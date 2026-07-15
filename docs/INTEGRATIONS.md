@@ -5,7 +5,7 @@
 1. A planner emits one `ChangeIntent` per worker.
 2. Producer intents are admitted before explicit consumers.
 3. Claim Plane canonicalizes concepts and returns admission decisions.
-4. Blocked work is split, serialized, or amended; workers do not bypass admission.
+4. Blocked work is split, serialized, amended, or retried unchanged after its blockers leave the active set; workers do not bypass admission.
 5. Admitted workers run in isolated Git worktrees.
 6. Each worker receives its bounded context pack.
 7. Long-running workers heartbeat their leases.
@@ -16,7 +16,7 @@
 12. Worker patches are composed in a neutral detached worktree.
 13. Integrated acceptance is executed.
 14. Targeted repair is applied only to affected work, within a bounded loop.
-15. Intents are completed or released after clean integration.
+15. Successfully integrated intents are completed. Abandoned work is released. A cleanup release after completion is accepted as an idempotent no-op.
 
 ## Producer amendment flow
 

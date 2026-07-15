@@ -8,6 +8,17 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-07-15
+
+### Fixed
+
+- Re-evaluate identical blocked intents against the current active set instead of
+  permanently returning a cached rejection, enabling the normal wait-and-retry flow.
+- Make `release_intent()` safe after successful completion while preserving
+  `completed` as the terminal success state and audit history.
+- Replace raw `KeyError` failures for malformed intent/resource/operation payloads
+  with stable, human-readable required-field validation errors.
+
 ## [0.1.0] — Initial public release
 
 ### Coordination and semantic admission

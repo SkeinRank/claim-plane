@@ -1,6 +1,6 @@
 """Transport-neutral protocol models for agentic change coordination.
 
-Claim Plane v0.9 treats a change as an intent, not a lock.  Intents declare
+Claim Plane treats a change as an intent, not a lock. Intents declare
 resources, semantic concepts, contracts, dependencies, bounded regions,
 acceptance commands, and invariants before implementation.  Manifests then
 record the concrete Git changes and verification evidence produced by workers.
@@ -16,6 +16,20 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Iterable, Mapping
+
+
+def _require_fields(
+    data: Mapping[str, Any], fields: Iterable[str], *, model_name: str
+) -> None:
+    """Raise a stable validation error instead of leaking raw mapping KeyErrors."""
+
+    missing = [field for field in fields if field not in data]
+    if not missing:
+        return
+    suffix = "field" if len(missing) == 1 else "fields"
+    raise ValueError(
+        f"missing required {model_name} {suffix}: {', '.join(sorted(missing))}"
+    )
 
 
 class ClaimType(str, Enum):
@@ -339,6 +353,7 @@ class ResourceRef:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ResourceRef":
+        _require_fields(data, ("kind", "identifier"), model_name="ResourceRef")
         return cls(
             kind=ResourceKind(data["kind"]),
             identifier=str(data["identifier"]),
@@ -377,9 +392,13 @@ class IntentOperation:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "IntentOperation":
+        _require_fields(data, ("access",), model_name="IntentOperation")
         if "resource" in data:
             resource = ResourceRef.from_dict(data["resource"])
         else:
+            _require_fields(
+                data, ("kind", "identifier"), model_name="IntentOperation"
+            )
             resource = ResourceRef(
                 kind=ResourceKind(data["kind"]),
                 identifier=str(data["identifier"]),
@@ -483,6 +502,16 @@ class ChangeIntent:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ChangeIntent":
+        _require_fields(
+            data,
+            ("intent_id", "owner", "base_revision", "operations"),
+            model_name="ChangeIntent",
+        )
+        raw_operations = data["operations"]
+        if raw_operations is None:
+            raise ValueError("ChangeIntent operations must not be null")
+        if isinstance(raw_operations, (str, bytes, Mapping)):
+            raise ValueError("ChangeIntent operations must be a sequence of objects")
         return cls(
             intent_id=str(data["intent_id"]),
             task_id=str(data.get("task_id") or data["intent_id"]),
@@ -490,7 +519,7 @@ class ChangeIntent:
             base_revision=str(data["base_revision"]),
             base_commit=(str(data["base_commit"]) if data.get("base_commit") else None),
             operations=tuple(
-                IntentOperation.from_dict(item) for item in data["operations"]
+                IntentOperation.from_dict(item) for item in raw_operations
             ),
             preserves=tuple(data.get("preserves") or ()),
             acceptance=tuple(data.get("acceptance") or ()),

@@ -522,7 +522,51 @@ class ClaimRegistry:
                     raise ValueError(
                         f"intent_id {intent.intent_id!r} already exists with different content; use amend"
                     )
-                return self._decision_from_json(existing["admission_json"])
+                current_state = IntentState(existing["state"])
+                if current_state is not IntentState.BLOCKED:
+                    return self._decision_from_json(existing["admission_json"])
+
+                # A blocked decision is inherently time-dependent: its blockers may
+                # have completed, expired, or been released since the first attempt.
+                # Re-evaluate identical retries atomically instead of returning a
+                # permanently cached rejection.
+                active = self._active_intents_locked(exclude=intent.intent_id)
+                decision = evaluator(
+                    intent, active, self._known_intent_ids_locked()
+                )
+                if decision.allowed:
+                    cycle = self._dependency_cycle_locked(intent, decision)
+                    if cycle:
+                        decision = _cycle_rejection(intent, decision, cycle)
+                state = (
+                    IntentState.ADMITTED if decision.allowed else IntentState.BLOCKED
+                )
+                now = _iso(_utc_now())
+                self._conn.execute(
+                    """
+                    UPDATE intents
+                    SET state=?,admission_json=?,updated_at=?,lease_expires_at=?,version=version+1
+                    WHERE intent_id=?
+                    """,
+                    (
+                        state.value,
+                        json.dumps(
+                            decision.to_dict(), ensure_ascii=False, sort_keys=True
+                        ),
+                        now,
+                        _future(intent.lease_seconds),
+                        intent.intent_id,
+                    ),
+                )
+                if decision.allowed:
+                    self._replace_dependency_edges_locked(intent, decision)
+                self._event_locked(
+                    "intent_readmitted" if decision.allowed else "intent_reblocked",
+                    intent.intent_id,
+                    intent.owner,
+                    decision.to_dict(),
+                )
+                return decision
             active = self._active_intents_locked()
             decision = evaluator(intent, active, self._known_intent_ids_locked())
             if decision.allowed:
@@ -980,6 +1024,7 @@ class ClaimRegistry:
                 IntentState.EXPIRED,
                 IntentState.STALE,
             },
+            no_op_from={IntentState.COMPLETED},
         )
 
     def _set_intent_state(
@@ -988,6 +1033,8 @@ class ClaimRegistry:
         state: IntentState,
         event_type: str,
         allowed_from: set[IntentState],
+        *,
+        no_op_from: set[IntentState] | None = None,
     ) -> None:
         with self._immediate():
             row = self._conn.execute(
@@ -996,6 +1043,18 @@ class ClaimRegistry:
             if row is None:
                 raise KeyError(f"unknown intent: {intent_id}")
             current = IntentState(row["state"])
+            if current in (no_op_from or set()):
+                self._event_locked(
+                    f"{event_type}_noop",
+                    intent_id,
+                    row["owner"],
+                    {
+                        "state": current.value,
+                        "requested_state": state.value,
+                        "reason": "terminal_state_preserved",
+                    },
+                )
+                return
             if current not in allowed_from:
                 raise ValueError(
                     f"cannot move intent {intent_id} from {current.value} to {state.value}"

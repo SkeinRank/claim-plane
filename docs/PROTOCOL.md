@@ -44,12 +44,12 @@ Admission is evaluated atomically against active intents and known dependencies.
 - notifications or required repairs;
 - canonicalized intent data.
 
-Allowed decisions enter the admitted lifecycle. Rejected decisions are retained for audit but cannot execute.
+Allowed decisions enter the admitted lifecycle. Rejected decisions are retained for audit but cannot execute. Re-submitting the same blocked intent re-evaluates it atomically against the current active set, so a worker can wait for a blocker to finish and retry without inventing a new `intent_id`.
 
 ## Intent states
 
 ```text
-blocked
+blocked ── retry/re-evaluate ──→ admitted
 admitted → active → completed
     │         │
     ├─────────┴→ released
@@ -57,7 +57,7 @@ admitted → active → completed
     └→ stale → amended/re-admitted
 ```
 
-Expired leases are excluded from active arbitration. A stale intent represents work whose premise changed after admission.
+Expired leases are excluded from active arbitration. A stale intent represents work whose premise changed after admission. `completed` is the successful terminal state and no longer participates in active arbitration. `released` represents abandoned or explicitly relinquished work. Calling release after completion is a safe no-op so generic cleanup code does not erase successful lifecycle history.
 
 ## Amendments
 
