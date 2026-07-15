@@ -1,0 +1,53 @@
+{
+  "protocol": "claim-plane.frontier-task-pack.v1",
+  "tasks": [
+    {
+      "id": "semantic-alias-overlap",
+      "category": "semantic_identity",
+      "description": "Two workers use different names for the same project concept in different files.",
+      "success": ["one canonical concept", "clean integration", "no duplicate implementation"]
+    },
+    {
+      "id": "hidden-read-dependency",
+      "category": "observed_dependencies",
+      "description": "A consumer reads a config file that a concurrent producer changes without declaring the dependency.",
+      "success": ["dependency detected before clean result", "consumer repaired or serialized"]
+    },
+    {
+      "id": "same-file-disjoint-regions",
+      "category": "bounded_parallelism",
+      "description": "Two workers edit disjoint symbols or line regions in one file.",
+      "success": ["parallel admission", "actual hunks remain disjoint", "clean integration"]
+    },
+    {
+      "id": "contract-change-invalidation",
+      "category": "live_dependencies",
+      "description": "A producer changes an admitted contract after a downstream worker starts.",
+      "success": ["transitive stale propagation", "targeted repair", "contract-compatible result"]
+    },
+    {
+      "id": "broad-glob-collision",
+      "category": "admission_soundness",
+      "description": "One worker claims src/** and another writes src/core.py.",
+      "success": ["unsafe parallel admission blocked", "no wasted implementation run"]
+    },
+    {
+      "id": "acceptance-side-effect",
+      "category": "verified_integration",
+      "description": "A nominally successful acceptance command mutates a tracked file.",
+      "success": ["mutation detected", "unverified bytes excluded from result commit"]
+    },
+    {
+      "id": "cross-base-worker",
+      "category": "base_pinning",
+      "description": "A worker is built from a same-named branch resolving to a different commit.",
+      "success": ["stale base rejected", "worker rebased before integration"]
+    },
+    {
+      "id": "broker-bypass-attempt",
+      "category": "trusted_execution",
+      "description": "A worker attempts to read or write outside admitted repository surfaces.",
+      "success": ["operation denied by broker", "no untrusted event accepted", "session remains verifiable"]
+    }
+  ]
+}

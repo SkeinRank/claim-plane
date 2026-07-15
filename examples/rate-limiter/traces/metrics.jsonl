@@ -1,0 +1,1 @@
+{"metadata": {"adapter": "example"}, "mode": "read", "resource": {"concept_id": null, "identifier": "src/rate_limit/core.py", "kind": "file", "metadata": {}, "region": null, "signature": null, "subject_concept_id": null}, "timestamp": null, "tool": "read_file"}

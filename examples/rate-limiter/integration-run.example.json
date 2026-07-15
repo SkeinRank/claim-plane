@@ -1,0 +1,55 @@
+{
+  "run_id": "rate-limit-feature",
+  "base_repo": ".",
+  "base_revision": "main",
+  "workers": [
+    {
+      "intent_id": "rate-limit-core",
+      "repo_path": "../worktrees/rate-limit-core"
+    },
+    {
+      "intent_id": "rate-limit-metrics",
+      "repo_path": "../worktrees/rate-limit-metrics",
+      "repair_command": "python tools/repair_agent.py --plan {repair_plan} --report {report}",
+      "observation_session_id": "rate-limit-metrics-session"
+    }
+  ],
+  "integration_commands": [
+    "pytest -q"
+  ],
+  "max_attempts": 2,
+  "run_worker_acceptance": true,
+  "keep_integration_worktree": false,
+  "complete_on_success": false,
+  "require_clean_worker_acceptance": true,
+  "require_clean_integration_commands": true,
+  "result_ref": "refs/claim-plane/runs/rate-limit-feature",
+  "base_commit": "0000000000000000000000000000000000000000",
+  "worker_sandbox": {
+    "backend": "auto",
+    "strict": true,
+    "allow_network": false
+  },
+  "integration_sandbox": {
+    "backend": "auto",
+    "strict": true,
+    "allow_network": false
+  },
+  "evidence_signing_key_env": "CLAIM_PLANE_SIGNING_KEY",
+  "evidence_key_id": "example-ci",
+  "repair_sandbox": {
+    "backend": "auto",
+    "strict": true,
+    "allow_network": false
+  },
+  "observation_policy": {
+    "mode": "trusted",
+    "require_complete": true,
+    "allowed_coverages": [
+      "tool_proxy",
+      "os_monitor"
+    ]
+  },
+  "observation_key_env": "CLAIM_PLANE_OBSERVATION_KEY",
+  "evidence_signing_method": "ed25519"
+}

@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claim-plane"
+version = "0.1.0"
+description = "Semantic concurrency control and continuous integration for parallel coding agents."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+  { name = "SkeinRank" }
+]
+keywords = [
+  "ai-agents",
+  "multi-agent",
+  "coordination",
+  "merge-conflicts",
+  "semantic-concurrency",
+  "continuous-integration",
+  "governance",
+  "code-generation"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed"
+]
+dependencies = []
+
+[project.optional-dependencies]
+semantic = [
+  "agent-lexicon>=0.11.2,<1.0"
+]
+signing = [
+  "cryptography>=42,<48"
+]
+dev = [
+  "pytest>=8,<10",
+  "ruff>=0.6,<1.0",
+  "mypy>=1.10,<2.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/SkeinRank/claim-plane"
+Repository = "https://github.com/SkeinRank/claim-plane"
+Issues = "https://github.com/SkeinRank/claim-plane/issues"
+
+[project.scripts]
+claim-plane = "claim_plane.cli:main"
+claim-plane-mcp = "claim_plane.mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+claim_plane = ["py.typed"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true

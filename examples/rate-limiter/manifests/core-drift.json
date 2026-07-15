@@ -1,0 +1,19 @@
+{
+  "intent_id": "rate-limit-core",
+  "owner": "agent-core",
+  "base_revision": "main",
+  "changed_files": [
+    "src/rate_limit/core.py",
+    "src/shared/config.py"
+  ],
+  "artifacts": [
+    {
+      "kind": "contract",
+      "identifier": "allow",
+      "path": "src/rate_limit/core.py",
+      "signature": "allow(request, policy)->bool",
+      "subject_concept_id": "project.rate_limiter"
+    }
+  ],
+  "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

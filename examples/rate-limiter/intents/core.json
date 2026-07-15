@@ -1,0 +1,38 @@
+{
+  "intent_id": "rate-limit-core",
+  "task_id": "issue-142",
+  "owner": "agent-core",
+  "base_revision": "main",
+  "operations": [
+    {
+      "access": "write",
+      "kind": "file",
+      "identifier": "src/rate_limit/core.py"
+    },
+    {
+      "access": "extend",
+      "kind": "concept",
+      "identifier": "RateLimiter"
+    },
+    {
+      "access": "write",
+      "kind": "contract",
+      "identifier": "allow",
+      "signature": "allow(request)->RateLimitDecision",
+      "subject_concept_id": "RateLimiter"
+    }
+  ],
+  "preserves": [
+    "existing request retry behavior",
+    "public package imports"
+  ],
+  "acceptance": [
+    "pytest tests/rate_limit/test_core.py",
+    "mypy src/rate_limit/core.py"
+  ],
+  "lease_seconds": 1800,
+  "metadata": {
+    "risk": "medium"
+  },
+  "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

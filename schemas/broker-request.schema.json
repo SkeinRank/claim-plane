@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/broker-request.schema.json",
+  "title": "Claim Plane Broker Request v0.9",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "op",
+    "token"
+  ],
+  "properties": {
+    "op": {
+      "enum": [
+        "health",
+        "read_file",
+        "list_dir",
+        "search_text",
+        "stat",
+        "write_file",
+        "append_file",
+        "replace_lines",
+        "delete_file",
+        "rename_file",
+        "run_command"
+      ]
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "query": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "start_line": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "end_line": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "max_results": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500
+    },
+    "target_path": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    }
+  }
+}

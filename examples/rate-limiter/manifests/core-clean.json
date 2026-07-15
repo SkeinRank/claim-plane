@@ -1,0 +1,31 @@
+{
+  "intent_id": "rate-limit-core",
+  "owner": "agent-core",
+  "base_revision": "main",
+  "changed_files": [
+    "src/rate_limit/core.py"
+  ],
+  "artifacts": [
+    {
+      "kind": "symbol",
+      "identifier": "RateLimiter",
+      "path": "src/rate_limit/core.py",
+      "concept_id": "project.rate_limiter"
+    },
+    {
+      "kind": "contract",
+      "identifier": "allow",
+      "path": "src/rate_limit/core.py",
+      "signature": "allow(request)->RateLimitDecision",
+      "subject_concept_id": "project.rate_limiter"
+    }
+  ],
+  "changed_regions": [
+    {
+      "path": "src/rate_limit/core.py",
+      "start_line": 1,
+      "end_line": 40
+    }
+  ],
+  "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

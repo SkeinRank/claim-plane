@@ -1,0 +1,37 @@
+{
+  "intent_id": "rate-limit-metrics",
+  "task_id": "issue-142-metrics",
+  "owner": "agent-metrics",
+  "base_revision": "main",
+  "dependencies": [
+    "rate-limit-core"
+  ],
+  "operations": [
+    {
+      "access": "write",
+      "kind": "file",
+      "identifier": "src/rate_limit/metrics.py"
+    },
+    {
+      "access": "extend",
+      "kind": "concept",
+      "identifier": "RequestThrottler"
+    },
+    {
+      "access": "read",
+      "kind": "contract",
+      "identifier": "allow",
+      "signature": "allow(request)->RateLimitDecision",
+      "subject_concept_id": "RateLimiter"
+    }
+  ],
+  "preserves": [
+    "RateLimiter.allow signature",
+    "metrics do not change admission behavior"
+  ],
+  "acceptance": [
+    "pytest tests/rate_limit/test_metrics.py"
+  ],
+  "lease_seconds": 1800,
+  "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

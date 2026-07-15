@@ -1,0 +1,10 @@
+{
+  "unit-tests": {
+    "argv": ["python", "-m", "pytest", "-q"],
+    "timeout_seconds": 300
+  },
+  "type-check": {
+    "argv": ["python", "-m", "mypy", "src"],
+    "timeout_seconds": 300
+  }
+}

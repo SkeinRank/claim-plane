@@ -1,0 +1,11 @@
+{
+  "task_pack": "tasks.json",
+  "repeats": 3,
+  "timeout_seconds": 3600,
+  "cwd": ".",
+  "arms": [
+    {"name": "A-worktree-only", "command": "python adapters/worktree_only.py"},
+    {"name": "B-planner-only", "command": "python adapters/planner_only.py"},
+    {"name": "C-claim-plane-v8", "command": "python adapters/claim_plane_v8.py"}
+  ]
+}

@@ -1,0 +1,22 @@
+version: 1
+metadata:
+  name: Rate limiter example
+  description: Canonical language shared by coding agents.
+scopes:
+  - id: project
+    label: Project
+terms:
+  - id: project.rate_limiter
+    canonical: RateLimiter
+    description: Admission control component that returns an allow/deny decision.
+    scopes: [project]
+    aliases:
+      - surface: RequestThrottler
+        scopes: [project]
+      - surface: rate limiting service
+        scopes: [project]
+  - id: project.rate_limit_decision
+    canonical: RateLimitDecision
+    description: Result returned by RateLimiter.allow.
+    scopes: [project]
+proposals: []

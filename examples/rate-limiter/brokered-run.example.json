@@ -1,0 +1,33 @@
+{
+  "run_id": "rate-limiter-brokered-v9",
+  "base_repo": ".",
+  "base_revision": "main",
+  "base_commit": "0000000000000000000000000000000000000000",
+  "workers": [
+    {
+      "intent_id": "rate-limit-core",
+      "repo_path": "../worktrees/rate-limit-core",
+      "observation_session_id": "rate-limit-core-session"
+    }
+  ],
+  "observation_policy": {
+    "mode": "brokered",
+    "require_complete": true,
+    "allowed_coverages": ["brokered_proxy"]
+  },
+  "observation_key_env": "CLAIM_PLANE_OBSERVATION_KEY",
+  "broker_key_env": "CLAIM_PLANE_BROKER_KEY",
+  "worker_sandbox": {
+    "backend": "bwrap-minimal",
+    "strict": true,
+    "allow_network": false,
+    "repository_writable": false
+  },
+  "integration_sandbox": {
+    "backend": "bwrap-minimal",
+    "strict": true,
+    "allow_network": false,
+    "repository_writable": false
+  },
+  "artifact_dir": ".claim-plane/runs"
+}

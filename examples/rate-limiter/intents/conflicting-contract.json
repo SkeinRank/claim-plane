@@ -1,0 +1,29 @@
+{
+  "intent_id": "rate-limit-admin",
+  "task_id": "issue-143",
+  "owner": "agent-admin",
+  "base_revision": "main",
+  "operations": [
+    {
+      "access": "write",
+      "kind": "file",
+      "identifier": "src/rate_limit/admin.py"
+    },
+    {
+      "access": "extend",
+      "kind": "concept",
+      "identifier": "RateLimiter"
+    },
+    {
+      "access": "write",
+      "kind": "contract",
+      "identifier": "allow",
+      "signature": "allow(request, policy)->bool",
+      "subject_concept_id": "RateLimiter"
+    }
+  ],
+  "acceptance": [
+    "pytest tests/rate_limit/test_admin.py"
+  ],
+  "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
