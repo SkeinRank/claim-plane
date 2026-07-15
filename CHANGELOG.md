@@ -10,6 +10,11 @@ not part of the public release history.
 
 ## [0.1.1] — 2026-07-15
 
+### Added
+
+- Add pre-commit Ruff lint-fix and formatting hooks so staged Python changes are
+  normalized before they reach CI.
+
 ### Fixed
 
 - Re-evaluate identical blocked intents against the current active set instead of

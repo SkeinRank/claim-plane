@@ -10,8 +10,18 @@ guidance instead of silently guessing.
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev,signing]"
+pre-commit install
 ./scripts/check.sh
 ```
+
+The pre-commit hooks run Ruff lint fixes and formatting on staged Python files before
+each commit. To validate the whole repository manually, run:
+
+```bash
+pre-commit run --all-files
+```
+
+If Ruff modifies a file, stage the change and commit again.
 
 Install the optional semantic integration from PyPI with:
 

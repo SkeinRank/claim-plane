@@ -396,9 +396,7 @@ class IntentOperation:
         if "resource" in data:
             resource = ResourceRef.from_dict(data["resource"])
         else:
-            _require_fields(
-                data, ("kind", "identifier"), model_name="IntentOperation"
-            )
+            _require_fields(data, ("kind", "identifier"), model_name="IntentOperation")
             resource = ResourceRef(
                 kind=ResourceKind(data["kind"]),
                 identifier=str(data["identifier"]),

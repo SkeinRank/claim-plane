@@ -531,9 +531,7 @@ class ClaimRegistry:
                 # Re-evaluate identical retries atomically instead of returning a
                 # permanently cached rejection.
                 active = self._active_intents_locked(exclude=intent.intent_id)
-                decision = evaluator(
-                    intent, active, self._known_intent_ids_locked()
-                )
+                decision = evaluator(intent, active, self._known_intent_ids_locked())
                 if decision.allowed:
                     cycle = self._dependency_cycle_locked(intent, decision)
                     if cycle:
