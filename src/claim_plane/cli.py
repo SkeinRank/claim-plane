@@ -382,6 +382,7 @@ def cmd_promote_scope(args: argparse.Namespace) -> int:
             args.intent_id,
             path=args.path,
             modes=modes,
+            region=args.region,
             expected_version=args.expected_version,
         )
         _write_json(decision.to_dict(), args.out)
@@ -823,6 +824,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         choices=[item.value for item in AccessMode],
         help="Access mode to promote (repeatable; default: write).",
+    )
+    promote_scope.add_argument(
+        "--region",
+        help="Concrete pre-image line interval to promote, e.g. lines:20-24.",
     )
     promote_scope.add_argument("--expected-version", type=int)
     promote_scope.add_argument("--out")

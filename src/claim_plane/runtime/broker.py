@@ -402,17 +402,52 @@ def _read_allowed(intent: ChangeIntent, path: str) -> bool:
     return bool(_matching_operations(intent, path))
 
 
-def _line_region_for(
+def _line_regions_for(
     intent: ChangeIntent, path: str, *, modes: Iterable[AccessMode]
-) -> tuple[int, int] | None:
-    regions: list[tuple[int, int]] = []
+) -> tuple[tuple[int, int], ...] | None:
+    """Return the union of bounded committed regions for a path.
+
+    ``None`` means an unbounded committed capability exists. An empty tuple means
+    no committed capability exists. Multiple bounded regions remain distinct instead
+    of collapsing into implicit whole-file authority.
+    """
+
     operations = _matching_operations(intent, path, modes=modes, committed_only=True)
+    if not operations:
+        return ()
+
+    regions: list[tuple[int, int]] = []
     for operation in operations:
+        if operation.resource.region is None:
+            return None
         region = _parse_region(operation.resource.region)
         if region is None:
-            return None
+            # Unknown region syntax must not widen a broker capability.
+            continue
         regions.append(region)
-    return regions[0] if len(regions) == 1 else None
+    return tuple(sorted(set(regions)))
+
+
+def _region_authorized(
+    intent: ChangeIntent,
+    path: str,
+    *,
+    modes: Iterable[AccessMode],
+    requested: tuple[int, int] | None,
+) -> bool:
+    operations = _matching_operations(intent, path, modes=modes, committed_only=True)
+    if requested is None:
+        return any(operation.resource.region is None for operation in operations)
+
+    for operation in operations:
+        if operation.resource.region is None:
+            return True
+        admitted = _parse_region(operation.resource.region)
+        if admitted is None:
+            continue
+        if admitted[0] <= requested[0] <= requested[1] <= admitted[1]:
+            return True
+    return False
 
 
 def _directory_visible(intent: ChangeIntent, directory: str) -> bool:
@@ -1132,12 +1167,19 @@ class _BrokerCore:
         path: str,
         *,
         modes: Iterable[AccessMode],
+        requested_region: tuple[int, int] | None = None,
     ) -> ChangeIntent:
-        """Promote a predeclared contingent write surface before first mutation."""
+        """Promote only the contingent capability covering the concrete mutation."""
 
         modes = tuple(modes)
-        if _matching_operations(intent, path, modes=modes, committed_only=True):
+        if _region_authorized(
+            intent,
+            path,
+            modes=modes,
+            requested=requested_region,
+        ):
             return intent
+
         contingent = tuple(
             operation
             for operation in _matching_operations(intent, path, modes=modes)
@@ -1146,15 +1188,29 @@ class _BrokerCore:
         if not contingent:
             return intent
 
+        region = (
+            None
+            if requested_region is None
+            else f"lines:{requested_region[0]}-{requested_region[1]}"
+        )
+
         plane = Plane.open(self.policy.db_path, governance="governed")
         try:
-            decision = plane.promote_contingent_scope(
-                intent.intent_id,
-                path=path,
-                modes=modes,
-                broker_instance_id=self.policy.instance_id,
-                broker_key=self.policy.broker_key or b"",
-            )
+            try:
+                decision = plane.promote_contingent_scope(
+                    intent.intent_id,
+                    path=path,
+                    modes=modes,
+                    region=region,
+                    broker_instance_id=self.policy.instance_id,
+                    broker_key=self.policy.broker_key or b"",
+                )
+            except ValueError:
+                # A contingent path may exist while none of its bounded regions covers
+                # this concrete mutation. Leave the intent unchanged; the caller will
+                # reject the missing capability below.
+                return intent
+
             if not decision.allowed:
                 blockers = sorted(
                     {
@@ -1164,8 +1220,9 @@ class _BrokerCore:
                     }
                 )
                 suffix = f"; blockers={','.join(blockers)}" if blockers else ""
+                region_suffix = f" region={region}" if region else ""
                 raise BrokerError(
-                    f"contingent scope promotion rejected for {path}{suffix}: "
+                    f"contingent scope promotion rejected for {path}{region_suffix}{suffix}: "
                     f"{decision.guidance}"
                 )
             promoted = plane.intent(intent.intent_id)
@@ -1181,12 +1238,13 @@ class _BrokerCore:
         target, path = self._resolve(str(request.get("path") or ""), allow_missing=True)
         allowed = {AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST}
         intent = self._ensure_mutation_scope(intent, path, modes=allowed)
-        if not _matching_operations(intent, path, modes=allowed, committed_only=True):
+        if not _region_authorized(intent, path, modes=allowed, requested=None):
+            regions = _line_regions_for(intent, path, modes=allowed)
+            if regions:
+                raise BrokerError("bounded file writes must use replace_lines")
             raise BrokerError(
-                f"write_file requires write/document/test capability: {path}"
+                f"write_file requires unbounded write/document/test capability: {path}"
             )
-        if _line_region_for(intent, path, modes=allowed) is not None:
-            raise BrokerError("bounded file writes must use replace_lines")
         content = str(request.get("content") or "").encode("utf-8")
         if len(content) > self.policy.max_write_bytes:
             raise BrokerError(f"write exceeds max_write_bytes: {path}")
@@ -1207,10 +1265,12 @@ class _BrokerCore:
     ) -> dict[str, Any]:
         target, path = self._resolve(str(request.get("path") or ""), allow_missing=True)
         intent = self._ensure_mutation_scope(intent, path, modes={AccessMode.EXTEND})
-        if not _matching_operations(
-            intent, path, modes={AccessMode.EXTEND}, committed_only=True
+        if not _region_authorized(
+            intent, path, modes={AccessMode.EXTEND}, requested=None
         ):
-            raise BrokerError(f"append_file requires extend capability: {path}")
+            raise BrokerError(
+                f"append_file requires unbounded extend capability: {path}"
+            )
         old = target.read_bytes() if target.exists() else b""
         addition = str(request.get("content") or "").encode("utf-8")
         content = old + addition
@@ -1233,19 +1293,28 @@ class _BrokerCore:
     ) -> dict[str, Any]:
         target, path = self._resolve(str(request.get("path") or ""))
         allowed = {AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST}
-        intent = self._ensure_mutation_scope(intent, path, modes=allowed)
-        if not _matching_operations(intent, path, modes=allowed, committed_only=True):
-            raise BrokerError(
-                f"replace_lines requires write/document/test capability: {path}"
-            )
         start = int(request.get("start_line") or 0)
         end = int(request.get("end_line") or 0)
         if start <= 0 or end < start:
             raise BrokerError("invalid replace_lines bounds")
-        admitted = _line_region_for(intent, path, modes=allowed)
-        if admitted is not None and not (admitted[0] <= start <= end <= admitted[1]):
+        requested_region = (start, end)
+        intent = self._ensure_mutation_scope(
+            intent,
+            path,
+            modes=allowed,
+            requested_region=requested_region,
+        )
+        if not _region_authorized(
+            intent, path, modes=allowed, requested=requested_region
+        ):
+            admitted = _line_regions_for(intent, path, modes=allowed)
+            rendered = (
+                "unbounded"
+                if admitted is None
+                else ", ".join(f"{a}-{b}" for a, b in admitted) or "none"
+            )
             raise BrokerError(
-                f"replace_lines {start}-{end} exceeds admitted region {admitted[0]}-{admitted[1]}"
+                f"replace_lines {start}-{end} exceeds admitted regions: {rendered}"
             )
         old = target.read_text(encoding="utf-8")
         lines = old.splitlines(keepends=True)
@@ -1276,10 +1345,12 @@ class _BrokerCore:
             raise BrokerError("delete operations are disabled")
         target, path = self._resolve(str(request.get("path") or ""))
         intent = self._ensure_mutation_scope(intent, path, modes={AccessMode.DELETE})
-        if not _matching_operations(
-            intent, path, modes={AccessMode.DELETE}, committed_only=True
+        if not _region_authorized(
+            intent, path, modes={AccessMode.DELETE}, requested=None
         ):
-            raise BrokerError(f"delete_file requires delete capability: {path}")
+            raise BrokerError(
+                f"delete_file requires unbounded delete capability: {path}"
+            )
         if target.is_dir():
             raise BrokerError("delete_file only accepts files")
         pre_tree_hash = capture_worktree_tree(self.root, seed=self.base_commit)
@@ -1365,8 +1436,12 @@ class _BrokerCore:
         operations = _matching_operations(
             intent, path, modes={AccessMode.RENAME}, committed_only=True
         )
-        if not operations:
-            raise BrokerError(f"rename_file requires rename capability: {path}")
+        if not _region_authorized(
+            intent, path, modes={AccessMode.RENAME}, requested=None
+        ):
+            raise BrokerError(
+                f"rename_file requires unbounded rename capability: {path}"
+            )
         expected = {_rename_target(operation) for operation in operations}
         if None in expected or target_path not in expected:
             raise BrokerError(

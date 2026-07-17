@@ -62,6 +62,7 @@ class IntentStore(Protocol):
         *,
         path: str,
         modes: Iterable[AccessMode],
+        region: str | None = None,
         evaluator: AdmissionEvaluator,
         expected_version: int | None = None,
         broker_instance_id: str | None = None,

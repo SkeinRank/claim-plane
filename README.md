@@ -184,7 +184,7 @@ atomically. A failed promotion leaves the current intent unchanged.
 
 ```bash
 claim-plane --db .claim-plane/plane.db \
-  promote-scope worker-intent src/click/shell_completion.py --mode write
+  promote-scope worker-intent src/click/shell_completion.py --mode write --region lines:20-24
 ```
 
 A governed broker performs the same promotion automatically when a worker first attempts

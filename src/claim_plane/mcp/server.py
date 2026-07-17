@@ -73,6 +73,7 @@ def tool_definitions() -> list[dict[str, Any]]:
                 {
                     "intent_id": {"type": "string"},
                     "path": {"type": "string"},
+                    "region": {"type": "string"},
                     "modes": {
                         "type": "array",
                         "items": {
@@ -350,6 +351,7 @@ class McpServer:
                     arguments["intent_id"],
                     path=arguments["path"],
                     modes=modes,
+                    region=arguments.get("region"),
                     expected_version=arguments.get("expected_version"),
                 ).to_dict()
             if name == "get_worker_context":

@@ -8,6 +8,28 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-07-17
+
+### Fixed
+
+- Make contingent-scope promotion region-aware. A concrete line mutation now promotes
+  only the contingent region that covers that mutation instead of all bounded regions
+  declared for the same path.
+- Preserve broad contingent fallbacks while granting the narrow concrete path/region
+  requested at runtime, enabling incremental scope expansion without accidental
+  whole-file authority.
+- Keep multiple committed line capabilities as an explicit region union in the broker;
+  bounded regions no longer collapse into implicit whole-file mutation permission.
+- Require whole-file write, append, delete, and rename operations to hold an unbounded
+  committed capability, while `replace_lines` may execute inside any one admitted
+  bounded interval.
+
+### Changed
+
+- `promote-scope` and the MCP `promote_contingent_scope` tool accept an optional
+  concrete `region` such as `lines:20-24`. Broker-driven `replace_lines` promotions
+  provide this region automatically.
+
 ## [0.2.0] — 2026-07-16
 
 ### Added

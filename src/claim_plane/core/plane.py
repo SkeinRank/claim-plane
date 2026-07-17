@@ -187,21 +187,25 @@ class Plane:
         *,
         path: str,
         modes: Iterable[AccessMode],
+        region: str | None = None,
         expected_version: int | None = None,
         broker_instance_id: str | None = None,
         broker_key: bytes | None = None,
     ) -> AdmissionDecision:
         """Promote matching contingent file operations after atomic re-admission.
 
-        The existing intent remains unchanged when the promoted scope conflicts with
-        active work. A trusted broker may supply its instance binding so a successful
-        promotion advances that capability to the new intent content version atomically.
+        ``region`` may identify the concrete pre-image line interval being mutated
+        (for example ``"lines:20-24"``). Region-aware promotion selects only a
+        contingent declaration that covers that mutation instead of promoting every
+        bounded declaration for the same path. The existing intent remains unchanged
+        when the promoted scope conflicts with active work.
         """
 
         return self._registry.promote_contingent_operations(
             intent_id,
             path=path,
             modes=tuple(modes),
+            region=region,
             evaluator=self._admission.evaluate,
             expected_version=expected_version,
             broker_instance_id=broker_instance_id,

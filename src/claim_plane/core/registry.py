@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import re
 import sqlite3
 from dataclasses import replace
 from collections import defaultdict, deque
@@ -39,6 +40,30 @@ def _iso(value: dt.datetime) -> str:
 
 def _future(seconds: int) -> str:
     return _iso(_utc_now() + dt.timedelta(seconds=seconds))
+
+
+def _parse_line_region(value: str | None) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    match = re.fullmatch(r"(?:lines?:)?\s*(\d+)\s*[-:]\s*(\d+)", str(value).strip())
+    if not match:
+        return None
+    start, end = int(match.group(1)), int(match.group(2))
+    if start <= 0 or end < start:
+        return None
+    return start, end
+
+
+def _region_covers(declared: str | None, requested: tuple[int, int] | None) -> bool:
+    if requested is None:
+        # Whole-file mutations must not silently consume a bounded capability.
+        return declared is None
+    if declared is None:
+        return True
+    parsed = _parse_line_region(declared)
+    if parsed is None:
+        return False
+    return parsed[0] <= requested[0] <= requested[1] <= parsed[1]
 
 
 class ClaimRegistry:
@@ -612,6 +637,7 @@ class ClaimRegistry:
         *,
         path: str,
         modes: Iterable[AccessMode],
+        region: str | None = None,
         evaluator: Callable[
             [ChangeIntent, list[ChangeIntent], set[str]], AdmissionDecision
         ],
@@ -639,6 +665,16 @@ class ClaimRegistry:
         if not path:
             raise ValueError("scope promotion path must not be empty")
 
+        requested_region = None
+        if region is not None:
+            requested_region = _parse_line_region(region)
+            if requested_region is None:
+                raise ValueError(
+                    "scope promotion region must be a positive line interval, "
+                    "for example 'lines:10-20'"
+                )
+            region = f"lines:{requested_region[0]}-{requested_region[1]}"
+
         with self._immediate():
             self._expire_intents_locked()
             row = self._conn.execute(
@@ -657,6 +693,44 @@ class ClaimRegistry:
                 )
 
             current = ChangeIntent.from_dict(json.loads(row["payload_json"]))
+
+            candidate_indexes: list[int] = []
+            bounded_candidates: list[tuple[int, int, int]] = []
+            exact_path_candidates: list[int] = []
+
+            for index, operation in enumerate(current.operations):
+                if not (
+                    operation.contingent
+                    and operation.access in normalized_modes
+                    and operation.resource.kind
+                    in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+                    and operation.resource.covers_path(path)
+                    and _region_covers(operation.resource.region, requested_region)
+                ):
+                    continue
+
+                candidate_indexes.append(index)
+                parsed_region = _parse_line_region(operation.resource.region)
+                if parsed_region is not None:
+                    bounded_candidates.append(
+                        (parsed_region[1] - parsed_region[0], index, parsed_region[0])
+                    )
+                if not operation.resource.is_pattern:
+                    exact_path_candidates.append(index)
+
+            if requested_region is not None and bounded_candidates:
+                # Prefer the narrowest declared bounded capability that contains the
+                # concrete mutation. This avoids also promoting a broader fallback.
+                narrowest = min(item[0] for item in bounded_candidates)
+                selected_indexes = {
+                    index for span, index, _ in bounded_candidates if span == narrowest
+                }
+            elif exact_path_candidates:
+                # An exact declaration is more specific than a glob fallback.
+                selected_indexes = set(exact_path_candidates)
+            else:
+                selected_indexes = set(candidate_indexes)
+
             promoted: list[dict[str, object]] = []
             operations = []
             committed_keys = {
@@ -668,25 +742,35 @@ class ClaimRegistry:
                 )
                 for operation in current.committed_operations
             }
-            for operation in current.operations:
-                matches = (
-                    operation.contingent
-                    and operation.access in normalized_modes
-                    and operation.resource.kind
-                    in {ResourceKind.FILE, ResourceKind.DOCUMENT}
-                    and operation.resource.covers_path(path)
-                )
-                if not matches:
+
+            for index, operation in enumerate(current.operations):
+                if index not in selected_indexes:
                     operations.append(operation)
                     continue
 
-                if operation.resource.is_pattern:
-                    # Keep the broad possibility contingent and promote only the
-                    # concrete path that the worker is about to mutate.
+                narrow_unbounded_region = (
+                    requested_region is not None and operation.resource.region is None
+                )
+                preserve_contingent = (
+                    operation.resource.is_pattern or narrow_unbounded_region
+                )
+
+                if preserve_contingent:
+                    # Keep the broad fallback contingent and grant only the concrete
+                    # path/region the worker is about to mutate.
                     operations.append(operation)
                     concrete_resource = replace(
                         operation.resource,
-                        identifier=path,
+                        identifier=(
+                            path
+                            if operation.resource.is_pattern
+                            else operation.resource.identifier
+                        ),
+                        region=(
+                            region
+                            if narrow_unbounded_region
+                            else operation.resource.region
+                        ),
                         metadata={
                             **operation.resource.metadata,
                             "promoted_from_contingent": operation.resource.identifier,
@@ -724,8 +808,9 @@ class ClaimRegistry:
                 )
 
             if not promoted:
+                suffix = f" and region {region}" if region is not None else ""
                 raise ValueError(
-                    f"no contingent operation for {path!r} matches modes "
+                    f"no contingent operation for {path!r}{suffix} matches modes "
                     + ", ".join(sorted(mode.value for mode in normalized_modes))
                 )
 
@@ -749,6 +834,7 @@ class ClaimRegistry:
                     current.owner,
                     {
                         "path": path,
+                        "region": region,
                         "modes": sorted(mode.value for mode in normalized_modes),
                         "promoted_operations": promoted,
                         "decision": decision.to_dict(),
@@ -799,6 +885,7 @@ class ClaimRegistry:
                 current.owner,
                 {
                     "path": path,
+                    "region": region,
                     "modes": sorted(mode.value for mode in normalized_modes),
                     "promoted_operations": promoted,
                     "decision": decision.to_dict(),

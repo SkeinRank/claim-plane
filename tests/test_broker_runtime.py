@@ -276,3 +276,54 @@ def test_broker_boundary_has_no_repository_mount(
     assert "--tmpfs /" in joined
     assert "/run/claim-plane/broker.sock" in joined
     assert str(tmp_path / "repo") not in joined
+
+
+def test_multiple_bounded_regions_do_not_collapse_to_whole_file_authority() -> None:
+    from claim_plane.runtime.broker import _line_regions_for, _region_authorized
+
+    intent = ChangeIntent(
+        intent_id="multi-region",
+        task_id="multi-region",
+        owner="agent",
+        base_revision="main",
+        base_commit="a" * 40,
+        operations=(
+            IntentOperation(
+                AccessMode.WRITE,
+                ResourceRef(ResourceKind.FILE, "src/a.py", region="lines:1-10"),
+            ),
+            IntentOperation(
+                AccessMode.WRITE,
+                ResourceRef(ResourceKind.FILE, "src/a.py", region="lines:20-30"),
+            ),
+        ),
+    )
+
+    assert _line_regions_for(intent, "src/a.py", modes={AccessMode.WRITE}) == (
+        (1, 10),
+        (20, 30),
+    )
+    assert _region_authorized(
+        intent,
+        "src/a.py",
+        modes={AccessMode.WRITE},
+        requested=(4, 6),
+    )
+    assert _region_authorized(
+        intent,
+        "src/a.py",
+        modes={AccessMode.WRITE},
+        requested=(24, 26),
+    )
+    assert not _region_authorized(
+        intent,
+        "src/a.py",
+        modes={AccessMode.WRITE},
+        requested=(15, 16),
+    )
+    assert not _region_authorized(
+        intent,
+        "src/a.py",
+        modes={AccessMode.WRITE},
+        requested=None,
+    )

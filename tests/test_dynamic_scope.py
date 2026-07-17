@@ -218,3 +218,146 @@ def test_scope_promotion_rejects_repository_escape_paths() -> None:
             assert "inside the repository" in str(exc)
         else:
             raise AssertionError(f"unsafe path was accepted: {path}")
+
+
+def test_region_aware_promotion_promotes_only_covering_contingent_region() -> None:
+    plane = Plane.open(":memory:")
+    intent = ChangeIntent(
+        intent_id="worker",
+        task_id="worker",
+        owner="agent",
+        base_revision="main",
+        base_commit="a" * 40,
+        operations=(
+            IntentOperation(
+                AccessMode.WRITE,
+                ResourceRef(ResourceKind.FILE, "src/a.py", region="lines:1-10"),
+                commitment=ScopeCommitment.CONTINGENT,
+            ),
+            IntentOperation(
+                AccessMode.WRITE,
+                ResourceRef(ResourceKind.FILE, "src/a.py", region="lines:20-30"),
+                commitment=ScopeCommitment.CONTINGENT,
+            ),
+        ),
+    )
+    assert plane.admit(intent).allowed
+
+    decision = plane.promote_contingent_scope(
+        "worker",
+        path="src/a.py",
+        modes=(AccessMode.WRITE,),
+        region="lines:4-6",
+    )
+
+    assert decision.allowed
+    stored = plane.intent("worker")
+    assert stored is not None
+    committed_regions = {
+        operation.resource.region for operation in stored.committed_operations
+    }
+    contingent_regions = {
+        operation.resource.region for operation in stored.contingent_operations
+    }
+    assert committed_regions == {"lines:1-10"}
+    assert contingent_regions == {"lines:20-30"}
+
+
+def test_region_aware_promotion_rejects_gap_between_contingent_regions() -> None:
+    plane = Plane.open(":memory:")
+    intent = ChangeIntent(
+        intent_id="worker",
+        task_id="worker",
+        owner="agent",
+        base_revision="main",
+        base_commit="a" * 40,
+        operations=(
+            IntentOperation(
+                AccessMode.WRITE,
+                ResourceRef(ResourceKind.FILE, "src/a.py", region="lines:1-10"),
+                commitment=ScopeCommitment.CONTINGENT,
+            ),
+            IntentOperation(
+                AccessMode.WRITE,
+                ResourceRef(ResourceKind.FILE, "src/a.py", region="lines:20-30"),
+                commitment=ScopeCommitment.CONTINGENT,
+            ),
+        ),
+    )
+    assert plane.admit(intent).allowed
+
+    try:
+        plane.promote_contingent_scope(
+            "worker",
+            path="src/a.py",
+            modes=(AccessMode.WRITE,),
+            region="lines:15-16",
+        )
+    except ValueError as exc:
+        assert "no contingent operation" in str(exc)
+    else:
+        raise AssertionError("gap mutation was unexpectedly promoted")
+
+
+def test_unbounded_contingent_scope_promotes_only_requested_region() -> None:
+    plane = Plane.open(":memory:")
+    assert plane.admit(
+        _intent(
+            "worker",
+            "agent",
+            "src/a.py",
+            commitment=ScopeCommitment.CONTINGENT,
+        )
+    ).allowed
+
+    assert plane.promote_contingent_scope(
+        "worker",
+        path="src/a.py",
+        modes=(AccessMode.WRITE,),
+        region="lines:4-6",
+    ).allowed
+
+    stored = plane.intent("worker")
+    assert stored is not None
+    assert any(
+        operation.contingent
+        and operation.resource.identifier == "src/a.py"
+        and operation.resource.region is None
+        for operation in stored.operations
+    )
+    assert any(
+        operation.committed
+        and operation.resource.identifier == "src/a.py"
+        and operation.resource.region == "lines:4-6"
+        for operation in stored.operations
+    )
+
+
+def test_path_only_promotion_does_not_promote_bounded_regions() -> None:
+    plane = Plane.open(":memory:")
+    intent = ChangeIntent(
+        intent_id="worker",
+        task_id="worker",
+        owner="agent",
+        base_revision="main",
+        base_commit="a" * 40,
+        operations=(
+            IntentOperation(
+                AccessMode.WRITE,
+                ResourceRef(ResourceKind.FILE, "src/a.py", region="lines:1-10"),
+                commitment=ScopeCommitment.CONTINGENT,
+            ),
+        ),
+    )
+    assert plane.admit(intent).allowed
+
+    try:
+        plane.promote_contingent_scope(
+            "worker",
+            path="src/a.py",
+            modes=(AccessMode.WRITE,),
+        )
+    except ValueError as exc:
+        assert "no contingent operation" in str(exc)
+    else:
+        raise AssertionError("bounded region was promoted without a concrete region")
