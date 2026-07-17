@@ -37,6 +37,12 @@ Important safety rules:
 - missing explicit dependencies reject admission;
 - proposed explicit and inferred premise edges must leave the graph acyclic.
 
+Adaptive scope separates likely writes from possible writes. Only committed mutations
+reserve ownership. Contingent mutations are coordinated as read premises until a worker
+actually needs them, at which point Claim Plane promotes the exact path and re-runs the
+same deterministic admission transaction. Pattern-based contingent scope is narrowed to
+the requested concrete path instead of turning into a broad write lease.
+
 ### Dependency graph
 
 Edges are stored as `consumer -> producer`. Claim Plane validates the complete candidate graph inside the same transaction as admission or amendment. The external graph representation also exposes a producer-first topological order.

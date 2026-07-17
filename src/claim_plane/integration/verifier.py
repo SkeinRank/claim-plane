@@ -92,9 +92,8 @@ class IntegrationVerifier:
 
         path_operations = tuple(
             operation
-            for operation in intent.operations
-            if operation.mutating
-            and operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+            for operation in intent.mutating_operations
+            if operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
         )
         for path in manifest.changed_files:
             if not any(
@@ -157,9 +156,8 @@ class IntegrationVerifier:
     ) -> None:
         bounded = [
             operation
-            for operation in intent.operations
-            if operation.mutating
-            and operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+            for operation in intent.mutating_operations
+            if operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
             and operation.resource.region
         ]
         if not bounded:
@@ -219,9 +217,9 @@ class IntegrationVerifier:
             if artifact.kind is ResourceKind.CONTRACT:
                 artifacts[(artifact.subject_key or "", artifact.key)].append(artifact)
 
-        for operation in intent.operations:
+        for operation in intent.mutating_operations:
             resource = operation.resource
-            if not operation.mutating or resource.kind is not ResourceKind.CONTRACT:
+            if resource.kind is not ResourceKind.CONTRACT:
                 continue
             key = (resource.subject_key or "", resource.semantic_key)
             candidates = artifacts.get(key, [])
@@ -277,9 +275,8 @@ class IntegrationVerifier:
     ) -> None:
         declared_semantic = {
             operation.resource.semantic_key
-            for operation in intent.operations
-            if operation.mutating
-            and operation.resource.kind
+            for operation in intent.mutating_operations
+            if operation.resource.kind
             in {
                 ResourceKind.CONCEPT,
                 ResourceKind.SYMBOL,
@@ -409,9 +406,7 @@ class IntegrationVerifier:
             for operation in intent.operations
             if operation.access.value == "read"
         )
-        declared_writes = tuple(
-            operation for operation in intent.operations if operation.mutating
-        )
+        declared_writes = intent.mutating_operations
         for access in manifest.observed_accesses:
             resource = access.resource
             if access.mode.value == "read":
@@ -498,7 +493,7 @@ class IntegrationVerifier:
             item for item in active_intents if item.intent_id != intent.intent_id
         )
         declared_semantic = {
-            op.resource.semantic_key for op in intent.operations if op.mutating
+            op.resource.semantic_key for op in intent.mutating_operations
         }
         for artifact in manifest.artifacts:
             if not artifact.concept_id:
@@ -517,8 +512,8 @@ class IntegrationVerifier:
                 )
 
         for existing in active:
-            for operation in existing.operations:
-                if not operation.mutating or operation.resource.kind not in {
+            for operation in existing.mutating_operations:
+                if operation.resource.kind not in {
                     ResourceKind.FILE,
                     ResourceKind.DOCUMENT,
                 }:
@@ -700,23 +695,22 @@ def _access_declared(resource, operations) -> bool:
 
 def _intent_declares_path(intent: ChangeIntent, path: str) -> bool:
     return any(
-        operation.mutating
-        and operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+        operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
         and operation.resource.covers_path(path)
-        for operation in intent.operations
+        for operation in intent.mutating_operations
     )
 
 
 def _declared_regions_disjoint(a: ChangeIntent, b: ChangeIntent, path: str) -> bool:
     a_regions = [
         parse_line_region(op.resource.region or "")
-        for op in a.operations
-        if op.mutating and op.resource.covers_path(path) and op.resource.region
+        for op in a.mutating_operations
+        if op.resource.covers_path(path) and op.resource.region
     ]
     b_regions = [
         parse_line_region(op.resource.region or "")
-        for op in b.operations
-        if op.mutating and op.resource.covers_path(path) and op.resource.region
+        for op in b.mutating_operations
+        if op.resource.covers_path(path) and op.resource.region
     ]
     if (
         not a_regions

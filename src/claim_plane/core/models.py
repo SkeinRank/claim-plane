@@ -13,7 +13,7 @@ import hashlib
 import json
 import posixpath
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Iterable, Mapping
 
@@ -80,6 +80,13 @@ class AccessMode(str, Enum):
     @property
     def destructive(self) -> bool:
         return self in {AccessMode.DELETE, AccessMode.RENAME}
+
+
+class ScopeCommitment(str, Enum):
+    """Whether an operation is admitted now or only a planned fallback surface."""
+
+    COMMITTED = "committed"
+    CONTINGENT = "contingent"
 
 
 class IntentState(str, Enum):
@@ -371,9 +378,11 @@ class IntentOperation:
     resource: ResourceRef
     required: bool = True
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    commitment: ScopeCommitment = ScopeCommitment.COMMITTED
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "access", AccessMode(self.access))
+        object.__setattr__(self, "commitment", ScopeCommitment(self.commitment))
         if not isinstance(self.resource, ResourceRef):
             object.__setattr__(self, "resource", ResourceRef.from_dict(self.resource))
         object.__setattr__(self, "metadata", dict(self.metadata))
@@ -382,13 +391,26 @@ class IntentOperation:
     def mutating(self) -> bool:
         return self.access.mutating
 
+    @property
+    def committed(self) -> bool:
+        return self.commitment is ScopeCommitment.COMMITTED
+
+    @property
+    def contingent(self) -> bool:
+        return self.commitment is ScopeCommitment.CONTINGENT
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "access": self.access.value,
             "resource": self.resource.to_dict(),
             "required": self.required,
             "metadata": dict(self.metadata),
         }
+        # Keep the default representation byte-compatible with pre-0.2 intent
+        # fingerprints. The field is only materialized when it changes semantics.
+        if self.contingent:
+            payload["commitment"] = self.commitment.value
+        return payload
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "IntentOperation":
@@ -410,6 +432,9 @@ class IntentOperation:
             access=AccessMode(data["access"]),
             resource=resource,
             required=bool(data.get("required", True)),
+            commitment=ScopeCommitment(
+                data.get("commitment", ScopeCommitment.COMMITTED.value)
+            ),
             metadata=dict(data.get("metadata") or {}),
         )
 
@@ -477,8 +502,44 @@ class ChangeIntent:
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     @property
+    def committed_operations(self) -> tuple[IntentOperation, ...]:
+        return tuple(op for op in self.operations if op.committed)
+
+    @property
+    def contingent_operations(self) -> tuple[IntentOperation, ...]:
+        return tuple(op for op in self.operations if op.contingent)
+
+    @property
     def mutating_operations(self) -> tuple[IntentOperation, ...]:
-        return tuple(op for op in self.operations if op.mutating)
+        return tuple(op for op in self.committed_operations if op.mutating)
+
+    @property
+    def admission_operations(self) -> tuple[IntentOperation, ...]:
+        """Operations that participate in coordination admission.
+
+        Committed operations retain their declared access. Contingent mutating
+        operations are projected as reads: they must not block initial admission or
+        grant mutation authority, but any premise gathered from that possible surface
+        is still tracked against concurrent writers.
+        """
+
+        operations: list[IntentOperation] = []
+        for operation in self.operations:
+            if operation.committed or not operation.mutating:
+                operations.append(operation)
+                continue
+            operations.append(
+                replace(
+                    operation,
+                    access=AccessMode.READ,
+                    required=False,
+                    metadata={
+                        **operation.metadata,
+                        "contingent_projection": operation.access.value,
+                    },
+                )
+            )
+        return tuple(operations)
 
     def fingerprint(self) -> str:
         return _json_fingerprint(self.to_dict())

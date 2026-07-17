@@ -33,6 +33,7 @@ Claim Plane does not replace Git, an IDE, a planner, or a coding agent. It is a 
 - atomic claim and intent admission through SQLite transactions;
 - leases, heartbeats, completion, release, and append-only audit events;
 - structured `ChangeIntent` operations: read, write, extend, delete, rename, document, and test;
+- adaptive committed/contingent scope with just-in-time atomic re-admission before first mutation;
 - exact files, globs, bounded line regions, symbols, concepts, contracts, routes, schemas, configs, and documents;
 - strict optional Agent Lexicon resolution: requested semantic mode fails closed when unavailable;
 - concept-bound contracts through `subject_concept_id`;
@@ -162,6 +163,35 @@ claim-plane --db .claim-plane/plane.db context rate-limit-metrics
 ```
 
 The pack includes only the admitted surfaces, canonical concepts, contracts, dependencies, acceptance criteria, current notices, and worker rules.
+
+## Adaptive scope
+
+Operations may be marked as `committed` or `contingent`:
+
+```json
+{
+  "access": "write",
+  "kind": "file",
+  "identifier": "src/click/shell_completion.py",
+  "commitment": "contingent"
+}
+```
+
+Committed operations participate in admission immediately and grant mutation authority.
+Contingent operations are planning hints: they do not reserve write ownership during
+initial admission. Before the first mutation, the scope must be promoted and re-admitted
+atomically. A failed promotion leaves the current intent unchanged.
+
+```bash
+claim-plane --db .claim-plane/plane.db \
+  promote-scope worker-intent src/click/shell_completion.py --mode write
+```
+
+A governed broker performs the same promotion automatically when a worker first attempts
+to mutate a predeclared contingent path. Broad contingent globs are narrowed to the
+concrete path being requested rather than promoted as one broad write reservation.
+Contingent surfaces may be inspected read-only before promotion, and those possible read
+premises still participate in coordination against active writers.
 
 ## Admission semantics
 
@@ -521,6 +551,7 @@ Primary tools include:
 
 - `admit_change_intent`
 - `amend_change_intent`
+- `promote_contingent_scope`
 - `get_worker_context`
 - `list_active_intents`
 - `list_coordination_notices`

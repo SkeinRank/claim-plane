@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import sqlite3
+from dataclasses import replace
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,6 +23,7 @@ from claim_plane.core.models import (
     ClaimType,
     IntentState,
     ResourceKind,
+    ScopeCommitment,
     Verdict,
     VerdictKind,
 )
@@ -601,6 +603,207 @@ class ClaimRegistry:
                 intent.intent_id,
                 intent.owner,
                 decision.to_dict(),
+            )
+            return decision
+
+    def promote_contingent_operations(
+        self,
+        intent_id: str,
+        *,
+        path: str,
+        modes: Iterable[AccessMode],
+        evaluator: Callable[
+            [ChangeIntent, list[ChangeIntent], set[str]], AdmissionDecision
+        ],
+        expected_version: int | None = None,
+        broker_instance_id: str | None = None,
+        broker_key: bytes | None = None,
+    ) -> AdmissionDecision:
+        """Promote matching contingent path operations after atomic re-admission.
+
+        A rejected promotion leaves the currently admitted intent unchanged. When a
+        trusted broker initiates the promotion, its attested intent binding is advanced
+        to the new content version in the same transaction so execution can continue
+        without reopening a capability gap.
+        """
+
+        normalized_modes = {AccessMode(mode) for mode in modes}
+        if not normalized_modes:
+            raise ValueError("scope promotion requires at least one access mode")
+        raw_path = str(path).replace("\\", "/").strip()
+        if raw_path.startswith("/") or ".." in raw_path.split("/"):
+            raise ValueError("scope promotion path must stay inside the repository")
+        while raw_path.startswith("./"):
+            raw_path = raw_path[2:]
+        path = raw_path.rstrip("/")
+        if not path:
+            raise ValueError("scope promotion path must not be empty")
+
+        with self._immediate():
+            self._expire_intents_locked()
+            row = self._conn.execute(
+                "SELECT * FROM intents WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown intent: {intent_id}")
+            current_state = IntentState(row["state"])
+            if current_state not in {IntentState.ADMITTED, IntentState.ACTIVE}:
+                raise ValueError(
+                    f"cannot promote contingent scope in state {current_state.value}"
+                )
+            if expected_version is not None and int(row["version"]) != expected_version:
+                raise ValueError(
+                    f"stale intent version: expected {expected_version}, current {row['version']}"
+                )
+
+            current = ChangeIntent.from_dict(json.loads(row["payload_json"]))
+            promoted: list[dict[str, object]] = []
+            operations = []
+            committed_keys = {
+                (
+                    operation.access.value,
+                    operation.resource.kind.value,
+                    operation.resource.identifier,
+                    operation.resource.region,
+                )
+                for operation in current.committed_operations
+            }
+            for operation in current.operations:
+                matches = (
+                    operation.contingent
+                    and operation.access in normalized_modes
+                    and operation.resource.kind
+                    in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+                    and operation.resource.covers_path(path)
+                )
+                if not matches:
+                    operations.append(operation)
+                    continue
+
+                if operation.resource.is_pattern:
+                    # Keep the broad possibility contingent and promote only the
+                    # concrete path that the worker is about to mutate.
+                    operations.append(operation)
+                    concrete_resource = replace(
+                        operation.resource,
+                        identifier=path,
+                        metadata={
+                            **operation.resource.metadata,
+                            "promoted_from_contingent": operation.resource.identifier,
+                        },
+                    )
+                    committed = replace(
+                        operation,
+                        resource=concrete_resource,
+                        commitment=ScopeCommitment.COMMITTED,
+                    )
+                    key = (
+                        committed.access.value,
+                        committed.resource.kind.value,
+                        committed.resource.identifier,
+                        committed.resource.region,
+                    )
+                    if key not in committed_keys:
+                        operations.append(committed)
+                        committed_keys.add(key)
+                    promoted.append(
+                        {
+                            "source": operation.to_dict(),
+                            "committed": committed.to_dict(),
+                        }
+                    )
+                    continue
+
+                committed = replace(operation, commitment=ScopeCommitment.COMMITTED)
+                operations.append(committed)
+                promoted.append(
+                    {
+                        "source": operation.to_dict(),
+                        "committed": committed.to_dict(),
+                    }
+                )
+
+            if not promoted:
+                raise ValueError(
+                    f"no contingent operation for {path!r} matches modes "
+                    + ", ".join(sorted(mode.value for mode in normalized_modes))
+                )
+
+            candidate = replace(
+                current,
+                operations=tuple(operations),
+                metadata={**current.metadata, "_scope_expansion": True},
+            )
+            active = self._active_intents_locked(exclude=intent_id)
+            decision = evaluator(
+                candidate, active, self._known_intent_ids_locked() | {intent_id}
+            )
+            if decision.allowed:
+                cycle = self._dependency_cycle_locked(candidate, decision)
+                if cycle:
+                    decision = _cycle_rejection(candidate, decision, cycle)
+            if not decision.allowed:
+                self._event_locked(
+                    "intent_scope_expansion_rejected",
+                    intent_id,
+                    current.owner,
+                    {
+                        "path": path,
+                        "modes": sorted(mode.value for mode in normalized_modes),
+                        "promoted_operations": promoted,
+                        "decision": decision.to_dict(),
+                    },
+                )
+                return decision
+
+            now = _iso(_utc_now())
+            self._conn.execute(
+                """
+                UPDATE intents
+                SET state=?,fingerprint=?,payload_json=?,admission_json=?,updated_at=?,
+                    lease_expires_at=?,version=version+1,content_version=content_version+1
+                WHERE intent_id=?
+                """,
+                (
+                    current_state.value,
+                    candidate.fingerprint(),
+                    json.dumps(candidate.to_dict(), ensure_ascii=False, sort_keys=True),
+                    json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True),
+                    now,
+                    _future(candidate.lease_seconds),
+                    intent_id,
+                ),
+            )
+            self._replace_dependency_edges_locked(candidate, decision)
+
+            if broker_instance_id is not None:
+                if not broker_key:
+                    raise ValueError(
+                        "broker_key is required when rebinding a broker after scope promotion"
+                    )
+                updated = self._conn.execute(
+                    "SELECT * FROM intents WHERE intent_id=?", (intent_id,)
+                ).fetchone()
+                assert updated is not None
+                self._refresh_broker_intent_binding_locked(
+                    broker_instance_id,
+                    intent_id=intent_id,
+                    intent_content_version=int(updated["content_version"]),
+                    intent_fingerprint=str(updated["fingerprint"]),
+                    broker_key=broker_key,
+                )
+
+            self._event_locked(
+                "intent_scope_expanded",
+                intent_id,
+                current.owner,
+                {
+                    "path": path,
+                    "modes": sorted(mode.value for mode in normalized_modes),
+                    "promoted_operations": promoted,
+                    "decision": decision.to_dict(),
+                    "broker_instance_id": broker_instance_id,
+                },
             )
             return decision
 
@@ -1510,6 +1713,58 @@ class ClaimRegistry:
                 """,
                 (now, now, lease["instance_id"]),
             )
+
+    def _refresh_broker_intent_binding_locked(
+        self,
+        instance_id: str,
+        *,
+        intent_id: str,
+        intent_content_version: int,
+        intent_fingerprint: str,
+        broker_key: bytes,
+    ) -> None:
+        instance = self._verify_broker_attestation_locked(
+            instance_id, broker_key=broker_key
+        )
+        if instance["state"] != "active":
+            raise ValueError(f"broker instance {instance_id} is {instance['state']}")
+        if instance["intent_id"] != intent_id:
+            raise ValueError("broker instance belongs to another intent")
+
+        fields = dict(instance)
+        fields["intent_content_version"] = intent_content_version
+        fields["intent_fingerprint"] = intent_fingerprint
+        payload = self._broker_instance_payload(fields)
+        attestation = {
+            **payload,
+            "algorithm": "hmac-sha256",
+            "signature": hmac.new(
+                broker_key, _canonical_json(payload), hashlib.sha256
+            ).hexdigest(),
+        }
+        encoded = json.dumps(attestation, ensure_ascii=False, sort_keys=True)
+        self._conn.execute(
+            """
+            UPDATE broker_instances
+            SET intent_content_version=?,intent_fingerprint=?,attestation_json=?,last_seen_at=?
+            WHERE instance_id=?
+            """,
+            (
+                intent_content_version,
+                intent_fingerprint,
+                encoded,
+                _iso(_utc_now()),
+                instance_id,
+            ),
+        )
+        self._conn.execute(
+            """
+            UPDATE observation_sessions
+            SET broker_attestation_json=?
+            WHERE broker_instance_id=?
+            """,
+            (encoded, instance_id),
+        )
 
     def register_broker_instance(
         self,

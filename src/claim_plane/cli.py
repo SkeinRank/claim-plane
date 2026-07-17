@@ -374,6 +374,22 @@ def cmd_amend(args: argparse.Namespace) -> int:
         plane.close()
 
 
+def cmd_promote_scope(args: argparse.Namespace) -> int:
+    plane = _plane(args)
+    try:
+        modes = tuple(AccessMode(item) for item in (args.mode or ["write"]))
+        decision = plane.promote_contingent_scope(
+            args.intent_id,
+            path=args.path,
+            modes=modes,
+            expected_version=args.expected_version,
+        )
+        _write_json(decision.to_dict(), args.out)
+        return 0 if decision.allowed else 2
+    finally:
+        plane.close()
+
+
 def cmd_intents(args: argparse.Namespace) -> int:
     plane = _plane(args)
     try:
@@ -795,6 +811,22 @@ def build_parser() -> argparse.ArgumentParser:
     amend.add_argument("--expected-version", type=int)
     amend.add_argument("--out")
     amend.set_defaults(func=cmd_amend)
+
+    promote_scope = sub.add_parser(
+        "promote-scope",
+        help="Promote matching contingent path operations after atomic re-admission.",
+    )
+    promote_scope.add_argument("intent_id")
+    promote_scope.add_argument("path")
+    promote_scope.add_argument(
+        "--mode",
+        action="append",
+        choices=[item.value for item in AccessMode],
+        help="Access mode to promote (repeatable; default: write).",
+    )
+    promote_scope.add_argument("--expected-version", type=int)
+    promote_scope.add_argument("--out")
+    promote_scope.set_defaults(func=cmd_promote_scope)
 
     intents = sub.add_parser("intents", help="List declared intents.")
     intents.add_argument("--active", action="store_true")

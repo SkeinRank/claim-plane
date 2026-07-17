@@ -384,6 +384,7 @@ def _matching_operations(
     path: str,
     *,
     modes: Iterable[AccessMode] | None = None,
+    committed_only: bool = False,
 ) -> tuple[IntentOperation, ...]:
     allowed = set(modes) if modes is not None else None
     return tuple(
@@ -392,6 +393,7 @@ def _matching_operations(
         if operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
         and operation.resource.covers_path(path)
         and (allowed is None or operation.access in allowed)
+        and (not committed_only or operation.committed)
     )
 
 
@@ -404,7 +406,7 @@ def _line_region_for(
     intent: ChangeIntent, path: str, *, modes: Iterable[AccessMode]
 ) -> tuple[int, int] | None:
     regions: list[tuple[int, int]] = []
-    operations = _matching_operations(intent, path, modes=modes)
+    operations = _matching_operations(intent, path, modes=modes, committed_only=True)
     for operation in operations:
         region = _parse_region(operation.resource.region)
         if region is None:
@@ -1124,12 +1126,62 @@ class _BrokerCore:
             self._fail(operation_id, state=state, error=error)
             raise BrokerError(error) from exc
 
+    def _ensure_mutation_scope(
+        self,
+        intent: ChangeIntent,
+        path: str,
+        *,
+        modes: Iterable[AccessMode],
+    ) -> ChangeIntent:
+        """Promote a predeclared contingent write surface before first mutation."""
+
+        modes = tuple(modes)
+        if _matching_operations(intent, path, modes=modes, committed_only=True):
+            return intent
+        contingent = tuple(
+            operation
+            for operation in _matching_operations(intent, path, modes=modes)
+            if operation.contingent
+        )
+        if not contingent:
+            return intent
+
+        plane = Plane.open(self.policy.db_path, governance="governed")
+        try:
+            decision = plane.promote_contingent_scope(
+                intent.intent_id,
+                path=path,
+                modes=modes,
+                broker_instance_id=self.policy.instance_id,
+                broker_key=self.policy.broker_key or b"",
+            )
+            if not decision.allowed:
+                blockers = sorted(
+                    {
+                        conflict.existing_intent_id
+                        for conflict in decision.conflicts
+                        if conflict.blocking
+                    }
+                )
+                suffix = f"; blockers={','.join(blockers)}" if blockers else ""
+                raise BrokerError(
+                    f"contingent scope promotion rejected for {path}{suffix}: "
+                    f"{decision.guidance}"
+                )
+            promoted = plane.intent(intent.intent_id)
+            if promoted is None:
+                raise BrokerError("promoted intent disappeared from the registry")
+            return promoted
+        finally:
+            plane.close()
+
     def _write_file(
         self, intent: ChangeIntent, request: Mapping[str, Any], request_id: str
     ) -> dict[str, Any]:
         target, path = self._resolve(str(request.get("path") or ""), allow_missing=True)
         allowed = {AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST}
-        if not _matching_operations(intent, path, modes=allowed):
+        intent = self._ensure_mutation_scope(intent, path, modes=allowed)
+        if not _matching_operations(intent, path, modes=allowed, committed_only=True):
             raise BrokerError(
                 f"write_file requires write/document/test capability: {path}"
             )
@@ -1154,7 +1206,10 @@ class _BrokerCore:
         self, intent: ChangeIntent, request: Mapping[str, Any], request_id: str
     ) -> dict[str, Any]:
         target, path = self._resolve(str(request.get("path") or ""), allow_missing=True)
-        if not _matching_operations(intent, path, modes={AccessMode.EXTEND}):
+        intent = self._ensure_mutation_scope(intent, path, modes={AccessMode.EXTEND})
+        if not _matching_operations(
+            intent, path, modes={AccessMode.EXTEND}, committed_only=True
+        ):
             raise BrokerError(f"append_file requires extend capability: {path}")
         old = target.read_bytes() if target.exists() else b""
         addition = str(request.get("content") or "").encode("utf-8")
@@ -1178,7 +1233,8 @@ class _BrokerCore:
     ) -> dict[str, Any]:
         target, path = self._resolve(str(request.get("path") or ""))
         allowed = {AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST}
-        if not _matching_operations(intent, path, modes=allowed):
+        intent = self._ensure_mutation_scope(intent, path, modes=allowed)
+        if not _matching_operations(intent, path, modes=allowed, committed_only=True):
             raise BrokerError(
                 f"replace_lines requires write/document/test capability: {path}"
             )
@@ -1219,7 +1275,10 @@ class _BrokerCore:
         if not self.policy.allow_delete:
             raise BrokerError("delete operations are disabled")
         target, path = self._resolve(str(request.get("path") or ""))
-        if not _matching_operations(intent, path, modes={AccessMode.DELETE}):
+        intent = self._ensure_mutation_scope(intent, path, modes={AccessMode.DELETE})
+        if not _matching_operations(
+            intent, path, modes={AccessMode.DELETE}, committed_only=True
+        ):
             raise BrokerError(f"delete_file requires delete capability: {path}")
         if target.is_dir():
             raise BrokerError("delete_file only accepts files")
@@ -1302,7 +1361,10 @@ class _BrokerCore:
         destination, target_path = self._resolve(
             str(request.get("target_path") or ""), allow_missing=True
         )
-        operations = _matching_operations(intent, path, modes={AccessMode.RENAME})
+        intent = self._ensure_mutation_scope(intent, path, modes={AccessMode.RENAME})
+        operations = _matching_operations(
+            intent, path, modes={AccessMode.RENAME}, committed_only=True
+        )
         if not operations:
             raise BrokerError(f"rename_file requires rename capability: {path}")
         expected = {_rename_target(operation) for operation in operations}
@@ -1409,7 +1471,7 @@ class _BrokerCore:
             raise BrokerError(f"command is not allowlisted: {name}")
         test_operations = tuple(
             operation
-            for operation in intent.operations
+            for operation in intent.committed_operations
             if operation.access is AccessMode.TEST
         )
         if not test_operations:

@@ -8,6 +8,30 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-16
+
+### Added
+
+- Add committed and contingent operation commitments to `ChangeIntent`. Committed
+  operations participate in initial admission and grant mutation authority, while
+  contingent operations remain non-blocking planning hints until promoted.
+- Add atomic contingent-scope promotion with re-admission. Rejected promotions leave
+  the currently admitted intent unchanged; successful promotions preserve active
+  lifecycle state and create an audited `intent_scope_expanded` event.
+- Add broker-driven just-in-time scope promotion. A governed broker may inspect a
+  predeclared contingent path and promote it before the first mutation; the broker
+  capability is re-attested to the new intent content version in the same transaction.
+- Add `promote-scope` CLI and `promote_contingent_scope` MCP entry points, plus
+  commitment metadata in worker context packs and the public JSON Schema.
+
+### Changed
+
+- Admission, verification, region enforcement, collision checks, and broker mutation
+  authorization now reason only over committed operations. Contingent surfaces never
+  silently grant write authority.
+- Read-only broker discovery may still inspect contingent path surfaces so workers can
+  gather evidence before requesting or triggering promotion.
+
 ## [0.1.1] — 2026-07-15
 
 ### Added

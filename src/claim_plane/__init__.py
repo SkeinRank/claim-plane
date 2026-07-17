@@ -33,6 +33,7 @@ from claim_plane.core import (
     RepairActionKind,
     RepairPlan,
     ResourceKind,
+    ScopeCommitment,
     ResourceRef,
     RouteRecommendation,
     SemanticIdentityResolver,
@@ -69,7 +70,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -109,6 +110,7 @@ __all__ = [
     "RepairActionKind",
     "RepairPlan",
     "ResourceKind",
+    "ScopeCommitment",
     "ResourceRef",
     "RouteRecommendation",
     "SemanticIdentityResolver",

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://skeinrank.github.io/claim-plane/schemas/change-intent.schema.json",
-  "title": "Claim Plane ChangeIntent v0.9",
+  "title": "Claim Plane ChangeIntent v1.0",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -142,6 +142,14 @@
         },
         "metadata": {
           "type": "object"
+        },
+        "commitment": {
+          "enum": [
+            "committed",
+            "contingent"
+          ],
+          "default": "committed",
+          "description": "Committed operations participate in admission and grant mutation authority. Contingent operations are planning hints that require promotion and atomic re-admission before mutation."
         }
       },
       "oneOf": [

@@ -56,6 +56,18 @@ class IntentStore(Protocol):
         expected_version: int | None = None,
     ) -> AdmissionDecision: ...
 
+    def promote_contingent_operations(
+        self,
+        intent_id: str,
+        *,
+        path: str,
+        modes: Iterable[AccessMode],
+        evaluator: AdmissionEvaluator,
+        expected_version: int | None = None,
+        broker_instance_id: str | None = None,
+        broker_key: bytes | None = None,
+    ) -> AdmissionDecision: ...
+
     def invalidate_dependents(
         self, producer_intent_id: str, resource_keys: list[str], *, reason: str
     ) -> list[str]: ...
@@ -253,6 +265,7 @@ PLANE_STORE_METHODS = (
     "observation_session",
     "pending_broker_operations",
     "prepare_broker_operation",
+    "promote_contingent_operations",
     "record_observation_event",
     "record_verification",
     "register_broker_instance",

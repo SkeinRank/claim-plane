@@ -61,7 +61,7 @@ class AdmissionEngine:
 
         ambiguous = [
             operation.resource.identifier
-            for operation in incoming.operations
+            for operation in incoming.admission_operations
             if operation.mutating
             and operation.resource.metadata.get("semantic_status") == "ambiguous"
         ]
@@ -89,7 +89,7 @@ class AdmissionEngine:
 
         deprecated = [
             operation.resource.identifier
-            for operation in incoming.operations
+            for operation in incoming.admission_operations
             if operation.mutating and operation.resource.metadata.get("deprecated")
         ]
         if deprecated:
@@ -101,8 +101,8 @@ class AdmissionEngine:
         for existing in active:
             if existing.intent_id == incoming.intent_id:
                 continue
-            for incoming_op in incoming.operations:
-                for existing_op in existing.operations:
+            for incoming_op in incoming.admission_operations:
+                for existing_op in existing.admission_operations:
                     assessment = self._assess(
                         incoming, incoming_op, existing, existing_op
                     )
@@ -415,7 +415,7 @@ class AdmissionEngine:
 
 def _contract_entries(intent: ChangeIntent, concept_key: str) -> dict[str, str]:
     entries: dict[str, str] = {}
-    for operation in intent.operations:
+    for operation in intent.admission_operations:
         resource = operation.resource
         if resource.kind is not ResourceKind.CONTRACT or not resource.signature:
             continue

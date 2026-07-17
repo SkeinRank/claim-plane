@@ -181,6 +181,33 @@ class Plane:
             expected_version=expected_version,
         )
 
+    def promote_contingent_scope(
+        self,
+        intent_id: str,
+        *,
+        path: str,
+        modes: Iterable[AccessMode],
+        expected_version: int | None = None,
+        broker_instance_id: str | None = None,
+        broker_key: bytes | None = None,
+    ) -> AdmissionDecision:
+        """Promote matching contingent file operations after atomic re-admission.
+
+        The existing intent remains unchanged when the promoted scope conflicts with
+        active work. A trusted broker may supply its instance binding so a successful
+        promotion advances that capability to the new intent content version atomically.
+        """
+
+        return self._registry.promote_contingent_operations(
+            intent_id,
+            path=path,
+            modes=tuple(modes),
+            evaluator=self._admission.evaluate,
+            expected_version=expected_version,
+            broker_instance_id=broker_instance_id,
+            broker_key=broker_key,
+        )
+
     def activate(self, intent_id: str) -> None:
         self._registry.activate_intent(intent_id)
 

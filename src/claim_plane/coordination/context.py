@@ -37,6 +37,8 @@ def build_context_pack(
                 "concept_id": resource.concept_id,
                 "subject_concept_id": resource.subject_concept_id,
                 "required": operation.required,
+                "commitment": operation.commitment.value,
+                "write_enabled": operation.committed or not operation.mutating,
             }
         )
         if resource.kind is ResourceKind.CONTRACT:

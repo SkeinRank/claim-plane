@@ -27,7 +27,7 @@ from claim_plane.integration import (
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "claim-plane"
-SERVER_VERSION = "0.1.1"
+SERVER_VERSION = "0.2.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +61,25 @@ def tool_definitions() -> list[dict[str, Any]]:
                 ["intent"],
                 {
                     "intent": {"type": "object"},
+                    "expected_version": {"type": "integer", "minimum": 1},
+                },
+            ),
+        },
+        {
+            "name": "promote_contingent_scope",
+            "description": "Promote predeclared contingent path operations after atomic re-admission.",
+            "inputSchema": _object_schema(
+                ["intent_id", "path"],
+                {
+                    "intent_id": {"type": "string"},
+                    "path": {"type": "string"},
+                    "modes": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [item.value for item in AccessMode],
+                        },
+                    },
                     "expected_version": {"type": "integer", "minimum": 1},
                 },
             ),
@@ -320,6 +339,17 @@ class McpServer:
             if name == "amend_change_intent":
                 return plane.amend(
                     ChangeIntent.from_dict(arguments["intent"]),
+                    expected_version=arguments.get("expected_version"),
+                ).to_dict()
+            if name == "promote_contingent_scope":
+                modes = tuple(
+                    AccessMode(item)
+                    for item in (arguments.get("modes") or [AccessMode.WRITE.value])
+                )
+                return plane.promote_contingent_scope(
+                    arguments["intent_id"],
+                    path=arguments["path"],
+                    modes=modes,
                     expected_version=arguments.get("expected_version"),
                 ).to_dict()
             if name == "get_worker_context":

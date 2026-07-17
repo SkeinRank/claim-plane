@@ -57,6 +57,12 @@ The broker does not cache authority for the lifetime of the process. Every reque
 
 Release, expiration, stale invalidation, or amendment revokes the running broker before the next operation.
 
+A successful contingent-scope promotion is the deliberate exception to ordinary content-
+version revocation. The broker requests atomic promotion before the first mutation, and the
+registry advances that broker's signed intent binding to the promoted content version in
+the same transaction. A rejected promotion leaves both the intent and broker capability
+unchanged, and the attempted mutation is denied.
+
 ## Broker instance and operation evidence
 
 A broker instance is bound to:

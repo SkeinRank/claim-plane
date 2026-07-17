@@ -11,7 +11,7 @@ Required identity fields:
 - `owner` — worker or worker group;
 - `base_revision` — human-readable repository revision used for planning;
 - `base_commit` — immutable Git commit used for execution and integration; mutable refs require this pin;
-- `operations` — read/write/extend/delete/rename/document/test surfaces.
+- `operations` — read/write/extend/delete/rename/document/test surfaces, each with an optional `commitment` of `committed` or `contingent` (default: `committed`).
 
 Optional coordination fields:
 
@@ -32,6 +32,24 @@ A resource contains:
 - optional line bounds and metadata.
 
 Contracts that participate in semantic overlap must set `subject_concept_id`. A common but unrelated contract does not authorize concurrent writes to a concept.
+
+## Adaptive operation commitment
+
+`committed` operations participate in current admission and mutation enforcement.
+`contingent` mutating operations represent possible future scope and do not reserve write
+ownership during initial admission. For coordination safety they are projected as read
+premises until promoted, so concurrent writers can still be tracked.
+
+Promotion is monotonic and atomic:
+
+1. select a predeclared contingent path operation;
+2. narrow a contingent glob to the concrete requested path when necessary;
+3. re-run admission against the current active set;
+4. commit the new intent content version only when admission succeeds.
+
+A rejected promotion does not alter the previously admitted intent. A successful promotion
+preserves an active intent's lifecycle state. Trusted broker-initiated promotion also
+re-attests that broker to the new intent content version in the same transaction.
 
 ## Admission
 
