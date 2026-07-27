@@ -8,6 +8,16 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-07-27
+
+### Fixed
+
+- Place CooperBench execution worktrees directly under an `agent_workspace` directory,
+  satisfying benchmark safety checks used by the Jinja tasks during gold sanity and
+  official feature evaluation.
+- Apply the same workspace normalization to the confirmatory 30×3 protocol so paper
+  reproduction and follow-up experiments share the benchmark-compatible layout.
+
 ## [0.9.0] — 2026-07-27
 
 ### Added

@@ -47,9 +47,14 @@ AGENT_TRACE_LOGS: list[dict[str, object]] = []
 
 
 def configure_workspace_root(path: str | Path) -> Path:
-    """Set and create the worktree root for the current process."""
+    """Set and create the CooperBench-safe worktree root for this process."""
     global AGENT_WORKSPACE_ROOT
-    AGENT_WORKSPACE_ROOT = Path(path).expanduser().resolve()
+    requested = Path(path).expanduser().resolve()
+    AGENT_WORKSPACE_ROOT = (
+        requested
+        if requested.name == "agent_workspace"
+        else requested / "agent_workspace"
+    )
     AGENT_WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
     return AGENT_WORKSPACE_ROOT
 

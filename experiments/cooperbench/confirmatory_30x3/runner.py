@@ -94,7 +94,7 @@ def _gold_feature(
     safe_name = hashlib.sha256(
         f"confirmatory-gold|{pair.repo}|{pair.task_id}|{feature_id}".encode("utf-8")
     ).hexdigest()[:16]
-    worktree = paths.workspace_root / f"gold-{safe_name}"
+    worktree = configure_workspace_root(paths.workspace_root) / f"gold-{safe_name}"
     result: dict[str, Any] = {
         "repo": pair.repo,
         "task": pair.task_id,
