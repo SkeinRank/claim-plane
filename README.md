@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.6.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.7.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
 
@@ -597,7 +597,7 @@ schemas/           intents, manifests, integration runs, and observation traces
 docs/              architecture, protocol, execution, storage, integration, benchmark, releasing
 benchmark/         deterministic protocol suite and adapter-driven A/B/C harness
 experiments/       reproducible research studies and model-specific evaluation code
-  cooperbench/      frozen Planner v1, published study runner, and pinned Linux research environment
+  cooperbench/      frozen Planner v1, paper reproduction, confirmatory runner, and Linux research image
 ```
 
 ## Reproducible research environment
@@ -614,10 +614,23 @@ research runner while leaving `claim-plane` itself free of runtime container dep
 OPENROUTER_API_KEY=... ./scripts/cooperbench-docker.sh reproduce /path/to/CooperBench
 ```
 
-The CooperBench checkout is mounted read-only. Repository caches, worktrees, checkpoints,
-and results are persisted under `.claim-plane/docker-research/`. Each paper run also
-records the CooperBench Git revision when available and a SHA-256 digest over the frozen
-dataset files used by the six selected pairs.
+The larger frozen-plan study is also CLI-native. It first gold-validates and freezes the
+exact 30-pair set, then freezes Planner v1 once, then runs nine resumable 10-pair shards
+covering coder seeds 101, 202, and 303:
+
+```bash
+python -m experiments.cooperbench confirmatory prepare --cooperbench /path/to/CooperBench
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory freeze-plans \
+  --cooperbench /path/to/CooperBench
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory run \
+  --cooperbench /path/to/CooperBench --seed 101 --shard 1
+python -m experiments.cooperbench confirmatory status
+```
+
+The CooperBench checkout is mounted read-only in the research image. Repository caches,
+worktrees, checkpoints, and results are persisted under `.claim-plane/docker-research/`.
+Protocol artifacts record the exact pair set, benchmark provenance, Planner v1 policy
+identity, frozen plan fingerprints, and shard identities without persisting API keys.
 
 ## Current limits
 
@@ -634,7 +647,7 @@ Claim Plane remains an alpha coordination kernel.
 - The default `tree` sandbox detects repository mutations but does not isolate network or the host filesystem; strict OS isolation requires an available supported backend.
 - HMAC evidence provides shared-secret authenticity, not public-key identity or hardware attestation.
 - The router is deterministic and heuristic, not learned.
-- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The repository includes the frozen Planner v1 policy and an executable reproduction of the published six-pair CooperBench mechanism check. The larger confirmatory study remains a separate frozen protocol until its runner and result set are released.
+- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The repository includes the frozen Planner v1 policy, an executable reproduction of the published six-pair CooperBench mechanism check, and the frozen-plan 30-pair × 3-seed runner. Confirmatory results remain unpublished until the full study completes and is analyzed.
 
 The comparative evaluation requirements are documented in [docs/BENCHMARK.md](docs/BENCHMARK.md), and the study infrastructure is described in [experiments/cooperbench/README.md](experiments/cooperbench/README.md).
 

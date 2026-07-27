@@ -145,6 +145,44 @@ current-source regions, but gold implementation text is never provided to the pl
 coder. API calls are physically sequential; the parallel arm is a logical execution
 topology in which both workers begin from the same immutable base.
 
+### Frozen-plan 30-pair × 3-seed study
+
+The confirmatory protocol is implemented under `experiments/cooperbench/confirmatory_30x3/`.
+It preserves the V9 design: 30 gold-valid pairs balanced between conflict and clean labels,
+one Planner v1 declaration per feature, three independent coder seeds (`101`, `202`,
+`303`), and the same four execution arms. Planner declarations are frozen before coder
+execution and reused byte-for-byte across all coder seeds and across the static and
+dynamic Claim Plane arms.
+
+Freeze the exact pair set with CooperBench-native gold checks before any paid model call:
+
+```bash
+python -m experiments.cooperbench confirmatory prepare \
+  --cooperbench /path/to/CooperBench
+```
+
+Freeze Planner v1 once for all 60 feature declarations:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory freeze-plans \
+  --cooperbench /path/to/CooperBench
+```
+
+Run one resumable shard:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory run \
+  --cooperbench /path/to/CooperBench \
+  --seed 101 \
+  --shard 1
+```
+
+Each coder seed has three contiguous 10-pair shards, producing nine shard runs and 360
+arm executions in the complete study. `confirmatory status` reports protocol, planner
+freeze, and shard completion without calling a model. The run manifest records the coder
+seed index separately from the seed value so the deterministic V9 implementation-seed
+schedule remains reproducible.
+
 ### Pinned Linux runner
 
 For environment-controlled reproduction, build the research image from the repository

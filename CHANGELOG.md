@@ -8,6 +8,29 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-27
+
+### Added
+
+- Add the CLI-native 30-pair, three-seed CooperBench confirmatory protocol derived from
+  the frozen V9 study design.
+- Add deterministic task-balanced 15/15 conflict-clean pair selection with CooperBench
+  gold-feature validation and immutable protocol artifacts.
+- Add one-time Planner v1 freezing with stable per-feature planner seeds, plan
+  fingerprints, resumable planner checkpoints, and reuse across coder seeds and Claim
+  Plane static/dynamic arms.
+- Add nine resumable 10-pair execution shards covering coder seeds 101, 202, and 303,
+  with per-shard manifests, checkpoints, traces, provider accounting, and frozen-plan
+  provenance.
+- Add Docker wrapper commands for preparing, freezing, running, and inspecting the
+  confirmatory study.
+
+### Changed
+
+- Generalize the CooperBench execution harness so an explicit coder seed and a frozen
+  planner declaration set can be supplied without changing the published six-pair
+  reproduction path.
+
 ## [0.6.0] — 2026-07-27
 
 ### Added

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -123,7 +124,10 @@ def _stable_agent_seed(
     pair,
     repetition,
     agent,
+    *,
+    coder_seed=None,
 ):
+    selected_seed = LLM_SEEDS[repetition] if coder_seed is None else int(coder_seed)
     return (
         stable_seed(
             pair,
@@ -131,7 +135,7 @@ def _stable_agent_seed(
             agent,
             "implementation",
         )
-        + LLM_SEEDS[repetition]
+        + selected_seed
     )
 
 
@@ -279,6 +283,9 @@ def run_pair(
     pair,
     arm,
     repetition,
+    *,
+    coder_seed=None,
+    frozen_plans=None,
 ):
     assert arm in ARMS
 
@@ -310,12 +317,14 @@ def run_pair(
         pair,
         repetition,
         "A",
+        coder_seed=coder_seed,
     )
 
     seed_b = _stable_agent_seed(
         pair,
         repetition,
         "B",
+        coder_seed=coder_seed,
     )
 
     plan_seed_a = stable_seed(
@@ -452,6 +461,11 @@ def run_pair(
         "tests_b": None,
         "pair_pass": False,
         "planner_cost": 0.0,
+        "frozen_planner_cost_pair": 0.0,
+        "logical_system_cost_estimate": 0.0,
+        "frozen_plan_reused": bool(
+            frozen_plans is not None and arm in CLAIM_PLANE_ARMS
+        ),
         "coder_pre_failure_cost": 0.0,
         "coder_post_failure_cost": 0.0,
         "coder_cost": 0.0,
@@ -490,47 +504,60 @@ def run_pair(
         # Shared planner declarations for both Claim Plane ablations.
         # -------------------------------------------------------------
         if arm in CLAIM_PLANE_ARMS:
-            plan_a_result = get_shared_calibrated_plan(
-                (
-                    pair_id,
-                    repetition,
-                    "A",
-                    plan_seed_a,
-                    PLANNER_MODEL,
-                    bool(RUN_PLANNER_UNCERTAINTY_CALIBRATION),
-                ),
-                repo,
-                feature_a,
-                seed=plan_seed_a,
-            )
-
-            record["planner_cost"] += plan_a_result["logical_cost"]
-
-            record["planner_latency_critical"] = max(
-                record["planner_latency_critical"],
-                plan_a_result["logical_latency"],
-            )
-
-            plan_b_result = get_shared_calibrated_plan(
-                (
-                    pair_id,
-                    repetition,
-                    "B",
-                    plan_seed_b,
-                    PLANNER_MODEL,
-                    bool(RUN_PLANNER_UNCERTAINTY_CALIBRATION),
-                ),
-                repo,
-                feature_b,
-                seed=plan_seed_b,
-            )
-
-            record["planner_cost"] += plan_b_result["logical_cost"]
-
-            record["planner_latency_critical"] = max(
-                record["planner_latency_critical"],
-                plan_b_result["logical_latency"],
-            )
+            if frozen_plans is None:
+                plan_a_result = get_shared_calibrated_plan(
+                    (
+                        pair_id,
+                        repetition,
+                        "A",
+                        plan_seed_a,
+                        PLANNER_MODEL,
+                        bool(RUN_PLANNER_UNCERTAINTY_CALIBRATION),
+                    ),
+                    repo,
+                    feature_a,
+                    seed=plan_seed_a,
+                )
+                plan_b_result = get_shared_calibrated_plan(
+                    (
+                        pair_id,
+                        repetition,
+                        "B",
+                        plan_seed_b,
+                        PLANNER_MODEL,
+                        bool(RUN_PLANNER_UNCERTAINTY_CALIBRATION),
+                    ),
+                    repo,
+                    feature_b,
+                    seed=plan_seed_b,
+                )
+                record["planner_cost"] = float(
+                    plan_a_result["logical_cost"] + plan_b_result["logical_cost"]
+                )
+                record["planner_latency_critical"] = max(
+                    float(plan_a_result["logical_latency"]),
+                    float(plan_b_result["logical_latency"]),
+                )
+            else:
+                pair_payload = frozen_plans.get(pair_id)
+                if not isinstance(pair_payload, dict):
+                    raise RuntimeError(
+                        f"Frozen Planner v1 output missing for {pair_id}."
+                    )
+                plan_a_result = copy.deepcopy(pair_payload["A"])
+                plan_b_result = copy.deepcopy(pair_payload["B"])
+                plan_a_result["shared_plan_cache_hit"] = True
+                plan_b_result["shared_plan_cache_hit"] = True
+                record["frozen_planner_cost_pair"] = sum(
+                    float(pair_payload[agent].get("logical_cost", 0.0) or 0.0)
+                    for agent in ("A", "B")
+                )
+                plan_seed_a = int(
+                    plan_a_result.get("confirmatory_plan_seed", plan_seed_a)
+                )
+                plan_seed_b = int(
+                    plan_b_result.get("confirmatory_plan_seed", plan_seed_b)
+                )
 
             plan_a = plan_a_result["plan"]
             plan_b = plan_b_result["plan"]
@@ -1482,6 +1509,11 @@ def run_pair(
 
     finally:
         record["logical_total_cost"] = record["planner_cost"] + record["coder_cost"]
+        record["logical_system_cost_estimate"] = record["coder_cost"] + (
+            record["frozen_planner_cost_pair"]
+            if record["frozen_plan_reused"]
+            else record["planner_cost"]
+        )
 
         if record["logical_llm_critical_path"] == 0.0:
             record["logical_llm_critical_path"] = (
@@ -1607,12 +1639,17 @@ def run_gold_sanity(paths: PaperPaths) -> list[dict[str, Any]]:
     return rows
 
 
-def configure_runtime(paths: PaperPaths, planner: PlannerV1 | None) -> None:
+def configure_runtime(
+    paths: Any,
+    planner: PlannerV1 | None,
+    *,
+    pairs=FROZEN_PAIRS,
+) -> None:
     global tasks, _REPO_CACHE, _PLANNER, _PLAN_DIR, AGENT_WORKSPACE_ROOT
     paths.repo_cache.mkdir(parents=True, exist_ok=True)
     paths.workspace_root.mkdir(parents=True, exist_ok=True)
-    tasks = validate_frozen_pairs(paths.dataset)
-    verify_pair_labels(paths.dataset)
+    tasks = validate_frozen_pairs(paths.dataset, pairs)
+    verify_pair_labels(paths.dataset, pairs)
     _REPO_CACHE = paths.repo_cache
     _PLANNER = planner
     AGENT_WORKSPACE_ROOT = configure_workspace_root(paths.workspace_root)

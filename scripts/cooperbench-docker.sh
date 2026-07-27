@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-IMAGE="${CLAIM_PLANE_RESEARCH_IMAGE:-claim-plane-cooperbench:0.6.0}"
+IMAGE="${CLAIM_PLANE_RESEARCH_IMAGE:-claim-plane-cooperbench:0.7.0}"
 STATE_INPUT="${CLAIM_PLANE_RESEARCH_STATE:-${ROOT}/.claim-plane/docker-research}"
 DOCKERFILE="${ROOT}/experiments/cooperbench/docker/Dockerfile"
 
@@ -14,9 +14,13 @@ Usage:
   ./scripts/cooperbench-docker.sh info
   ./scripts/cooperbench-docker.sh prepare /path/to/CooperBench
   ./scripts/cooperbench-docker.sh reproduce /path/to/CooperBench [extra arguments]
+  ./scripts/cooperbench-docker.sh confirmatory-prepare /path/to/CooperBench
+  ./scripts/cooperbench-docker.sh confirmatory-freeze /path/to/CooperBench
+  ./scripts/cooperbench-docker.sh confirmatory-run /path/to/CooperBench --seed 101 --shard 1
+  ./scripts/cooperbench-docker.sh confirmatory-status
   ./scripts/cooperbench-docker.sh shell [/path/to/CooperBench]
 
-The reproduce command reads OPENROUTER_API_KEY from the host environment and passes it
+Commands that call models read OPENROUTER_API_KEY from the host environment and pass it
 only to the container process. Research artifacts, repository caches, and worktrees are
 persisted under .claim-plane/docker-research unless CLAIM_PLANE_RESEARCH_STATE is set.
 USAGE
@@ -117,6 +121,63 @@ main() {
         --repo-cache /state/repos \
         --workspace /state/worktrees \
         "$@"
+      ;;
+    confirmatory-prepare)
+      [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+      run_study_command "$(canonical_dir "$2")" confirmatory prepare
+      ;;
+    confirmatory-freeze)
+      [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+      [ -n "${OPENROUTER_API_KEY:-}" ] || {
+        echo "error: OPENROUTER_API_KEY is not set" >&2
+        exit 1
+      }
+      local cooperbench state
+      cooperbench="$(canonical_dir "$2")"
+      state="$(state_dir)"
+      local -a mounts
+      while IFS= read -r line; do mounts+=("$line"); done < <(common_mounts "$cooperbench" "$state")
+      docker run --rm --init \
+        -e OPENROUTER_API_KEY \
+        "${mounts[@]}" \
+        "$IMAGE" \
+        confirmatory freeze-plans \
+        --cooperbench /data/cooperbench \
+        --artifacts /state/artifacts \
+        --repo-cache /state/repos \
+        --workspace /state/worktrees
+      ;;
+    confirmatory-run)
+      [ "$#" -ge 4 ] || { usage >&2; exit 2; }
+      [ -n "${OPENROUTER_API_KEY:-}" ] || {
+        echo "error: OPENROUTER_API_KEY is not set" >&2
+        exit 1
+      }
+      local cooperbench
+      cooperbench="$(canonical_dir "$2")"
+      shift 2
+      local state
+      state="$(state_dir)"
+      local -a mounts
+      while IFS= read -r line; do mounts+=("$line"); done < <(common_mounts "$cooperbench" "$state")
+      docker run --rm --init \
+        -e OPENROUTER_API_KEY \
+        "${mounts[@]}" \
+        "$IMAGE" \
+        confirmatory run \
+        --cooperbench /data/cooperbench \
+        --artifacts /state/artifacts \
+        --repo-cache /state/repos \
+        --workspace /state/worktrees \
+        "$@"
+      ;;
+    confirmatory-status)
+      [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+      local state
+      state="$(state_dir)"
+      docker run --rm --init \
+        --mount "type=bind,src=${state},dst=/state" \
+        "$IMAGE" confirmatory status --artifacts /state/artifacts
       ;;
     shell)
       local -a mounts=()

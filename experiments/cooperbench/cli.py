@@ -312,6 +312,144 @@ def _add_paper_paths(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", default=".claim-plane/cooperbench/worktrees")
 
 
+def _confirmatory_paths(args: argparse.Namespace):
+    from .confirmatory_30x3.config import ConfirmatoryPaths
+
+    return ConfirmatoryPaths.from_values(
+        getattr(args, "cooperbench", "."),
+        artifact_root=args.artifacts,
+        repo_cache=getattr(args, "repo_cache", ".claim-plane/cooperbench/repos"),
+        workspace_root=getattr(args, "workspace", ".claim-plane/cooperbench/worktrees"),
+    )
+
+
+def cmd_confirmatory_info(_args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.config import (
+        CODER_SEEDS,
+        N_PAIRS,
+        PLANNER_FREEZE_SEED,
+        SHARD_COUNT,
+        SHARD_SIZE,
+        STUDY_ID,
+    )
+
+    _print_json(
+        {
+            "study_id": STUDY_ID,
+            "pairs": N_PAIRS,
+            "coder_seeds": list(CODER_SEEDS),
+            "arms": [
+                "parallel",
+                "claim-plane-static",
+                "claim-plane-dynamic",
+                "always-serial",
+            ],
+            "planner_freeze_seed": PLANNER_FREEZE_SEED,
+            "shard_size": SHARD_SIZE,
+            "shard_count_per_seed": SHARD_COUNT,
+            "total_shards": len(CODER_SEEDS) * SHARD_COUNT,
+            "planned_arm_executions": N_PAIRS * len(CODER_SEEDS) * 4,
+        }
+    )
+    return 0
+
+
+def cmd_confirmatory_prepare(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.runner import prepare_protocol
+
+    _print_json(prepare_protocol(_confirmatory_paths(args)))
+    return 0
+
+
+def cmd_confirmatory_freeze(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.runner import freeze_protocol_plans
+
+    _print_json(freeze_protocol_plans(_confirmatory_paths(args)))
+    return 0
+
+
+def cmd_confirmatory_run(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.runner import run_shard
+
+    result = run_shard(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        shard_index=args.shard,
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0
+
+
+def cmd_confirmatory_status(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.runner import study_status
+
+    _print_json(study_status(_confirmatory_paths(args)))
+    return 0
+
+
+def _add_confirmatory_paths(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--cooperbench",
+        required=True,
+        help="Path to a CooperBench checkout containing dataset/.",
+    )
+    parser.add_argument("--artifacts", default=".claim-plane/experiments")
+    parser.add_argument("--repo-cache", default=".claim-plane/cooperbench/repos")
+    parser.add_argument("--workspace", default=".claim-plane/cooperbench/worktrees")
+
+
+def _add_confirmatory_commands(sub: Any) -> None:
+    confirmatory = sub.add_parser(
+        "confirmatory",
+        help="Freeze and execute the 30-pair, three-seed CooperBench study.",
+    )
+    confirmatory_sub = confirmatory.add_subparsers(
+        dest="confirmatory_command", required=True
+    )
+
+    info = confirmatory_sub.add_parser(
+        "info", help="Print the frozen protocol dimensions and seed schedule."
+    )
+    info.set_defaults(func=cmd_confirmatory_info)
+
+    prepare = confirmatory_sub.add_parser(
+        "prepare",
+        help="Select and gold-validate the exact 30-pair confirmatory set.",
+    )
+    _add_confirmatory_paths(prepare)
+    prepare.set_defaults(func=cmd_confirmatory_prepare)
+
+    freeze = confirmatory_sub.add_parser(
+        "freeze-plans",
+        help="Run Planner v1 once per feature and freeze all declarations.",
+    )
+    _add_confirmatory_paths(freeze)
+    freeze.set_defaults(func=cmd_confirmatory_freeze)
+
+    run = confirmatory_sub.add_parser(
+        "run",
+        help="Run or resume one 10-pair coder-seed shard using frozen plans.",
+    )
+    _add_confirmatory_paths(run)
+    run.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    run.add_argument("--shard", required=True, type=int, choices=(1, 2, 3))
+    run.add_argument("--repo", default=".")
+    run.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Refuse to reuse a shard that already contains completed units.",
+    )
+    run.set_defaults(func=cmd_confirmatory_run)
+
+    status = confirmatory_sub.add_parser(
+        "status", help="Report planner-freeze and nine-shard completion state."
+    )
+    status.add_argument("--artifacts", default=".claim-plane/experiments")
+    status.set_defaults(func=cmd_confirmatory_status)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m experiments.cooperbench",
@@ -349,6 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     _add_planner_commands(sub)
     _add_paper_commands(sub)
+    _add_confirmatory_commands(sub)
     return parser
 
 

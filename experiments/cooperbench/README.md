@@ -8,7 +8,7 @@ The experiment code follows three rules:
 2. Run artifacts use a stable directory layout with atomic checkpoints for resume.
 3. Secrets are never written into study declarations or run manifests.
 
-The shared foundation is model-free. Planner v1 is preserved as a separate research module. The published six-pair study is executable from this directory; the larger confirmatory study remains a separate frozen protocol.
+The shared foundation is model-free. Planner v1 is preserved as a separate research module. The published six-pair study and the frozen-plan 30-pair × 3-seed study are executable from this directory without Jupyter.
 
 ## Study declaration
 
@@ -115,6 +115,56 @@ gold replacement text is shown to the planner or coder. API calls are physically
 sequential; the parallel arm represents logical topology in which both workers start
 from the same immutable base.
 
+## Frozen-plan 30-pair × 3-seed study
+
+`confirmatory_30x3/` converts the V9 notebook protocol into a resumable CLI workflow.
+The protocol is deliberately staged so pair selection, planning, and coding variance are
+separate artifacts rather than notebook state.
+
+Inspect the fixed dimensions without touching CooperBench or a model provider:
+
+```bash
+python -m experiments.cooperbench confirmatory info
+```
+
+Gold-validate candidates and freeze exactly 15 conflict plus 15 clean pairs:
+
+```bash
+python -m experiments.cooperbench confirmatory prepare \
+  --cooperbench /path/to/CooperBench
+```
+
+Freeze Planner v1 once. The planner seed for each pair/agent is derived from the V9
+`planner-freeze` identity and is independent of coder seed:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory freeze-plans \
+  --cooperbench /path/to/CooperBench
+```
+
+Execute one of the nine 10-pair shards:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory run \
+  --cooperbench /path/to/CooperBench \
+  --seed 101 \
+  --shard 1
+```
+
+Static and Dynamic Claim Plane consume the same frozen declarations. Seeds `101`, `202`,
+and `303` change only coding execution. Each shard has an independent atomic checkpoint,
+so process restarts do not regenerate plans or rerun completed arm executions.
+
+Check completion at any time:
+
+```bash
+python -m experiments.cooperbench confirmatory status
+```
+
+The protocol source artifacts live under
+`.claim-plane/experiments/claim-plane-confirmatory-30x3/protocol/`. Once created, the
+30-pair study declaration is immutable for that artifact root.
+
 ## Pinned Linux environment
 
 A Docker image is provided for runs that should not depend on the host Python toolchain.
@@ -140,6 +190,18 @@ Run or resume the published study:
 ```bash
 OPENROUTER_API_KEY=... \
   ./scripts/cooperbench-docker.sh reproduce /absolute/path/to/CooperBench
+```
+
+The same image can freeze and execute the confirmatory protocol:
+
+```bash
+./scripts/cooperbench-docker.sh confirmatory-prepare /absolute/path/to/CooperBench
+OPENROUTER_API_KEY=... \
+  ./scripts/cooperbench-docker.sh confirmatory-freeze /absolute/path/to/CooperBench
+OPENROUTER_API_KEY=... \
+  ./scripts/cooperbench-docker.sh confirmatory-run /absolute/path/to/CooperBench \
+  --seed 101 --shard 1
+./scripts/cooperbench-docker.sh confirmatory-status
 ```
 
 The checkout is mounted read-only. Persistent artifacts, cloned task repositories, and
@@ -178,4 +240,4 @@ that define those six pairs.
 
 ## Scope
 
-The shared study foundation does not call an LLM or download CooperBench. Live model access exists only in research modules, and the runtime package remains model-agnostic. The six-pair runner is intentionally study-specific so its published protocol can be reviewed independently from the future confirmatory study.
+The shared study foundation does not call an LLM or download CooperBench. Live model access exists only in research modules, and the runtime package remains model-agnostic. The published study and confirmatory study keep protocol-specific selection and execution policy outside `src/claim_plane` while sharing the same deterministic runtime mechanisms.
