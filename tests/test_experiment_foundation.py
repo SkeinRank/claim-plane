@@ -22,7 +22,7 @@ def _study() -> StudySpec:
     return StudySpec(
         study_id="paper-six-pair",
         description="Stable test declaration",
-        claim_plane_version="0.3.0",
+        claim_plane_version="0.4.0",
         planner_policy_version="planner-v1",
         planner_model="provider/planner",
         coder_model="provider/coder",

@@ -8,6 +8,27 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-27
+
+### Added
+
+- Preserve the final CooperBench Planner v1 policy as research-only code, including
+  the primary planning prompt, retry behavior, OpenRouter request contract, and stable
+  policy fingerprint.
+- Add deterministic source-localization and uncertainty-analysis utilities from the
+  final planner calibration, including bounded support candidates, insertion anchors,
+  symbol/reference surfaces, and automatic contingent selection.
+- Add planner CLI commands for inspecting policy identity, rendering localized context,
+  building deterministic uncertainty candidates, and running the frozen planner with
+  its calibration pass.
+- Add provider cost and request diagnostics while keeping API keys outside persisted
+  planner outputs and the runtime package.
+
+### Changed
+
+- Document the oracle-localized planner condition and the boundary between the
+  model-agnostic Claim Plane runtime and research-only model execution.
+
 ## [0.3.0] — 2026-07-27
 
 ### Added

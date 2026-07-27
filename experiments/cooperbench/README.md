@@ -8,7 +8,7 @@ The experiment code follows three rules:
 2. Run artifacts use a stable directory layout with atomic checkpoints for resume.
 3. Secrets are never written into study declarations or run manifests.
 
-The shared foundation is model-free. Planner v1, coding-agent execution, the published six-pair study, and the larger confirmatory study are layered on top of these primitives.
+The shared foundation is model-free. Planner v1 is preserved as a separate research module; coding-agent execution, the published six-pair study, and the larger confirmatory study are layered on top of these primitives.
 
 ## Study declaration
 
@@ -30,6 +30,44 @@ python -m experiments.cooperbench init path/to/study.json \
 ```
 
 The default root is `.claim-plane/experiments`, which is ignored by Git.
+
+## Planner v1
+
+The planner used by the published CooperBench mechanism check is preserved as
+`planner_v1`. It is research-only code and is not imported by the Claim Plane runtime.
+Its model identity, prompts, retry budgets, source-localization rules, deterministic
+uncertainty candidate generation, and final calibration constants are frozen under the
+`planner-v1` policy identity.
+
+Print the model and policy fingerprint without making a network call:
+
+```bash
+python -m experiments.cooperbench planner policy
+```
+
+Inspect the exact current-source context shown to the planner:
+
+```bash
+python -m experiments.cooperbench planner context \
+  --tree /path/to/worktree \
+  --feature-dir /path/to/CooperBench/dataset/repo_task/task123/feature1
+```
+
+Run the primary planner and the final uncertainty calibration:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench planner run \
+  --tree /path/to/worktree \
+  --feature-dir /path/to/feature1 \
+  --seed 101 \
+  --output plan.json
+```
+
+The planner follows the oracle-localized context condition disclosed in the paper:
+gold feature data identifies relevant current-source regions, while the model receives
+the current repository contents rather than the gold implementation. The calibration
+step can only select bounded candidates produced by deterministic repository analysis;
+it cannot invent additional paths or ranges.
 
 ## Artifact layout
 
@@ -54,4 +92,4 @@ The default root is `.claim-plane/experiments`, which is ignored by Git.
 
 ## Scope
 
-This layer does not call an LLM, download CooperBench, select pairs, or execute repository tasks. Those behaviors remain study-specific so the runtime package stays model-agnostic and the published and confirmatory protocols can be reviewed independently.
+The shared study foundation does not call an LLM, download CooperBench, select pairs, or execute repository tasks. Live model access exists only under `planner_v1`, and the runtime package remains model-agnostic. Coding-agent execution and complete study runners remain study-specific so the published and confirmatory protocols can be reviewed independently.
