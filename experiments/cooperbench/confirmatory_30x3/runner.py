@@ -6,10 +6,19 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
-from ..common import CheckpointStore, PairRef, ShardSpec, create_run, load_study
+from ..common import (
+    CheckpointStore,
+    PairRef,
+    ProgressUnit,
+    ResearchProgress,
+    ShardSpec,
+    create_run,
+    load_study,
+)
 from ..common.identity import study_fingerprint
 from ..environment import runtime_environment
 from ..paper_6pair import runner as harness
@@ -365,6 +374,31 @@ def run_shard(
                     raise RuntimeError(f"invalid result artifact: {path}")
                 results.append(payload)
 
+    units = [
+        ProgressUnit(
+            unit_id=_unit_id(pair, arm_item.value),
+            label=f"{pair.key} · {arm_item.value}",
+            arm=arm_item.value,
+        )
+        for pair in shard_pairs
+        for arm_item in study.arms
+    ]
+    historical_durations: dict[str, float] = {}
+    for row in results:
+        pair_name = str(row.get("pair", ""))
+        arm = str(row.get("arm", ""))
+        duration = float(row.get("wall_time_seconds", 0.0) or 0.0)
+        if pair_name and arm and duration > 0:
+            historical_durations[f"{pair_name}/{arm}"] = duration
+    progress = ResearchProgress(
+        f"confirmatory 30x3 · seed {coder_seed} · shard {shard_index}/{SHARD_COUNT}",
+        units,
+        completed_units=completed,
+        historical_durations=historical_durations,
+    )
+    progress.start()
+    progress.phase(1, 2, "execute frozen coder shard")
+
     repetition = list(study.coder_seeds).index(coder_seed)
     for pair in shard_pairs:
         for arm_item in study.arms:
@@ -372,13 +406,21 @@ def run_shard(
             unit = _unit_id(pair, arm)
             if unit in completed:
                 continue
-            row = harness.run_pair(
-                _legacy_pair(pair),
-                arm,
-                repetition,
-                coder_seed=coder_seed,
-                frozen_plans=frozen_pair_plans,
-            )
+            progress.start_unit(unit)
+            started = time.monotonic()
+            try:
+                row = harness.run_pair(
+                    _legacy_pair(pair),
+                    arm,
+                    repetition,
+                    coder_seed=coder_seed,
+                    frozen_plans=frozen_pair_plans,
+                )
+            except Exception as exc:
+                progress.fail_unit(unit, exc)
+                raise
+            wall_time = max(0.0, time.monotonic() - started)
+            row["wall_time_seconds"] = wall_time
             row["coder_seed"] = coder_seed
             row["coder_seed_index"] = repetition
             row["shard_index"] = shard_index
@@ -390,7 +432,14 @@ def run_shard(
             completed.add(unit)
             _atomic_json(layout.run_dir / "results.json", results)
             _atomic_json(traces_file, AGENT_TRACE_LOGS)
+            progress.complete_unit(
+                unit,
+                duration_seconds=wall_time,
+                result="PASS" if bool(row.get("pair_pass")) else "FAIL",
+                cost=float(row.get("logical_total_cost", 0.0) or 0.0),
+            )
 
+    progress.phase(2, 2, "finalize shard artifacts")
     result_index = {(str(row["pair"]), str(row["arm"])): row for row in results}
     ordered: list[dict[str, Any]] = []
     for pair in shard_pairs:
@@ -422,6 +471,7 @@ def run_shard(
         },
     )
     checkpoint_store.save(checkpoint.with_state("completed"))
+    progress.finish(detail="shard complete")
     return {
         "run_id": run.run_id,
         "run_dir": str(layout.run_dir),

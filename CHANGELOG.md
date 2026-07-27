@@ -8,6 +8,26 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-27
+
+### Added
+
+- Add live terminal progress for the published six-pair reproduction with durable-unit
+  percentage, current pair and arm, elapsed time, per-arm ETA estimation, execution
+  result, logical cost, and wall-clock duration.
+- Add stage visibility for frozen-input validation, CooperBench gold sanity, the
+  24-execution study matrix, and final aggregation/reference comparison.
+- Add resume-aware progress that starts from the durable checkpoint and reuses recorded
+  wall-clock durations to improve ETA estimates after interrupted runs.
+- Add the same execution progress surface to confirmatory coder shards.
+
+### Changed
+
+- Record wall-clock duration on completed research execution artifacts without changing
+  the frozen study protocol or model inputs.
+- Keep progress on stderr so stdout remains a stable machine-readable CLI result.
+
+
 ## [0.8.0] — 2026-07-27
 
 ### Added

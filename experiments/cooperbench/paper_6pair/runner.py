@@ -5,10 +5,18 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
-from ..common import CheckpointStore, PairRef, ShardSpec, create_run
+from ..common import (
+    CheckpointStore,
+    PairRef,
+    ProgressUnit,
+    ResearchProgress,
+    ShardSpec,
+    create_run,
+)
 from ..environment import runtime_environment
 from ..planner_v1 import (
     OpenRouterClient,
@@ -1611,12 +1619,16 @@ def _gold_sanity_record(
     return result
 
 
-def run_gold_sanity(paths: PaperPaths) -> list[dict[str, Any]]:
+def run_gold_sanity(
+    paths: PaperPaths, *, progress: ResearchProgress | None = None
+) -> list[dict[str, Any]]:
     """Validate all frozen features through CooperBench's own task runner."""
     configure_runtime(paths, planner=None)
     cache: dict[tuple[str, int, int], dict[str, Any]] = {}
     rows: list[dict[str, Any]] = []
-    for pair in FROZEN_PAIRS:
+    for pair_index, pair in enumerate(FROZEN_PAIRS, start=1):
+        if progress is not None:
+            progress.activity("gold", pair_index, len(FROZEN_PAIRS), pair.key)
         records = []
         for feature_id in (pair.feature_a, pair.feature_b):
             key = (pair.repo, pair.task_id, feature_id)
@@ -1837,36 +1849,6 @@ def run_paper_study(
         if not isinstance(persisted_traces, list):
             raise RuntimeError("invalid persisted agent trace artifact")
         AGENT_TRACE_LOGS.extend(persisted_traces)
-    configure_runtime(paths, planner=None)
-
-    gold_file = layout.logs_dir / "gold_sanity.json"
-    if skip_gold_sanity:
-        gold_rows: list[dict[str, Any]] = []
-    elif resume and gold_file.exists():
-        payload = json.loads(gold_file.read_text(encoding="utf-8"))
-        if not isinstance(payload, list):
-            raise RuntimeError("invalid persisted gold sanity artifact")
-        gold_rows = payload
-    else:
-        gold_rows = run_gold_sanity(paths)
-        _atomic_json(gold_file, gold_rows)
-
-    if gold_rows and not all(
-        bool(row.get("benchmark_harness_valid")) for row in gold_rows
-    ):
-        invalid = [
-            f"{row['repo']}/task{row['tid']}/feature{row['a']}+feature{row['b']}"
-            for row in gold_rows
-            if not row.get("benchmark_harness_valid")
-        ]
-        raise RuntimeError(
-            "Gold sanity failed; stopping before paid model calls: "
-            + ", ".join(invalid)
-        )
-
-    planner_provider = OpenRouterClient()
-    planner = PlannerV1(planner_provider)
-    configure_runtime(paths, planner=planner)
 
     checkpoint_store = CheckpointStore(layout.checkpoint_file)
     checkpoint = checkpoint_store.load()
@@ -1874,79 +1856,174 @@ def run_paper_study(
         raise RuntimeError(
             "run already contains completed units; use --resume or choose a different artifact root"
         )
-    checkpoint = checkpoint.with_state("running")
-    checkpoint_store.save(checkpoint)
     completed = set(checkpoint.completed_units) if resume else set()
     results = _load_completed_results(layout, completed) if resume else []
 
-    for pair in FROZEN_PAIRS:
-        legacy = _legacy_pair(pair)
-        for arm in ARMS:
-            unit = _unit_id(pair, arm)
-            if unit in completed:
-                continue
-            row = run_pair(legacy, arm, 0)
-            result_file = layout.results_dir / _unit_filename(pair, arm)
-            _atomic_json(result_file, row)
-            if row.get("plan_a") is not None:
-                _immutable_json(
-                    layout.declarations_dir
-                    / f"{hashlib.sha256(pair.key.encode()).hexdigest()[:12]}-A.json",
-                    row["plan_a"],
-                )
-            if row.get("plan_b") is not None:
-                _immutable_json(
-                    layout.declarations_dir
-                    / f"{hashlib.sha256(pair.key.encode()).hexdigest()[:12]}-B.json",
-                    row["plan_b"],
-                )
-            results.append(row)
-            checkpoint = checkpoint.mark_completed(unit)
-            checkpoint_store.save(checkpoint)
-            completed.add(unit)
-            _atomic_json(layout.run_dir / "results.json", results)
-            _atomic_json(traces_file, AGENT_TRACE_LOGS)
+    units = [
+        ProgressUnit(
+            unit_id=_unit_id(pair, arm),
+            label=f"{pair.key} · {arm}",
+            arm=arm,
+        )
+        for pair in FROZEN_PAIRS
+        for arm in ARMS
+    ]
+    historical_durations: dict[str, float] = {}
+    for row in results:
+        pair_name = str(row.get("pair", ""))
+        arm = str(row.get("arm", ""))
+        duration = float(row.get("wall_time_seconds", 0.0) or 0.0)
+        if pair_name and arm and duration > 0:
+            historical_durations[f"{pair_name}/{arm}"] = duration
 
-    # Stable order independent of resume boundaries.
-    result_index = {(str(row["pair"]), str(row["arm"])): row for row in results}
-    ordered_results = []
-    for pair in FROZEN_PAIRS:
-        pair_name = f"{pair.repo}/task{pair.task_id}/feature{pair.feature_a}+feature{pair.feature_b}"
-        for arm in ARMS:
-            row = result_index.get((pair_name, arm))
-            if row is None:
-                raise RuntimeError(f"missing completed result for {pair_name}/{arm}")
-            ordered_results.append(row)
-
-    summary = aggregate_results(ordered_results)
-    comparison = compare_reference(summary)
-    _atomic_json(layout.run_dir / "results.json", ordered_results)
-    _atomic_json(layout.run_dir / "summary.json", summary)
-    _write_summary_csv(layout.run_dir / "summary.csv", summary)
-    _atomic_json(layout.run_dir / "reference_comparison.json", comparison)
-    _atomic_json(
-        layout.run_dir / "provider_stats.json",
-        {
-            "planner": {
-                "api_attempts": planner_provider.stats.api_attempts,
-                "http_200_responses": planner_provider.stats.http_200_responses,
-                "accepted_responses": planner_provider.stats.accepted_responses,
-                "actual_cost": planner_provider.stats.actual_cost,
-                "planner_cost": planner_provider.stats.planner_cost,
-            },
-            "coder": {
-                "api_attempts": CODER_PROVIDER_STATS.api_attempts,
-                "http_200_responses": CODER_PROVIDER_STATS.http_200_responses,
-                "accepted_responses": CODER_PROVIDER_STATS.accepted_responses,
-                "actual_cost": CODER_PROVIDER_STATS.actual_cost,
-                "cost_by_role": dict(CODER_PROVIDER_STATS.cost_by_role),
-            },
-        },
+    progress = ResearchProgress(
+        "paper 6-pair reproduction · seed 101",
+        units,
+        completed_units=completed,
+        historical_durations=historical_durations,
     )
-    checkpoint_store.save(checkpoint.with_state("completed"))
-    return {
-        "run_id": run.run_id,
-        "run_dir": str(layout.run_dir),
-        "summary": summary,
-        "reference_comparison": comparison,
-    }
+    progress.start()
+
+    try:
+        progress.phase(1, 4, "validate frozen CooperBench inputs")
+        configure_runtime(paths, planner=None)
+
+        gold_file = layout.logs_dir / "gold_sanity.json"
+        if skip_gold_sanity:
+            progress.phase(2, 4, "benchmark gold sanity", detail="skipped by request")
+            gold_rows: list[dict[str, Any]] = []
+        elif resume and gold_file.exists():
+            progress.phase(2, 4, "benchmark gold sanity", detail="cached")
+            payload = json.loads(gold_file.read_text(encoding="utf-8"))
+            if not isinstance(payload, list):
+                raise RuntimeError("invalid persisted gold sanity artifact")
+            gold_rows = payload
+        else:
+            progress.phase(2, 4, "benchmark gold sanity", detail="6 frozen pairs")
+            gold_rows = run_gold_sanity(paths, progress=progress)
+            _atomic_json(gold_file, gold_rows)
+
+        if gold_rows and not all(
+            bool(row.get("benchmark_harness_valid")) for row in gold_rows
+        ):
+            invalid = [
+                f"{row['repo']}/task{row['tid']}/feature{row['a']}+feature{row['b']}"
+                for row in gold_rows
+                if not row.get("benchmark_harness_valid")
+            ]
+            raise RuntimeError(
+                "Gold sanity failed; stopping before paid model calls: "
+                + ", ".join(invalid)
+            )
+
+        planner_provider = OpenRouterClient()
+        planner = PlannerV1(planner_provider)
+        configure_runtime(paths, planner=planner)
+
+        checkpoint = checkpoint.with_state("running")
+        checkpoint_store.save(checkpoint)
+        progress.phase(
+            3,
+            4,
+            "execute frozen study matrix",
+            detail=f"{len(completed)}/24 durable executions already complete",
+        )
+
+        for pair in FROZEN_PAIRS:
+            legacy = _legacy_pair(pair)
+            for arm in ARMS:
+                unit = _unit_id(pair, arm)
+                if unit in completed:
+                    continue
+                progress.start_unit(unit)
+                started = time.monotonic()
+                try:
+                    row = run_pair(legacy, arm, 0)
+                except Exception as exc:
+                    progress.fail_unit(unit, exc)
+                    raise
+                wall_time = max(0.0, time.monotonic() - started)
+                row["wall_time_seconds"] = wall_time
+                result_file = layout.results_dir / _unit_filename(pair, arm)
+                _atomic_json(result_file, row)
+                if row.get("plan_a") is not None:
+                    _immutable_json(
+                        layout.declarations_dir
+                        / f"{hashlib.sha256(pair.key.encode()).hexdigest()[:12]}-A.json",
+                        row["plan_a"],
+                    )
+                if row.get("plan_b") is not None:
+                    _immutable_json(
+                        layout.declarations_dir
+                        / f"{hashlib.sha256(pair.key.encode()).hexdigest()[:12]}-B.json",
+                        row["plan_b"],
+                    )
+                results.append(row)
+                checkpoint = checkpoint.mark_completed(unit)
+                checkpoint_store.save(checkpoint)
+                completed.add(unit)
+                _atomic_json(layout.run_dir / "results.json", results)
+                _atomic_json(traces_file, AGENT_TRACE_LOGS)
+                progress.complete_unit(
+                    unit,
+                    duration_seconds=wall_time,
+                    result="PASS" if bool(row.get("pair_pass")) else "FAIL",
+                    cost=float(row.get("logical_total_cost", 0.0) or 0.0),
+                )
+
+        progress.phase(4, 4, "aggregate and compare published results")
+
+        # Stable order independent of resume boundaries.
+        result_index = {(str(row["pair"]), str(row["arm"])): row for row in results}
+        ordered_results = []
+        for pair in FROZEN_PAIRS:
+            pair_name = f"{pair.repo}/task{pair.task_id}/feature{pair.feature_a}+feature{pair.feature_b}"
+            for arm in ARMS:
+                row = result_index.get((pair_name, arm))
+                if row is None:
+                    raise RuntimeError(
+                        f"missing completed result for {pair_name}/{arm}"
+                    )
+                ordered_results.append(row)
+
+        summary = aggregate_results(ordered_results)
+        comparison = compare_reference(summary)
+        _atomic_json(layout.run_dir / "results.json", ordered_results)
+        _atomic_json(layout.run_dir / "summary.json", summary)
+        _write_summary_csv(layout.run_dir / "summary.csv", summary)
+        _atomic_json(layout.run_dir / "reference_comparison.json", comparison)
+        _atomic_json(
+            layout.run_dir / "provider_stats.json",
+            {
+                "planner": {
+                    "api_attempts": planner_provider.stats.api_attempts,
+                    "http_200_responses": planner_provider.stats.http_200_responses,
+                    "accepted_responses": planner_provider.stats.accepted_responses,
+                    "actual_cost": planner_provider.stats.actual_cost,
+                    "planner_cost": planner_provider.stats.planner_cost,
+                },
+                "coder": {
+                    "api_attempts": CODER_PROVIDER_STATS.api_attempts,
+                    "http_200_responses": CODER_PROVIDER_STATS.http_200_responses,
+                    "accepted_responses": CODER_PROVIDER_STATS.accepted_responses,
+                    "actual_cost": CODER_PROVIDER_STATS.actual_cost,
+                    "cost_by_role": dict(CODER_PROVIDER_STATS.cost_by_role),
+                },
+            },
+        )
+        checkpoint_store.save(checkpoint.with_state("completed"))
+        progress.finish(
+            detail=(
+                "published mechanism counts matched"
+                if comparison.get("matches_published_mechanism_counts")
+                else "completed; see reference_comparison.json"
+            )
+        )
+        return {
+            "run_id": run.run_id,
+            "run_dir": str(layout.run_dir),
+            "summary": summary,
+            "reference_comparison": comparison,
+        }
+    finally:
+        progress.close()

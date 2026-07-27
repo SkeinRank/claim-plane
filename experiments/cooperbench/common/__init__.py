@@ -6,6 +6,7 @@ from .config import load_study
 from .identity import RunIdentity, build_run_identity
 from .manifest import RunManifest, collect_run_manifest
 from .models import Arm, PairRef, ShardSpec, StudySpec
+from .progress import ProgressUnit, ResearchProgress, format_duration, progress_bar
 
 __all__ = [
     "Arm",
@@ -13,6 +14,8 @@ __all__ = [
     "Checkpoint",
     "CheckpointStore",
     "PairRef",
+    "ProgressUnit",
+    "ResearchProgress",
     "RunIdentity",
     "RunManifest",
     "ShardSpec",
@@ -20,5 +23,7 @@ __all__ = [
     "build_run_identity",
     "collect_run_manifest",
     "create_run",
+    "format_duration",
     "load_study",
+    "progress_bar",
 ]

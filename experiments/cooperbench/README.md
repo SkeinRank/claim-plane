@@ -103,6 +103,13 @@ then executes the six frozen pairs under `parallel`, `claim-plane-static`,
 `claim-plane-dynamic`, and `always-serial`. Static and Dynamic Claim Plane reuse the
 exact same persisted Planner v1 outputs, including across resumed processes.
 
+Long-running executions report live progress to stderr while the final JSON result stays
+on stdout. The display starts at the durable checkpoint, shows the current pair and arm,
+elapsed time, percentage complete, and an ETA once enough execution timing is available.
+ETA estimates learn separate arm durations as the run progresses. Completed execution
+artifacts also retain `wall_time_seconds`, so a resumed run can reuse prior timing data.
+Set `CLAIM_PLANE_PROGRESS=0` to suppress progress output in automation.
+
 Outputs are written under the canonical artifact tree. In addition to per-unit results
 and full agent traces, the completed run contains `results.json`, `summary.json`,
 `summary.csv`, provider accounting, and `reference_comparison.json`. Live model APIs
