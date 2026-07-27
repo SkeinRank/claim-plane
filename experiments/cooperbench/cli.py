@@ -10,6 +10,7 @@ from typing import Any
 
 from .common import CheckpointStore, ShardSpec, create_run, load_study
 from .common.identity import study_fingerprint
+from .environment import runtime_environment
 from .planner_v1 import (
     OpenRouterClient,
     PLANNER_MODEL,
@@ -83,6 +84,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     checkpoint_path = Path(args.run_dir) / "checkpoint.json"
     checkpoint = CheckpointStore(checkpoint_path).load()
     _print_json(checkpoint.to_dict())
+    return 0
+
+
+def cmd_environment(_args: argparse.Namespace) -> int:
+    _print_json(runtime_environment())
     return 0
 
 
@@ -219,7 +225,11 @@ def cmd_paper_info(_args: argparse.Namespace) -> int:
 
 
 def cmd_paper_prepare(args: argparse.Namespace) -> int:
-    from .paper_6pair.dataset import validate_frozen_pairs, verify_pair_labels
+    from .paper_6pair.dataset import (
+        benchmark_provenance,
+        validate_frozen_pairs,
+        verify_pair_labels,
+    )
 
     paths = _paper_paths(args)
     tasks = validate_frozen_pairs(paths.dataset)
@@ -233,6 +243,7 @@ def cmd_paper_prepare(args: argparse.Namespace) -> int:
             "artifact_root": str(paths.artifact_root),
             "repo_cache": str(paths.repo_cache),
             "workspace": str(paths.workspace_root),
+            "benchmark": benchmark_provenance(paths.cooperbench),
         }
     )
     return 0
@@ -329,6 +340,12 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="Read a run checkpoint.")
     status.add_argument("run_dir")
     status.set_defaults(func=cmd_status)
+
+    environment = sub.add_parser(
+        "environment",
+        help="Print the pinned research toolchain and current runtime diagnostics.",
+    )
+    environment.set_defaults(func=cmd_environment)
 
     _add_planner_commands(sub)
     _add_paper_commands(sub)

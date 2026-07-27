@@ -202,6 +202,101 @@ def get_repo(clone_url: str, base_commit: str, repo_cache: str | Path) -> Path:
     return path
 
 
+def _git_value(repo: Path, *args: str) -> str | None:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    value = completed.stdout.strip()
+    return value or None
+
+
+def _git_dirty(repo: Path) -> bool | None:
+    completed = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    return bool(completed.stdout.strip())
+
+
+def _frozen_input_files(
+    dataset: str | Path,
+    pairs: Iterable[PairRef] = FROZEN_PAIRS,
+) -> tuple[Path, ...]:
+    root = Path(dataset).resolve()
+    files: set[Path] = set()
+    conflict_report = root / "gold_conflict_report.json"
+    if conflict_report.exists():
+        files.add(conflict_report)
+
+    grouped: dict[tuple[str, int], set[int]] = {}
+    for pair in pairs:
+        grouped.setdefault((pair.repo, pair.task_id), set()).update(
+            (pair.feature_a, pair.feature_b)
+        )
+
+    for (repo, task_id), feature_ids in grouped.items():
+        task_dir = root / repo / f"task{task_id}"
+        if task_dir.exists():
+            files.update(path for path in task_dir.iterdir() if path.is_file())
+        for feature_id in feature_ids:
+            feature_dir = task_dir / f"feature{feature_id}"
+            if feature_dir.exists():
+                files.update(path for path in feature_dir.rglob("*") if path.is_file())
+
+    return tuple(sorted(files, key=lambda path: path.relative_to(root).as_posix()))
+
+
+def frozen_dataset_digest(
+    dataset: str | Path,
+    pairs: Iterable[PairRef] = FROZEN_PAIRS,
+) -> str:
+    """Hash the benchmark files that define the frozen paper study."""
+
+    root = Path(dataset).resolve()
+    digest = hashlib.sha256()
+    files = _frozen_input_files(root, pairs)
+    if not files:
+        raise RuntimeError("no frozen CooperBench input files were found")
+    for path in files:
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        payload = path.read_bytes()
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
+def benchmark_provenance(
+    cooperbench: str | Path,
+    pairs: Iterable[PairRef] = FROZEN_PAIRS,
+) -> dict[str, object]:
+    """Capture non-secret identity for the mounted CooperBench checkout."""
+
+    root = Path(cooperbench).resolve()
+    dataset = root / "dataset"
+    frozen_pairs = tuple(pairs)
+    validate_frozen_pairs(dataset, frozen_pairs)
+    return {
+        "cooperbench_git_commit": _git_value(root, "rev-parse", "HEAD"),
+        "cooperbench_git_dirty": _git_dirty(root),
+        "frozen_dataset_sha256": frozen_dataset_digest(dataset, frozen_pairs),
+        "frozen_pair_count": len(frozen_pairs),
+        "frozen_task_count": len({(pair.repo, pair.task_id) for pair in frozen_pairs}),
+    }
+
+
 def stable_seed(pair: PairRef, repetition: int, role: str, phase: str) -> int:
     raw = (
         f"{PAIR_SELECTION_SEED}|{pair.repo}|{pair.task_id}|{pair.feature_a}|"

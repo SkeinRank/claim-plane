@@ -145,3 +145,20 @@ current-source regions, but gold implementation text is never provided to the pl
 coder. API calls are physically sequential; the parallel arm is a logical execution
 topology in which both workers begin from the same immutable base.
 
+### Pinned Linux runner
+
+For environment-controlled reproduction, build the research image from the repository
+root and mount CooperBench read-only:
+
+```bash
+./scripts/cooperbench-docker.sh build
+./scripts/cooperbench-docker.sh prepare /absolute/path/to/CooperBench
+OPENROUTER_API_KEY=... \
+  ./scripts/cooperbench-docker.sh reproduce /absolute/path/to/CooperBench
+```
+
+The image fixes the research Python and `uv` versions while keeping Docker outside the
+Claim Plane runtime dependency graph. Task repositories are still checked out at the exact
+base commits declared by CooperBench, and task-local test scripts remain authoritative for
+their own dependency setup. Every paper run persists the supplied CooperBench Git revision
+when available plus a digest over the frozen benchmark inputs used by the study.

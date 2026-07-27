@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..common import CheckpointStore, PairRef, ShardSpec, create_run
+from ..environment import runtime_environment
 from ..planner_v1 import (
     OpenRouterClient,
     PLANNER_MODEL,
@@ -41,6 +42,7 @@ from .config import (
 )
 from .dataset import (
     TaskInfo,
+    benchmark_provenance,
     get_repo as prepare_repo,
     q,
     sh,
@@ -1781,6 +1783,14 @@ def run_paper_study(
     )
     global _PLAN_DIR
     _PLAN_DIR = layout.plans_dir
+    _immutable_json(
+        layout.run_dir / "benchmark.json",
+        benchmark_provenance(paths.cooperbench),
+    )
+    _immutable_json(
+        layout.run_dir / "environment.json",
+        runtime_environment(),
+    )
 
     reset_agent_traces()
     reset_provider_state()

@@ -12,6 +12,8 @@ from experiments.cooperbench.paper_6pair.config import (
     REFERENCE_SUMMARY,
 )
 from experiments.cooperbench.paper_6pair.dataset import (
+    benchmark_provenance,
+    frozen_dataset_digest,
     stable_seed,
     validate_frozen_pairs,
     verify_pair_labels,
@@ -178,3 +180,32 @@ def test_paper_prepare_cli_validates_local_checkout(
     payload = json.loads(capsys.readouterr().out)
     assert payload["ready"] is True
     assert payload["compatible_tasks"] == 5
+    assert payload["benchmark"]["frozen_pair_count"] == 6
+    assert payload["benchmark"]["frozen_task_count"] == 5
+    assert len(payload["benchmark"]["frozen_dataset_sha256"]) == 64
+
+
+def test_frozen_dataset_digest_changes_only_with_frozen_inputs(tmp_path: Path) -> None:
+    dataset = _fake_dataset(tmp_path)
+    first = frozen_dataset_digest(dataset)
+
+    unrelated = dataset / "unrelated_task"
+    unrelated.mkdir()
+    (unrelated / "note.txt").write_text("ignored", encoding="utf-8")
+    assert frozen_dataset_digest(dataset) == first
+
+    target = dataset / "pallets_jinja_task" / "task1465" / "feature1" / "feature.md"
+    target.write_text("changed feature", encoding="utf-8")
+    assert frozen_dataset_digest(dataset) != first
+
+
+def test_benchmark_provenance_is_non_secret_and_checkout_tolerant(
+    tmp_path: Path,
+) -> None:
+    dataset = _fake_dataset(tmp_path)
+    payload = benchmark_provenance(dataset.parent)
+
+    assert payload["cooperbench_git_commit"] is None
+    assert payload["cooperbench_git_dirty"] is None
+    assert payload["frozen_pair_count"] == 6
+    assert len(str(payload["frozen_dataset_sha256"])) == 64

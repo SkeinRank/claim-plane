@@ -8,6 +8,24 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-27
+
+### Added
+
+- Add a pinned Linux research image for CooperBench execution with a fixed Python base
+  image, `uv` version, locale, timezone, and benchmark Git identity.
+- Add a host wrapper for building the image, inspecting its environment, validating a
+  mounted CooperBench checkout, running the published study, and persisting resumable
+  artifacts outside the container.
+- Add offline environment diagnostics and a machine-readable research environment lock.
+- Record the mounted CooperBench Git revision when available and a stable SHA-256 digest
+  over the frozen dataset inputs used by the published six-pair study.
+
+### Changed
+
+- Document container-based reproduction alongside direct host execution without making
+  Docker a runtime dependency of Claim Plane.
+
 ## [0.5.0] — 2026-07-27
 
 ### Added

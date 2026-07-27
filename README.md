@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.5.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.6.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
 
@@ -597,8 +597,27 @@ schemas/           intents, manifests, integration runs, and observation traces
 docs/              architecture, protocol, execution, storage, integration, benchmark, releasing
 benchmark/         deterministic protocol suite and adapter-driven A/B/C harness
 experiments/       reproducible research studies and model-specific evaluation code
-  cooperbench/      frozen Planner v1 and the published six-pair reproduction runner
+  cooperbench/      frozen Planner v1, published study runner, and pinned Linux research environment
 ```
+
+## Reproducible research environment
+
+The CooperBench studies can run directly on a host Python environment or inside the
+pinned Linux research image under `experiments/cooperbench/docker/`. The container fixes
+the Python base image, `uv` version, locale, timezone, and Git identity used by the
+research runner while leaving `claim-plane` itself free of runtime container dependencies.
+
+```bash
+./scripts/cooperbench-docker.sh build
+./scripts/cooperbench-docker.sh environment
+./scripts/cooperbench-docker.sh prepare /path/to/CooperBench
+OPENROUTER_API_KEY=... ./scripts/cooperbench-docker.sh reproduce /path/to/CooperBench
+```
+
+The CooperBench checkout is mounted read-only. Repository caches, worktrees, checkpoints,
+and results are persisted under `.claim-plane/docker-research/`. Each paper run also
+records the CooperBench Git revision when available and a SHA-256 digest over the frozen
+dataset files used by the six selected pairs.
 
 ## Current limits
 

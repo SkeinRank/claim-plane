@@ -25,6 +25,8 @@ jobs:
       - run: ruff check src tests benchmark experiments
       - run: ruff format --check src tests benchmark experiments
       - run: mypy src/claim_plane experiments/cooperbench
+      - run: bash -n scripts/cooperbench-docker.sh
+      - run: python -m experiments.cooperbench environment > /dev/null
       - run: pytest -q
       - run: python benchmark/run_protocol_suite.py
       - run: python -m compileall -q src benchmark experiments

@@ -115,6 +115,44 @@ gold replacement text is shown to the planner or coder. API calls are physically
 sequential; the parallel arm represents logical topology in which both workers start
 from the same immutable base.
 
+## Pinned Linux environment
+
+A Docker image is provided for runs that should not depend on the host Python toolchain.
+Its environment lock fixes Python 3.12.11, `uv` 0.11.29, UTC, `C.UTF-8`, and the
+benchmark Git identity. Docker remains optional; none of these dependencies are imported
+by the installable Claim Plane runtime.
+
+Build and inspect the image:
+
+```bash
+./scripts/cooperbench-docker.sh build
+./scripts/cooperbench-docker.sh environment
+```
+
+Validate a CooperBench checkout through the same container without a model call:
+
+```bash
+./scripts/cooperbench-docker.sh prepare /absolute/path/to/CooperBench
+```
+
+Run or resume the published study:
+
+```bash
+OPENROUTER_API_KEY=... \
+  ./scripts/cooperbench-docker.sh reproduce /absolute/path/to/CooperBench
+```
+
+The checkout is mounted read-only. Persistent artifacts, cloned task repositories, and
+worktrees live under `.claim-plane/docker-research/` by default. The API key is passed
+only as process environment and is never written by the research manifest helpers.
+
+The historical V8.5 notebook installed `uv` without a version constraint and cloned the
+then-current CooperBench default branch at depth one. Because that checkout revision was
+not recorded by the notebook, the current runner does not invent a historical commit.
+Instead, `paper6 prepare` validates the exact frozen pair inputs, reports the supplied
+checkout revision when available, and computes a stable digest over the benchmark files
+that define those six pairs.
+
 ## Artifact layout
 
 ```text
@@ -126,6 +164,8 @@ from the same immutable base.
       runs/
         <run-id>/
           manifest.json
+          benchmark.json
+          environment.json
           checkpoint.json
           declarations/
           plans/
@@ -134,7 +174,7 @@ from the same immutable base.
           logs/
 ```
 
-`study.json` and `pairs.json` are immutable inputs for a study fingerprint. `manifest.json` records non-secret execution provenance, including the installed Claim Plane version, Python/platform information, repository commit when available, and only the names of explicitly requested environment variables. `checkpoint.json` is replaced atomically so interrupted executions can resume from the last durable unit.
+`study.json` and `pairs.json` are immutable inputs for a study fingerprint. `manifest.json` records non-secret execution provenance, including the installed Claim Plane version, Python/platform information, repository commit when available, and only the names of explicitly requested environment variables. The published study also writes immutable `benchmark.json` provenance containing the mounted CooperBench revision when Git metadata is available and the frozen dataset digest. `environment.json` records the pinned research lock plus non-secret runtime diagnostics, including the container build commit when available. `checkpoint.json` is replaced atomically so interrupted executions can resume from the last durable unit.
 
 ## Scope
 

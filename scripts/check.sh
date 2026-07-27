@@ -8,4 +8,6 @@ pytest -q
 ruff format --check .
 ruff check .
 mypy src experiments/cooperbench
+bash -n scripts/cooperbench-docker.sh
+python -m experiments.cooperbench environment > /dev/null
 PYTHONPATH=src python benchmark/run_protocol_suite.py
