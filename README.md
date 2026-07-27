@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.7.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.8.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
 
@@ -597,7 +597,7 @@ schemas/           intents, manifests, integration runs, and observation traces
 docs/              architecture, protocol, execution, storage, integration, benchmark, releasing
 benchmark/         deterministic protocol suite and adapter-driven A/B/C harness
 experiments/       reproducible research studies and model-specific evaluation code
-  cooperbench/      frozen Planner v1, paper reproduction, confirmatory runner, and Linux research image
+  cooperbench/      frozen Planner v1, paper reproduction, confirmatory runner, analysis, and Linux research image
 ```
 
 ## Reproducible research environment
@@ -625,12 +625,21 @@ OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory freeze-pla
 OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory run \
   --cooperbench /path/to/CooperBench --seed 101 --shard 1
 python -m experiments.cooperbench confirmatory status
+python -m experiments.cooperbench confirmatory aggregate
+python -m experiments.cooperbench confirmatory verify-analysis
 ```
 
+Aggregation is intentionally strict: it requires all nine completed shards and the full
+360-row pair/seed/arm matrix before writing final analysis artifacts. The output includes
+arm, feature-pair, and repository-task cluster summaries, task-cluster bootstrap confidence
+intervals, failure and coordination-mechanism summaries, cost accounting, canonical JSON/CSV
+results, and a SHA-256 publication manifest.
+
 The CooperBench checkout is mounted read-only in the research image. Repository caches,
-worktrees, checkpoints, and results are persisted under `.claim-plane/docker-research/`.
-Protocol artifacts record the exact pair set, benchmark provenance, Planner v1 policy
-identity, frozen plan fingerprints, and shard identities without persisting API keys.
+worktrees, checkpoints, results, and analysis artifacts are persisted under
+`.claim-plane/docker-research/`. Protocol artifacts record the exact pair set, benchmark
+provenance, Planner v1 policy identity, frozen plan fingerprints, and shard identities
+without persisting API keys.
 
 ## Current limits
 
@@ -647,7 +656,7 @@ Claim Plane remains an alpha coordination kernel.
 - The default `tree` sandbox detects repository mutations but does not isolate network or the host filesystem; strict OS isolation requires an available supported backend.
 - HMAC evidence provides shared-secret authenticity, not public-key identity or hardware attestation.
 - The router is deterministic and heuristic, not learned.
-- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The repository includes the frozen Planner v1 policy, an executable reproduction of the published six-pair CooperBench mechanism check, and the frozen-plan 30-pair × 3-seed runner. Confirmatory results remain unpublished until the full study completes and is analyzed.
+- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The repository includes the frozen Planner v1 policy, an executable reproduction of the published six-pair CooperBench mechanism check, the frozen-plan 30-pair × 3-seed runner, and deterministic publication aggregation. Confirmatory conclusions remain unpublished until the full study is completed and the resulting analysis is reviewed.
 
 The comparative evaluation requirements are documented in [docs/BENCHMARK.md](docs/BENCHMARK.md), and the study infrastructure is described in [experiments/cooperbench/README.md](experiments/cooperbench/README.md).
 

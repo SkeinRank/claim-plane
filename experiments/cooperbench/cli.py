@@ -389,6 +389,27 @@ def cmd_confirmatory_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_confirmatory_aggregate(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.aggregation import aggregate_study
+
+    _print_json(
+        aggregate_study(
+            _confirmatory_paths(args),
+            bootstrap_samples=args.bootstrap_samples,
+            bootstrap_seed=args.bootstrap_seed,
+        )
+    )
+    return 0
+
+
+def cmd_confirmatory_verify_analysis(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.aggregation import verify_analysis
+
+    result = verify_analysis(_confirmatory_paths(args))
+    _print_json(result)
+    return 0 if result.get("valid") else 1
+
+
 def _add_confirmatory_paths(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cooperbench",
@@ -448,6 +469,22 @@ def _add_confirmatory_commands(sub: Any) -> None:
     )
     status.add_argument("--artifacts", default=".claim-plane/experiments")
     status.set_defaults(func=cmd_confirmatory_status)
+
+    aggregate = confirmatory_sub.add_parser(
+        "aggregate",
+        help="Validate all nine shards and write publication-grade final results.",
+    )
+    aggregate.add_argument("--artifacts", default=".claim-plane/experiments")
+    aggregate.add_argument("--bootstrap-samples", type=int, default=5000)
+    aggregate.add_argument("--bootstrap-seed", type=int, default=20260727)
+    aggregate.set_defaults(func=cmd_confirmatory_aggregate)
+
+    verify = confirmatory_sub.add_parser(
+        "verify-analysis",
+        help="Verify final analysis artifacts against the publication manifest.",
+    )
+    verify.add_argument("--artifacts", default=".claim-plane/experiments")
+    verify.set_defaults(func=cmd_confirmatory_verify_analysis)
 
 
 def build_parser() -> argparse.ArgumentParser:

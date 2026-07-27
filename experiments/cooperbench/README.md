@@ -161,6 +161,37 @@ Check completion at any time:
 python -m experiments.cooperbench confirmatory status
 ```
 
+After all nine shards report complete, create the final analysis artifacts:
+
+```bash
+python -m experiments.cooperbench confirmatory aggregate
+python -m experiments.cooperbench confirmatory verify-analysis
+```
+
+`aggregate` refuses partial matrices. It verifies the expected 30 pairs × 3 coder seeds ×
+4 arms, shard identity, frozen study fingerprint, and per-shard protocol provenance before
+analysis. The default statistical output uses 5,000 deterministic nonparametric bootstrap
+samples clustered by CooperBench repository/task identity. It reports arm estimates and
+paired deltas without introducing a scientific Python dependency into the runtime package.
+
+Final outputs are written under the study fingerprint in `analysis/` and include:
+
+```text
+arm_results.json / arm_results.csv
+arm_summary.json / arm_summary.csv
+feature_pair_summary.json / feature_pair_summary.csv
+task_cluster_summary.json / task_cluster_summary.csv
+bootstrap_ci.json / bootstrap_ci.csv
+failure_taxonomy.json / failure_taxonomy.csv
+mechanism_summary.json / mechanism_summary.csv
+cost_summary.json
+publication_manifest.json
+```
+
+Planner cost is reported once from the frozen plan set rather than multiplied across coder
+seeds or Claim Plane arms. `publication_manifest.json` records SHA-256 digests for every
+final analysis payload; `verify-analysis` checks those digests offline.
+
 The protocol source artifacts live under
 `.claim-plane/experiments/claim-plane-confirmatory-30x3/protocol/`. Once created, the
 30-pair study declaration is immutable for that artifact root.
@@ -202,6 +233,8 @@ OPENROUTER_API_KEY=... \
   ./scripts/cooperbench-docker.sh confirmatory-run /absolute/path/to/CooperBench \
   --seed 101 --shard 1
 ./scripts/cooperbench-docker.sh confirmatory-status
+./scripts/cooperbench-docker.sh confirmatory-aggregate
+./scripts/cooperbench-docker.sh confirmatory-verify-analysis
 ```
 
 The checkout is mounted read-only. Persistent artifacts, cloned task repositories, and
@@ -234,9 +267,19 @@ that define those six pairs.
           results/
           traces/
           logs/
+      analysis/
+        arm_results.json
+        arm_summary.json
+        feature_pair_summary.json
+        task_cluster_summary.json
+        bootstrap_ci.json
+        failure_taxonomy.json
+        mechanism_summary.json
+        cost_summary.json
+        publication_manifest.json
 ```
 
-`study.json` and `pairs.json` are immutable inputs for a study fingerprint. `manifest.json` records non-secret execution provenance, including the installed Claim Plane version, Python/platform information, repository commit when available, and only the names of explicitly requested environment variables. The published study also writes immutable `benchmark.json` provenance containing the mounted CooperBench revision when Git metadata is available and the frozen dataset digest. `environment.json` records the pinned research lock plus non-secret runtime diagnostics, including the container build commit when available. `checkpoint.json` is replaced atomically so interrupted executions can resume from the last durable unit.
+`study.json` and `pairs.json` are immutable inputs for a study fingerprint. `manifest.json` records non-secret execution provenance, including the installed Claim Plane version, Python/platform information, repository commit when available, and only the names of explicitly requested environment variables. The published study also writes immutable `benchmark.json` provenance containing the mounted CooperBench revision when Git metadata is available and the frozen dataset digest. `environment.json` records the pinned research lock plus non-secret runtime diagnostics, including the container build commit when available. `checkpoint.json` is replaced atomically so interrupted executions can resume from the last durable unit. A completed confirmatory study adds deterministic JSON/CSV analysis payloads and a hash manifest under `analysis/`.
 
 ## Scope
 

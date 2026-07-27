@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-IMAGE="${CLAIM_PLANE_RESEARCH_IMAGE:-claim-plane-cooperbench:0.7.0}"
+IMAGE="${CLAIM_PLANE_RESEARCH_IMAGE:-claim-plane-cooperbench:0.8.0}"
 STATE_INPUT="${CLAIM_PLANE_RESEARCH_STATE:-${ROOT}/.claim-plane/docker-research}"
 DOCKERFILE="${ROOT}/experiments/cooperbench/docker/Dockerfile"
 
@@ -18,6 +18,8 @@ Usage:
   ./scripts/cooperbench-docker.sh confirmatory-freeze /path/to/CooperBench
   ./scripts/cooperbench-docker.sh confirmatory-run /path/to/CooperBench --seed 101 --shard 1
   ./scripts/cooperbench-docker.sh confirmatory-status
+  ./scripts/cooperbench-docker.sh confirmatory-aggregate [extra arguments]
+  ./scripts/cooperbench-docker.sh confirmatory-verify-analysis
   ./scripts/cooperbench-docker.sh shell [/path/to/CooperBench]
 
 Commands that call models read OPENROUTER_API_KEY from the host environment and pass it
@@ -178,6 +180,22 @@ main() {
       docker run --rm --init \
         --mount "type=bind,src=${state},dst=/state" \
         "$IMAGE" confirmatory status --artifacts /state/artifacts
+      ;;
+    confirmatory-aggregate)
+      local state
+      state="$(state_dir)"
+      shift
+      docker run --rm --init \
+        --mount "type=bind,src=${state},dst=/state" \
+        "$IMAGE" confirmatory aggregate --artifacts /state/artifacts "$@"
+      ;;
+    confirmatory-verify-analysis)
+      [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+      local state
+      state="$(state_dir)"
+      docker run --rm --init \
+        --mount "type=bind,src=${state},dst=/state" \
+        "$IMAGE" confirmatory verify-analysis --artifacts /state/artifacts
       ;;
     shell)
       local -a mounts=()

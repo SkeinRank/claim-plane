@@ -8,6 +8,27 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-27
+
+### Added
+
+- Add strict confirmatory-study aggregation that accepts results only after all nine
+  shards are complete and all 360 pair/seed/arm executions are unique and protocol-aligned.
+- Add arm, feature-pair, and repository-task cluster summaries with deterministic
+  task-cluster bootstrap confidence intervals and paired arm deltas.
+- Add machine-readable failure taxonomy, scope-promotion/block/serialization mechanism
+  summaries, and study-level cost accounting with one-time frozen Planner v1 cost separated
+  from coder execution cost.
+- Add canonical JSON/CSV publication artifacts plus a SHA-256 publication manifest and
+  an offline verification command for detecting missing or modified analysis files.
+- Add Docker commands for aggregation and analysis verification, together with CI coverage
+  for complete synthetic 30-pair × 3-seed result matrices and integrity verification.
+
+### Changed
+
+- Extend the CooperBench research documentation from execution through final analysis so a
+  completed confirmatory study can be aggregated and verified without notebooks.
+
 ## [0.7.0] — 2026-07-27
 
 ### Added
