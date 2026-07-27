@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SkeinRank/claim-plane/experiments/cooperbench/schemas/run-manifest.schema.json",
+  "title": "Claim Plane CooperBench Run Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run",
+    "created_at_utc",
+    "claim_plane_version",
+    "study_claim_plane_version",
+    "python_version",
+    "platform",
+    "machine",
+    "git_commit",
+    "git_dirty",
+    "command",
+    "environment_keys"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["study_id", "study_fingerprint", "coder_seed", "shard", "run_id"],
+      "properties": {
+        "study_id": {"type": "string", "minLength": 1},
+        "study_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "coder_seed": {"type": "integer"},
+        "run_id": {"type": "string", "minLength": 1},
+        "shard": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["index", "count"],
+          "properties": {
+            "index": {"type": "integer", "minimum": 1},
+            "count": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "created_at_utc": {"type": "string", "minLength": 1},
+    "claim_plane_version": {"type": "string", "minLength": 1},
+    "study_claim_plane_version": {"type": "string", "minLength": 1},
+    "python_version": {"type": "string", "minLength": 1},
+    "platform": {"type": "string", "minLength": 1},
+    "machine": {"type": "string"},
+    "git_commit": {"type": ["string", "null"]},
+    "git_dirty": {"type": ["boolean", "null"]},
+    "command": {"type": "array", "items": {"type": "string"}},
+    "environment_keys": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  }
+}

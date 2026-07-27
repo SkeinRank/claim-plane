@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/SkeinRank/claim-plane/experiments/cooperbench/schemas/checkpoint.schema.json",
+  "title": "Claim Plane CooperBench Checkpoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "state",
+    "completed_units",
+    "failed_units",
+    "updated_at_utc"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "state": {"enum": ["initialized", "running", "completed", "failed"]},
+    "completed_units": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "failed_units": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "updated_at_utc": {"type": "string", "minLength": 1}
+  }
+}

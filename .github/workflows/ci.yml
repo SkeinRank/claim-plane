@@ -22,12 +22,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev,signing]"
-      - run: ruff check src tests benchmark
-      - run: ruff format --check src tests benchmark
-      - run: mypy src/claim_plane
+      - run: ruff check src tests benchmark experiments
+      - run: ruff format --check src tests benchmark experiments
+      - run: mypy src/claim_plane experiments/cooperbench
       - run: pytest -q
       - run: python benchmark/run_protocol_suite.py
-      - run: python -m compileall -q src benchmark
+      - run: python -m compileall -q src benchmark experiments
 
   package:
     runs-on: ubuntu-latest

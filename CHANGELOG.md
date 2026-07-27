@@ -8,6 +8,24 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-27
+
+### Added
+
+- Add a model-free CooperBench research foundation with typed study declarations,
+  deterministic study fingerprints, stable run identities, and reproducible sharding.
+- Add canonical research artifact directories, non-secret run provenance manifests, and
+  atomic resumable checkpoints for long-running evaluations.
+- Add machine-readable schemas for study declarations, run manifests, checkpoints, and
+  per-arm result envelopes.
+- Add a repository-local CooperBench utility for validating study declarations, creating
+  run directories, and inspecting checkpoints without installing model-provider clients.
+
+### Changed
+
+- Extend repository quality checks to lint, format-check, type-check, and compile the
+  CooperBench research infrastructure alongside the runtime package.
+
 ## [0.2.1] — 2026-07-17
 
 ### Fixed

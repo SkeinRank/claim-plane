@@ -87,3 +87,21 @@ Each adapter should print a final one-line JSON object, for example:
 ```
 
 The harness is measurement infrastructure, not benchmark evidence by itself. Real claims still require controlled tasks, repeated runs, and identical model/tool conditions across arms.
+## Reproducible CooperBench study infrastructure
+
+Research code that depends on benchmark datasets or model providers lives under
+`experiments/cooperbench/`, outside the installable runtime package. The shared layer is
+model-free and defines frozen study inputs, deterministic fingerprints, stable run and
+shard identities, non-secret provenance manifests, and atomic checkpoints.
+
+A study declaration can be validated before any paid model call:
+
+```bash
+python -m experiments.cooperbench validate path/to/study.json
+```
+
+Long executions should initialize their artifact directory before work begins and resume
+from the durable checkpoint rather than relying on notebook state. Study-specific planner
+code and task execution are added above this foundation and must preserve identical inputs
+across compared arms.
+
