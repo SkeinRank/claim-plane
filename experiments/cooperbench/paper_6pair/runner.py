@@ -287,6 +287,13 @@ def _partial_cost(
     }
 
 
+def _task_inputs(pair: dict[str, Any]) -> tuple[TaskInfo, Path, Path, str]:
+    task = tasks[(str(pair["repo"]), int(pair["tid"]))]
+    feature_a = task.features[int(pair["a"])]
+    feature_b = task.features[int(pair["b"])]
+    return task, feature_a, feature_b, task.base_commit
+
+
 def run_pair(
     pair,
     arm,
@@ -297,23 +304,13 @@ def run_pair(
 ):
     assert arm in ARMS
 
-    task = tasks[
-        (
-            pair["repo"],
-            pair["tid"],
-        )
-    ]
+    task, feature_a, feature_b, base = _task_inputs(pair)
+    task_dir = task.directory
 
     repo = get_repo(
-        task["url"],
-        task["base"],
+        task.clone_url,
+        base,
     )
-
-    feature_a = task["features"][pair["a"]]
-
-    feature_b = task["features"][pair["b"]]
-
-    base = task["base"]
 
     pair_id = f"{pair['repo']}/task{pair['tid']}/feature{pair['a']}+feature{pair['b']}"
 
@@ -762,7 +759,7 @@ def run_pair(
                     "A",
                 ),
                 base_commit=base,
-                task_dir=task["dir"],
+                task_dir=task_dir,
                 feature_dir=feature_a,
                 seed=seed_a,
                 message="feature A",
@@ -777,7 +774,7 @@ def run_pair(
                     "B",
                 ),
                 base_commit=result_a["head"],
-                task_dir=task["dir"],
+                task_dir=task_dir,
                 feature_dir=feature_b,
                 seed=seed_b,
                 message="feature B",
@@ -800,7 +797,7 @@ def run_pair(
                     "A",
                 ),
                 base_commit=base,
-                task_dir=task["dir"],
+                task_dir=task_dir,
                 feature_dir=feature_a,
                 seed=seed_a,
                 message="feature A",
@@ -815,7 +812,7 @@ def run_pair(
                     "B",
                 ),
                 base_commit=base,
-                task_dir=task["dir"],
+                task_dir=task_dir,
                 feature_dir=feature_b,
                 seed=seed_b,
                 message="feature B",
@@ -864,7 +861,7 @@ def run_pair(
                         "A",
                     ),
                     base_commit=base,
-                    task_dir=task["dir"],
+                    task_dir=task_dir,
                     feature_dir=feature_a,
                     seed=seed_a,
                     message="feature A",
@@ -890,7 +887,7 @@ def run_pair(
                         "B",
                     ),
                     base_commit=result_a["head"],
-                    task_dir=task["dir"],
+                    task_dir=task_dir,
                     feature_dir=feature_b,
                     seed=seed_b,
                     message="feature B",
@@ -934,7 +931,7 @@ def run_pair(
                         "A",
                     ),
                     base_commit=base,
-                    task_dir=task["dir"],
+                    task_dir=task_dir,
                     feature_dir=feature_a,
                     seed=seed_a,
                     message="feature A",
@@ -950,7 +947,7 @@ def run_pair(
                         "B",
                     ),
                     base_commit=base,
-                    task_dir=task["dir"],
+                    task_dir=task_dir,
                     feature_dir=feature_b,
                     seed=seed_b,
                     message="feature B",
@@ -992,7 +989,7 @@ def run_pair(
                         "A",
                     ),
                     base_commit=base,
-                    task_dir=task["dir"],
+                    task_dir=task_dir,
                     feature_dir=feature_a,
                     seed=seed_a,
                     message="feature A",
@@ -1019,7 +1016,7 @@ def run_pair(
                         "B",
                     ),
                     base_commit=result_a["head"],
-                    task_dir=task["dir"],
+                    task_dir=task_dir,
                     feature_dir=feature_b,
                     seed=seed_b,
                     message="feature B",
@@ -1066,7 +1063,7 @@ def run_pair(
                             "A0",
                         ),
                         base_commit=base,
-                        task_dir=task["dir"],
+                        task_dir=task_dir,
                         feature_dir=feature_a,
                         seed=seed_a,
                         message="feature A",
@@ -1109,7 +1106,7 @@ def run_pair(
                             "B1",
                         ),
                         base_commit=base,
-                        task_dir=task["dir"],
+                        task_dir=task_dir,
                         feature_dir=feature_b,
                         seed=seed_b,
                         message="feature B",
@@ -1135,7 +1132,7 @@ def run_pair(
                             "A1",
                         ),
                         base_commit=result_b["head"],
-                        task_dir=task["dir"],
+                        task_dir=task_dir,
                         feature_dir=feature_a,
                         seed=seed_a,
                         message="feature A",
@@ -1164,7 +1161,7 @@ def run_pair(
                                 "B0",
                             ),
                             base_commit=base,
-                            task_dir=task["dir"],
+                            task_dir=task_dir,
                             feature_dir=feature_b,
                             seed=seed_b,
                             message="feature B",
@@ -1208,7 +1205,7 @@ def run_pair(
                                 "B1",
                             ),
                             base_commit=result_a["head"],
-                            task_dir=task["dir"],
+                            task_dir=task_dir,
                             feature_dir=feature_b,
                             seed=seed_b,
                             message="feature B",
@@ -1393,7 +1390,7 @@ def run_pair(
                 record["tests_a_log"],
             ) = run_official_feature_test(
                 final_tree,
-                task["dir"],
+                task_dir,
                 feature_a,
             )
 
@@ -1402,7 +1399,7 @@ def run_pair(
                 record["tests_b_log"],
             ) = run_official_feature_test(
                 final_tree,
-                task["dir"],
+                task_dir,
                 feature_b,
             )
 

@@ -8,6 +8,15 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-07-27
+
+### Fixed
+
+- Use the typed CooperBench `TaskInfo` contract throughout the published six-pair
+  execution path instead of legacy notebook-style dictionary indexing.
+- Keep task directory, clone URL, base commit, and feature paths on one typed execution
+  path so gold sanity and paid study execution consume the same discovered inputs.
+
 ## [0.9.1] — 2026-07-27
 
 ### Fixed

@@ -209,3 +209,34 @@ def test_benchmark_provenance_is_non_secret_and_checkout_tolerant(
     assert payload["cooperbench_git_dirty"] is None
     assert payload["frozen_pair_count"] == 6
     assert len(str(payload["frozen_dataset_sha256"])) == 64
+
+
+def test_paper_runner_resolves_typed_task_info(monkeypatch, tmp_path: Path) -> None:
+    from experiments.cooperbench.paper_6pair import runner
+    from experiments.cooperbench.paper_6pair.dataset import TaskInfo
+
+    task_dir = tmp_path / "pallets_jinja_task" / "task1465"
+    feature_a = task_dir / "feature1"
+    feature_b = task_dir / "feature8"
+    feature_a.mkdir(parents=True)
+    feature_b.mkdir(parents=True)
+    task = TaskInfo(
+        repo="pallets_jinja_task",
+        task_id=1465,
+        directory=task_dir,
+        clone_url="https://example.invalid/pallets/jinja.git",
+        base_commit="abc123",
+        features={1: feature_a, 8: feature_b},
+    )
+    monkeypatch.setattr(runner, "tasks", {(task.repo, task.task_id): task})
+
+    resolved, resolved_a, resolved_b, base = runner._task_inputs(
+        {"repo": task.repo, "tid": task.task_id, "a": 1, "b": 8}
+    )
+
+    assert resolved is task
+    assert resolved.directory == task_dir
+    assert resolved.clone_url == "https://example.invalid/pallets/jinja.git"
+    assert resolved_a == feature_a
+    assert resolved_b == feature_b
+    assert base == "abc123"

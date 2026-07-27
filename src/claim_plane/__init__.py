@@ -70,7 +70,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 
 __all__ = [
     "AcceptanceResult",
