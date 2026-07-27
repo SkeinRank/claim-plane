@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.4.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.5.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
 
@@ -597,6 +597,7 @@ schemas/           intents, manifests, integration runs, and observation traces
 docs/              architecture, protocol, execution, storage, integration, benchmark, releasing
 benchmark/         deterministic protocol suite and adapter-driven A/B/C harness
 experiments/       reproducible research studies and model-specific evaluation code
+  cooperbench/      frozen Planner v1 and the published six-pair reproduction runner
 ```
 
 ## Current limits
@@ -614,7 +615,7 @@ Claim Plane remains an alpha coordination kernel.
 - The default `tree` sandbox detects repository mutations but does not isolate network or the host filesystem; strict OS isolation requires an available supported backend.
 - HMAC evidence provides shared-secret authenticity, not public-key identity or hardware attestation.
 - The router is deterministic and heuristic, not learned.
-- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The repository now includes model-free CooperBench study infrastructure and the frozen Planner v1 research policy, while the published six-pair runner and larger confirmatory runner remain separate research layers.
+- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The repository includes the frozen Planner v1 policy and an executable reproduction of the published six-pair CooperBench mechanism check. The larger confirmatory study remains a separate frozen protocol until its runner and result set are released.
 
 The comparative evaluation requirements are documented in [docs/BENCHMARK.md](docs/BENCHMARK.md), and the study infrastructure is described in [experiments/cooperbench/README.md](experiments/cooperbench/README.md).
 

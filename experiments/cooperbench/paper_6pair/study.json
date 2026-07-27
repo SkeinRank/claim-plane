@@ -1,0 +1,71 @@
+{
+  "arms": [
+    "parallel",
+    "claim-plane-static",
+    "claim-plane-dynamic",
+    "always-serial"
+  ],
+  "claim_plane_version": "0.2.1",
+  "coder_model": "deepseek/deepseek-v4-flash",
+  "coder_seeds": [
+    101
+  ],
+  "description": "Six-pair CooperBench mechanism check reported in Section 8 of the Claim Plane preprint.",
+  "metadata": {
+    "api_calls_physically_sequential": true,
+    "benchmark_notebook": "V8.5",
+    "conflict_share": 0.5,
+    "logical_parallelism": true,
+    "oracle_localized_initial_context": true,
+    "paper_section": "8"
+  },
+  "pair_selection_seed": 42,
+  "pairs": [
+    {
+      "feature_a": 1,
+      "feature_b": 8,
+      "gold_conflict": true,
+      "repo": "pallets_jinja_task",
+      "task_id": 1465
+    },
+    {
+      "feature_a": 1,
+      "feature_b": 4,
+      "gold_conflict": false,
+      "repo": "pallets_jinja_task",
+      "task_id": 1559
+    },
+    {
+      "feature_a": 1,
+      "feature_b": 7,
+      "gold_conflict": false,
+      "repo": "pallets_jinja_task",
+      "task_id": 1621
+    },
+    {
+      "feature_a": 1,
+      "feature_b": 3,
+      "gold_conflict": true,
+      "repo": "pallets_click_task",
+      "task_id": 2800
+    },
+    {
+      "feature_a": 6,
+      "feature_b": 8,
+      "gold_conflict": false,
+      "repo": "pallets_jinja_task",
+      "task_id": 1559
+    },
+    {
+      "feature_a": 5,
+      "feature_b": 7,
+      "gold_conflict": true,
+      "repo": "samuelcolvin_dirty_equals_task",
+      "task_id": 43
+    }
+  ],
+  "planner_model": "deepseek/deepseek-v4-pro",
+  "planner_policy_version": "planner-v1",
+  "schema_version": 1,
+  "study_id": "claim-plane-paper-6pair"
+}

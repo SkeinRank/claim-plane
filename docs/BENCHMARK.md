@@ -105,3 +105,43 @@ from the durable checkpoint rather than relying on notebook state. Study-specifi
 code and task execution are added above this foundation and must preserve identical inputs
 across compared arms.
 
+### Published six-pair CooperBench mechanism check
+
+The Section 8 mechanism check is executable without Jupyter. Its exact pair order,
+conflict labels, models, coder seed, four execution arms, Planner v1 policy, and execution
+limits are frozen under `experiments/cooperbench/paper_6pair/`.
+
+Validate a local CooperBench checkout before any paid model call:
+
+```bash
+python -m experiments.cooperbench paper6 prepare \
+  --cooperbench /path/to/CooperBench
+```
+
+Inspect the frozen protocol and published reference counts:
+
+```bash
+python -m experiments.cooperbench paper6 info
+```
+
+Run or resume the study:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench reproduce-paper \
+  --cooperbench /path/to/CooperBench
+```
+
+The static and dynamic Claim Plane arms consume the same persisted Planner v1 output for
+each feature pair, including after process resume. The runner performs CooperBench gold
+sanity checks before live model execution and persists declarations, plans, traces,
+per-arm results, aggregate summaries, provider accounting, and a comparison against the
+published mechanism counts.
+
+The study declaration records Claim Plane `0.2.1`, the version used by the published run.
+The run manifest separately records the installed package version used for a reproduction,
+so historical protocol identity is not confused with the current implementation version.
+The disclosed oracle-localized context condition is retained: gold patch locations select
+current-source regions, but gold implementation text is never provided to the planner or
+coder. API calls are physically sequential; the parallel arm is a logical execution
+topology in which both workers begin from the same immutable base.
+

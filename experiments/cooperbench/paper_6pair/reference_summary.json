@@ -1,0 +1,34 @@
+{
+  "always-serial": {
+    "initial_serialized": 6,
+    "integration_success": 6,
+    "n": 6,
+    "pair_pass": 4,
+    "promotions": 0,
+    "undeclared_blocks": 0
+  },
+  "claim-plane-dynamic": {
+    "initial_serialized": 3,
+    "integration_success": 4,
+    "n": 6,
+    "pair_pass": 3,
+    "promotions": 7,
+    "undeclared_blocks": 2
+  },
+  "claim-plane-static": {
+    "initial_serialized": 6,
+    "integration_success": 6,
+    "n": 6,
+    "pair_pass": 6,
+    "promotions": 0,
+    "undeclared_blocks": 0
+  },
+  "parallel": {
+    "initial_serialized": 0,
+    "integration_success": 3,
+    "n": 6,
+    "pair_pass": 2,
+    "promotions": 0,
+    "undeclared_blocks": 0
+  }
+}

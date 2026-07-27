@@ -195,6 +195,112 @@ def _add_planner_commands(sub: Any) -> None:
     run.set_defaults(func=cmd_planner_run)
 
 
+def _paper_paths(args: argparse.Namespace):
+    from .paper_6pair.config import PaperPaths
+
+    return PaperPaths.from_values(
+        args.cooperbench,
+        artifact_root=args.artifacts,
+        repo_cache=args.repo_cache,
+        workspace_root=args.workspace,
+    )
+
+
+def cmd_paper_info(_args: argparse.Namespace) -> int:
+    from .paper_6pair.config import PAPER_STUDY, REFERENCE_SUMMARY
+
+    _print_json(
+        {
+            "study": PAPER_STUDY.to_dict(),
+            "published_mechanism_counts": REFERENCE_SUMMARY,
+        }
+    )
+    return 0
+
+
+def cmd_paper_prepare(args: argparse.Namespace) -> int:
+    from .paper_6pair.dataset import validate_frozen_pairs, verify_pair_labels
+
+    paths = _paper_paths(args)
+    tasks = validate_frozen_pairs(paths.dataset)
+    verify_pair_labels(paths.dataset)
+    _print_json(
+        {
+            "ready": True,
+            "cooperbench": str(paths.cooperbench),
+            "dataset": str(paths.dataset),
+            "compatible_tasks": len(tasks),
+            "artifact_root": str(paths.artifact_root),
+            "repo_cache": str(paths.repo_cache),
+            "workspace": str(paths.workspace_root),
+        }
+    )
+    return 0
+
+
+def cmd_reproduce_paper(args: argparse.Namespace) -> int:
+    from .paper_6pair.runner import run_paper_study
+
+    result = run_paper_study(
+        _paper_paths(args),
+        repo_root=args.repo,
+        resume=not args.no_resume,
+        skip_gold_sanity=args.skip_gold_sanity,
+    )
+    _print_json(result)
+    return 0
+
+
+def _add_paper_commands(sub: Any) -> None:
+    paper = sub.add_parser(
+        "paper6",
+        help="Inspect or prepare the published six-pair CooperBench study.",
+    )
+    paper_sub = paper.add_subparsers(dest="paper_command", required=True)
+
+    info = paper_sub.add_parser(
+        "info",
+        help="Print the frozen study declaration and published mechanism counts.",
+    )
+    info.set_defaults(func=cmd_paper_info)
+
+    prepare = paper_sub.add_parser(
+        "prepare",
+        help="Validate a local CooperBench checkout against the six frozen pairs.",
+    )
+    _add_paper_paths(prepare)
+    prepare.set_defaults(func=cmd_paper_prepare)
+
+    reproduce = sub.add_parser(
+        "reproduce-paper",
+        help="Run the 24 arm executions reported in the published six-pair study.",
+    )
+    _add_paper_paths(reproduce)
+    reproduce.add_argument("--repo", default=".")
+    reproduce.add_argument(
+        "--skip-gold-sanity",
+        action="store_true",
+        help="Skip CooperBench gold-feature sanity checks before model calls.",
+    )
+    reproduce.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Refuse to reuse a run that already contains completed units.",
+    )
+    reproduce.set_defaults(func=cmd_reproduce_paper)
+
+
+def _add_paper_paths(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--cooperbench",
+        required=True,
+        help="Path to a CooperBench checkout containing dataset/.",
+    )
+    parser.add_argument("--artifacts", default=".claim-plane/experiments")
+    parser.add_argument("--repo-cache", default=".claim-plane/cooperbench/repos")
+    parser.add_argument("--workspace", default=".claim-plane/cooperbench/worktrees")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m experiments.cooperbench",
@@ -225,6 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(func=cmd_status)
 
     _add_planner_commands(sub)
+    _add_paper_commands(sub)
     return parser
 
 

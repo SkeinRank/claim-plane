@@ -8,6 +8,27 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-27
+
+### Added
+
+- Add a CLI-oriented reproduction of the published six-pair CooperBench mechanism check,
+  including the exact frozen pair order, conflict labels, coder seed, models, four arms,
+  and execution budgets used by the study.
+- Add the research-only coding-agent executor, Dynamic Scope mutation controller, frozen
+  scope/gate helpers, CooperBench dataset preparation, and provider accounting needed to
+  execute the published protocol without Jupyter.
+- Persist one shared Planner v1 output per feature pair so static and dynamic Claim Plane
+  consume the same declaration across normal and resumed runs.
+- Add gold-feature sanity checks, durable per-unit results and traces, aggregate JSON/CSV
+  summaries, and comparison against the mechanism counts reported in the paper.
+
+### Changed
+
+- Document the executable paper study, its oracle-localized context condition, logical
+  parallel topology, resume semantics, and the distinction between the historical study
+  version and the installed Claim Plane version used for a reproduction.
+
 ## [0.4.0] — 2026-07-27
 
 ### Added

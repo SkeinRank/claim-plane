@@ -8,7 +8,7 @@ The experiment code follows three rules:
 2. Run artifacts use a stable directory layout with atomic checkpoints for resume.
 3. Secrets are never written into study declarations or run manifests.
 
-The shared foundation is model-free. Planner v1 is preserved as a separate research module; coding-agent execution, the published six-pair study, and the larger confirmatory study are layered on top of these primitives.
+The shared foundation is model-free. Planner v1 is preserved as a separate research module. The published six-pair study is executable from this directory; the larger confirmatory study remains a separate frozen protocol.
 
 ## Study declaration
 
@@ -69,6 +69,52 @@ the current repository contents rather than the gold implementation. The calibra
 step can only select bounded candidates produced by deterministic repository analysis;
 it cannot invent additional paths or ranges.
 
+## Published six-pair study
+
+`paper_6pair/` contains the CLI-oriented reproduction of the mechanism check reported
+in Section 8 of the Claim Plane preprint. The pair order, conflict labels, models,
+seeds, execution limits, four arms, planner policy, and published mechanism counts
+are checked into the repository. The coding-agent executor is extracted from the
+V8.5 research harness; Jupyter is not required.
+
+Validate that a local CooperBench checkout contains the exact frozen inputs without
+making any model call:
+
+```bash
+python -m experiments.cooperbench paper6 prepare \
+  --cooperbench /path/to/CooperBench
+```
+
+Inspect the frozen study and the mechanism counts reported in the paper:
+
+```bash
+python -m experiments.cooperbench paper6 info
+```
+
+Run the complete study:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench reproduce-paper \
+  --cooperbench /path/to/CooperBench
+```
+
+The command performs CooperBench gold-feature sanity checks before paid model calls,
+then executes the six frozen pairs under `parallel`, `claim-plane-static`,
+`claim-plane-dynamic`, and `always-serial`. Static and Dynamic Claim Plane reuse the
+exact same persisted Planner v1 outputs, including across resumed processes.
+
+Outputs are written under the canonical artifact tree. In addition to per-unit results
+and full agent traces, the completed run contains `results.json`, `summary.json`,
+`summary.csv`, provider accounting, and `reference_comparison.json`. Live model APIs
+may change behavior over time even with frozen seeds, so the published counts are a
+regression reference rather than a promise of byte-identical future generations.
+
+The original study used oracle-localized initial context: CooperBench gold patches
+identify relevant current-source regions, while neither the gold implementation nor
+gold replacement text is shown to the planner or coder. API calls are physically
+sequential; the parallel arm represents logical topology in which both workers start
+from the same immutable base.
+
 ## Artifact layout
 
 ```text
@@ -92,4 +138,4 @@ it cannot invent additional paths or ranges.
 
 ## Scope
 
-The shared study foundation does not call an LLM, download CooperBench, select pairs, or execute repository tasks. Live model access exists only under `planner_v1`, and the runtime package remains model-agnostic. Coding-agent execution and complete study runners remain study-specific so the published and confirmatory protocols can be reviewed independently.
+The shared study foundation does not call an LLM or download CooperBench. Live model access exists only in research modules, and the runtime package remains model-agnostic. The six-pair runner is intentionally study-specific so its published protocol can be reviewed independently from the future confirmatory study.
