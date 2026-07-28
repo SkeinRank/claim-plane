@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "claim-plane"
-version = "0.9.2"
+version = "0.9.3"
 description = "Semantic concurrency control and continuous integration for parallel coding agents."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,7 +45,7 @@ signing = [
 ]
 dev = [
   "pytest>=8,<10",
-  "ruff>=0.6,<1.0",
+  "ruff==0.15.21",
   "mypy>=1.10,<2.0",
   "pre-commit>=3.7,<5.0"
 ]

@@ -8,6 +8,16 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-07-28
+
+### Changed
+
+- Pin Ruff to `0.15.21` for deterministic lint and formatting behavior across local development, pre-commit, and CI.
+- Make the existing `scripts/check.sh` the canonical repository quality gate used by GitHub Actions on Python 3.10–3.13.
+- Run pre-commit Ruff checks repository-wide instead of limiting them to files staged in the current commit.
+- Report the commit, Python version, and Ruff version at the start of the quality gate so CI environment drift is immediately visible.
+- Extend the quality gate to cover linting, formatting, typing, shell syntax, research environment validation, bytecode compilation, tests, and the protocol suite in one command.
+
 ## [0.9.2] — 2026-07-27
 
 ### Fixed

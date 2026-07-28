@@ -14,14 +14,23 @@ pre-commit install
 ./scripts/check.sh
 ```
 
-The pre-commit hooks run Ruff lint fixes and formatting on staged Python files before
-each commit. To validate the whole repository manually, run:
+The pre-commit hooks run Ruff lint fixes and formatting across the repository before
+each commit, so unrelated stale Python files cannot bypass the local gate. They use the
+Ruff executable from the active development environment and verify the exact pinned
+version before running, so commits do not create a separate pre-commit environment or
+require package-index access after development dependencies are installed. CI installs
+the same pinned development dependencies and runs the same repository-wide gate.
+
+The canonical repository-wide validation command is:
 
 ```bash
-pre-commit run --all-files
+./scripts/check.sh
 ```
 
-If Ruff modifies a file, stage the change and commit again.
+It runs the same quality gate used by GitHub Actions: linting, formatting, typing, shell
+syntax checks, research-environment validation, bytecode compilation, tests, and the
+protocol suite. If Ruff modifies a file during pre-commit, stage the change and commit
+again.
 
 Install the optional semantic integration from PyPI with:
 

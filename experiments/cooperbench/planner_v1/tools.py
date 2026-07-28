@@ -11,6 +11,7 @@ import copy
 import json
 from pathlib import Path
 import re
+from typing import Any
 
 from claim_plane import ScopeCommitment
 
@@ -87,7 +88,7 @@ def gold_files(feature_dir):
 
 def gold_preimage_ranges(feature_dir):
     patch = (feature_dir / "feature.patch").read_text(errors="replace")
-    ranges = {}
+    ranges: dict[str, list[tuple[int, int]]] = {}
     current_file = None
     for line in patch.splitlines():
         if line.startswith("+++ b/"):
@@ -138,7 +139,7 @@ def read_context(tree, feature_dir):
             windows = [(0, min(len(lines), TARGET_CONTEXT_RADIUS * 2))]
 
         windows.sort()
-        merged = []
+        merged: list[list[int]] = []
         for left, right in windows:
             if not merged or left > merged[-1][1]:
                 merged.append([left, right])
@@ -669,8 +670,8 @@ def _calibration_v3_alias_blocks(
     if not assignment_nodes:
         return []
 
-    blocks = []
-    current = []
+    blocks: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
 
     for item in assignment_nodes:
         if not current:
@@ -751,7 +752,7 @@ def build_uncertainty_candidates_v2(
     primary_plan,
 ):
     """Build bounded structural candidates without granting write authority."""
-    items_by_path = {}
+    items_by_path: dict[str, list[tuple[int, dict[str, Any]]]] = {}
 
     for item_index, item in enumerate(
         primary_plan.get(
@@ -1719,7 +1720,7 @@ def apply_uncertainty_calibration_v2(
     }
 
     added = []
-    selected_kinds = {}
+    selected_kinds: dict[str, int] = {}
 
     for candidate_id in selected_ids:
         candidate = candidate_by_id[

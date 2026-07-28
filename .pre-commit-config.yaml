@@ -2,19 +2,15 @@ repos:
   - repo: local
     hooks:
       - id: ruff-check
-        name: ruff check (auto-fix)
-        entry: ruff check --fix
-        language: python
-        additional_dependencies:
-          - "ruff>=0.6,<1.0"
-        types_or: [python, pyi]
-        files: ^(src|tests|benchmark|experiments)/
+        name: ruff check (repository-wide, auto-fix)
+        entry: ./scripts/ruff-tool.sh check --fix src tests benchmark experiments
+        language: system
+        pass_filenames: false
+        always_run: true
 
       - id: ruff-format
-        name: ruff format
-        entry: ruff format
-        language: python
-        additional_dependencies:
-          - "ruff>=0.6,<1.0"
-        types_or: [python, pyi]
-        files: ^(src|tests|benchmark|experiments)/
+        name: ruff format (repository-wide)
+        entry: ./scripts/ruff-tool.sh format src tests benchmark experiments
+        language: system
+        pass_filenames: false
+        always_run: true

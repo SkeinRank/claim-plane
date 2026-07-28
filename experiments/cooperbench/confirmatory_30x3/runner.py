@@ -445,12 +445,12 @@ def run_shard(
     for pair in shard_pairs:
         for arm_item in study.arms:
             key = (pair.key, arm_item.value)
-            row = result_index.get(key)
-            if row is None:
+            completed_row = result_index.get(key)
+            if completed_row is None:
                 raise RuntimeError(
                     f"missing completed result for {pair.key}/{arm_item.value}"
                 )
-            ordered.append(row)
+            ordered.append(completed_row)
 
     _atomic_json(layout.run_dir / "results.json", ordered)
     _atomic_json(traces_file, AGENT_TRACE_LOGS)
