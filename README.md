@@ -29,6 +29,19 @@ Clean integration or targeted repair
 
 Claim Plane does not replace Git, an IDE, a planner, or a coding agent. It is a model-agnostic integration layer that can sit between a planner and Cursor, Codex, Claude Code, Copilot, OpenHands, or internal agents.
 
+## Research paper
+
+**Claim Plane: Enforceable Change Intents and Dynamic Scope for Parallel Coding Agents**  
+Maxim Nikolaev · Software Engineering (`cs.SE`) · 2026
+
+- [arXiv abstract](https://arxiv.org/abs/2607.21909)
+- [PDF](https://arxiv.org/pdf/2607.21909)
+- [DOI: 10.48550/arXiv.2607.21909](https://doi.org/10.48550/arXiv.2607.21909)
+- [Paper metadata and citation](papers/claim-plane-2026/README.md)
+- [Published six-pair CooperBench reproduction](experiments/cooperbench/paper_6pair/)
+
+Repository-level software citation metadata is available in [`CITATION.cff`](CITATION.cff), and the paper-specific BibTeX entry is available in [`papers/claim-plane-2026/citation.bib`](papers/claim-plane-2026/citation.bib).
+
 ## Current capabilities
 
 - atomic claim and intent admission through SQLite transactions;
@@ -597,6 +610,7 @@ examples/          runnable overlapping-task scenario
 schemas/           intents, manifests, integration runs, and observation traces
 docs/              architecture, protocol, execution, storage, integration, benchmark, releasing
 benchmark/         deterministic protocol suite and adapter-driven A/B/C harness
+papers/            publication index, citation metadata, and paper-to-reproduction links
 experiments/       reproducible research studies and model-specific evaluation code
   cooperbench/      frozen Planner v1, paper reproduction, confirmatory runner, analysis, and Linux research image
 ```

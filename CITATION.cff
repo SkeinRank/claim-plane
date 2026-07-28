@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: >-
+  If you use Claim Plane in research, please cite the software. The related
+  research paper is listed in the references below.
+title: Claim Plane
+type: software
+version: 0.9.3
+date-released: 2026-07-28
+authors:
+  - family-names: Nikolaev
+    given-names: Maxim
+repository-code: https://github.com/SkeinRank/claim-plane
+url: https://github.com/SkeinRank/claim-plane
+license: Apache-2.0
+abstract: >-
+  Claim Plane is a model-agnostic coordination and verification layer for
+  parallel coding agents, providing enforceable change intents, deterministic
+  admission, dynamic scope control, and reproducible integration evidence.
+keywords:
+  - ai-agents
+  - multi-agent
+  - software-engineering
+  - concurrency-control
+  - code-generation
+references:
+  - type: article
+    title: "Claim Plane: Enforceable Change Intents and Dynamic Scope for Parallel Coding Agents"
+    authors:
+      - family-names: Nikolaev
+        given-names: Maxim
+    year: 2026
+    identifiers:
+      - type: doi
+        value: 10.48550/arXiv.2607.21909
+      - type: url
+        value: https://arxiv.org/abs/2607.21909

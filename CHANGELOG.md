@@ -10,6 +10,11 @@ not part of the public release history.
 
 ## [0.9.3] — 2026-07-28
 
+### Added
+
+- Add repository-level `CITATION.cff` metadata and a permanent `papers/` index for research publications.
+- Link the 2026 Claim Plane arXiv preprint to its paper-specific BibTeX citation and executable six-pair CooperBench reproduction.
+
 ### Changed
 
 - Pin Ruff to `0.15.21` for deterministic lint and formatting behavior across local development, pre-commit, and CI.

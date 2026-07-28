@@ -54,6 +54,7 @@ dev = [
 Homepage = "https://github.com/SkeinRank/claim-plane"
 Repository = "https://github.com/SkeinRank/claim-plane"
 Issues = "https://github.com/SkeinRank/claim-plane/issues"
+"Research Paper" = "https://arxiv.org/abs/2607.21909"
 
 [project.scripts]
 claim-plane = "claim_plane.cli:main"
