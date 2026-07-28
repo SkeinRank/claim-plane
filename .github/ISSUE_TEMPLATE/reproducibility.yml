@@ -1,0 +1,102 @@
+name: Reproducibility problem
+description: Report a failure to reproduce a published or frozen Claim Plane experiment.
+title: "[Reproducibility]: "
+labels:
+  - "type: research"
+  - "area: cooperbench"
+  - "status: needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for failures to reproduce a published/frozen experiment. General product bugs should use the Bug report form.
+
+  - type: input
+    id: study
+    attributes:
+      label: Study
+      description: Which frozen study or reproduction path are you running?
+      placeholder: "paper_6pair, confirmatory_30x3, ..."
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Claim Plane revision
+      description: Release tag or exact commit SHA.
+      placeholder: "v0.9.3 or abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Research environment
+      description: Docker image/tag, OS/architecture, and benchmark revision when known.
+      placeholder: "claim-plane-cooperbench:0.9.2, arm64 macOS host, CooperBench abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: seed
+    attributes:
+      label: Seed and shard
+      description: Coder seed and shard identifier if applicable.
+      placeholder: "seed 101, shard 1/9"
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Failure phase
+      options:
+        - environment / preparation
+        - gold sanity
+        - planning / frozen plans
+        - execution
+        - official tests
+        - aggregation
+        - integrity / provenance verification
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command that produced the problem. Remove secrets before submitting.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Reference result or expected protocol behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include the concise error, divergent metric, or failed invariant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Artifact references
+      description: Paths or links to manifests, checkpoint, traces, summary, provider stats, or comparison output. Do not include credentials or private data.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I used the frozen study configuration rather than changing pairs, seeds, arms, or planner inputs.
+          required: true
+        - label: I removed API keys, credentials, and private data from all pasted output.
+          required: true

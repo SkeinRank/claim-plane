@@ -1,0 +1,67 @@
+name: Feature request
+description: Propose a concrete, actionable capability for Claim Plane.
+title: "[Feature]: "
+labels:
+  - "type: feature"
+  - "status: needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature issues are for concrete work. Broader design exploration should begin in Discussions and move here once the proposal is actionable.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Claim Plane would own this capability?
+      options:
+        - core
+        - broker
+        - verification
+        - cli
+        - cooperbench
+        - tooling
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What concrete problem or limitation should this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+      description: Describe the observable behavior and boundaries, not only an implementation idea.
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariants and failure behavior
+      description: Which Claim Plane guarantees must remain true? How should the system fail closed?
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What would make this issue objectively complete?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions for related proposals.
+          required: true

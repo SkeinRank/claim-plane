@@ -12,6 +12,8 @@ not part of the public release history.
 
 ### Added
 
+- Add structured GitHub Issue Forms for bugs, features, research tasks, and reproducibility problems, with a Discussions-first path for questions and exploratory work.
+- Add an issue-intake workflow that converts the required Area field into the repository's `area:*` taxonomy and an idempotent GitHub CLI script for synchronizing public labels.
 - Add repository-level `CITATION.cff` metadata and a permanent `papers/` index for research publications.
 - Link the 2026 Claim Plane arXiv preprint to its paper-specific BibTeX citation and executable six-pair CooperBench reproduction.
 

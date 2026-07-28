@@ -1,0 +1,88 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Claim Plane.
+title: "[Bug]: "
+labels:
+  - "type: bug"
+  - "status: needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Claim Plane. Please include enough detail for another person to reproduce the problem.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Claim Plane is affected?
+      options:
+        - core
+        - broker
+        - verification
+        - cli
+        - cooperbench
+        - tooling
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Claim Plane version
+      description: Package version, release tag, or commit SHA.
+      placeholder: "0.9.3 or v0.9.3 / abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, installation method, and relevant runtime details.
+      placeholder: "macOS 15, Python 3.12, pip install claim-plane"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest sequence that reproduces the behavior.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include concise logs or trace references when useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Relevant artifacts
+      description: Add manifests, traces, minimal examples, or links to public artifacts. Do not include credentials or private data.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions for the same problem.
+          required: true
+        - label: I removed credentials, tokens, private keys, and sensitive data from logs and artifacts.
+          required: true

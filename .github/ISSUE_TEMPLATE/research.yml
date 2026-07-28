@@ -1,0 +1,65 @@
+name: Research task
+description: Propose an actionable experiment, evaluation, or research-method change.
+title: "[Research]: "
+labels:
+  - "type: research"
+  - "status: needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when the research question is concrete enough to track as work. Open-ended findings and exploratory discussion belong in Discussions → Research & Experiments.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which project area owns the research work?
+      options:
+        - cooperbench
+        - core
+        - broker
+        - verification
+        - cli
+        - tooling
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question
+      description: State the question or hypothesis precisely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: protocol
+    attributes:
+      label: Proposed protocol
+      description: Describe datasets, models, arms, seeds, controls, metrics, and frozen inputs as applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Required evidence
+      description: Which artifacts and measurements must be retained for the result to be auditable?
+      placeholder: "Manifests, plans, traces, raw results, provider metadata, cost records, ..."
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Completion criteria
+      description: What result or artifact marks this research task complete?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: The proposal separates experimental code and assumptions from the deterministic Claim Plane core.
+          required: true

@@ -48,8 +48,21 @@ python -m pip install -e ".[semantic,signing,dev]"
   archives, or local benchmark results.
 - Run `./scripts/check.sh` before opening a pull request.
 
-## Design discussions
+## Issues and discussions
 
-Large protocol, storage, sandbox, or evidence changes should begin with a GitHub issue
-that states the invariant being added, the failure mode being prevented, and how the
-change will be tested.
+Use GitHub Discussions for questions, exploratory ideas, architecture discussion, research
+results, and proposals that are not yet actionable. Open an issue once there is concrete
+work to track. The issue chooser provides structured forms for bugs, features, research
+tasks, and reproducibility problems.
+
+Issue Forms apply type and triage labels automatically. The issue-intake workflow maps the
+required Area field to one `area:*` label from the repository taxonomy. Maintainers can
+synchronize the full label set with:
+
+```bash
+./scripts/setup-github-labels.sh
+```
+
+Large protocol, storage, sandbox, or evidence changes should state the invariant being
+added, the failure mode being prevented, and how the change will be tested before they
+move from discussion into implementation.

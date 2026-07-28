@@ -1,0 +1,72 @@
+name: Issue intake
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  classify-area:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply area label from Issue Form
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const body = context.payload.issue.body || "";
+            const allowed = new Set([
+              "core",
+              "broker",
+              "verification",
+              "cli",
+              "cooperbench",
+              "tooling",
+            ]);
+
+            const match = body.match(/(?:^|\n)### Area\s*\n+\s*([^\n]+)\s*(?:\n|$)/i);
+            if (!match) {
+              return;
+            }
+
+            const area = match[1].trim().toLowerCase();
+            if (!allowed.has(area)) {
+              core.warning(`Ignoring unsupported issue area: ${area}`);
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = context.issue.number;
+            const desired = `area: ${area}`;
+
+            const current = context.payload.issue.labels
+              .map((label) => typeof label === "string" ? label : label.name)
+              .filter(Boolean);
+            const stale = current.filter(
+              (label) => label.startsWith("area: ") && label !== desired,
+            );
+
+            for (const label of stale) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number,
+                  name: label,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            if (!current.includes(desired)) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number,
+                labels: [desired],
+              });
+            }

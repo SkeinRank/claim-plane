@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and design discussion
+    url: https://github.com/SkeinRank/claim-plane/discussions
+    about: Ask usage questions, explore ideas, and discuss architecture before opening actionable work.
+  - name: Research results and experiments
+    url: https://github.com/SkeinRank/claim-plane/discussions
+    about: Share reproduction results, benchmark findings, and exploratory research with the community.
