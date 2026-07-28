@@ -26,7 +26,17 @@ from experiments.cooperbench.confirmatory_30x3.config import (
     SHARD_SIZE,
     build_study,
 )
-from experiments.cooperbench.confirmatory_30x3.plans import pair_plan_seed
+from experiments.cooperbench.confirmatory_30x3.plans import (
+    SCHEMA_VERSION as PLAN_SCHEMA_VERSION,
+    pair_plan_seed,
+    planner_checkpoint_status,
+)
+from experiments.cooperbench.planner_v1 import (
+    PLANNER_MODEL,
+    PLANNER_POLICY_FINGERPRINT,
+    PLANNER_POLICY_VERSION,
+    plan_fingerprint,
+)
 from experiments.cooperbench.confirmatory_30x3.runner import contiguous_shard
 from experiments.cooperbench.confirmatory_30x3.selection import (
     freeze_gold_valid_pairs,
@@ -72,6 +82,54 @@ def test_planner_freeze_seed_is_stable_and_agent_specific() -> None:
     pair = _pairs(2)[0]
     assert pair_plan_seed(pair, "A") == pair_plan_seed(pair, "A")
     assert pair_plan_seed(pair, "A") != pair_plan_seed(pair, "B")
+
+
+def test_planner_checkpoint_status_reports_partial_feature_resume(
+    tmp_path: Path,
+) -> None:
+    pairs = tuple(
+        PairRef(
+            "pallets_jinja_task",
+            i,
+            1,
+            2,
+            True if i < 15 else False,
+        )
+        for i in range(30)
+    )
+    study = build_study(pairs)
+    pair = pairs[0]
+    plan = {"files": []}
+    bundle = {
+        "schema_version": PLAN_SCHEMA_VERSION,
+        "study_fingerprint": study_fingerprint(study),
+        "planner_policy_version": PLANNER_POLICY_VERSION,
+        "planner_policy_fingerprint": PLANNER_POLICY_FINGERPRINT,
+        "planner_model": PLANNER_MODEL,
+        "planner_freeze_seed": 1701,
+        "pairs": {
+            pair.key: {
+                "A": {
+                    "valid": True,
+                    "plan": plan,
+                    "logical_cost": 0.1,
+                    "logical_latency": 5.0,
+                    "confirmatory_plan_seed": pair_plan_seed(pair, "A"),
+                    "confirmatory_plan_fingerprint": plan_fingerprint(plan),
+                }
+            }
+        },
+    }
+    checkpoint = tmp_path / "frozen_plans.json"
+    _write_json(checkpoint, bundle)
+
+    status = planner_checkpoint_status(checkpoint, study)
+
+    assert status == {
+        "state": "in-progress",
+        "completed_units": 1,
+        "expected_units": 60,
+    }
 
 
 def test_contiguous_shards_match_v9_ten_pair_layout() -> None:
@@ -287,4 +345,131 @@ def test_confirmatory_analysis_verification_detects_tampering(tmp_path: Path) ->
     assert any(
         row["file"] == "arm_summary.json" and row["reason"] == "sha256_mismatch"
         for row in verified["mismatches"]
+    )
+
+
+def test_freeze_plans_persists_each_feature_and_resumes_after_interrupt(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from types import SimpleNamespace
+
+    from experiments.cooperbench.confirmatory_30x3 import plans as plans_module
+    from experiments.cooperbench.paper_6pair.dataset import TaskInfo
+
+    pairs = tuple(
+        PairRef(
+            "pallets_jinja_task",
+            i,
+            1,
+            2,
+            True if i < 15 else False,
+        )
+        for i in range(30)
+    )
+    study = build_study(pairs)
+    paths = ConfirmatoryPaths.from_values(
+        tmp_path / "cooperbench",
+        artifact_root=tmp_path / "artifacts",
+        repo_cache=tmp_path / "repos",
+        workspace_root=tmp_path / "worktrees",
+    )
+    tasks = {
+        (pair.repo, pair.task_id): TaskInfo(
+            repo=pair.repo,
+            task_id=pair.task_id,
+            directory=tmp_path / f"task-{pair.task_id}",
+            clone_url="https://example.invalid/repo.git",
+            base_commit="a" * 40,
+            features={
+                1: tmp_path / f"task-{pair.task_id}" / "feature1",
+                2: tmp_path / f"task-{pair.task_id}" / "feature2",
+            },
+        )
+        for pair in pairs
+    }
+
+    class FakeProvider:
+        def __init__(self) -> None:
+            self.stats = SimpleNamespace(
+                api_attempts=0,
+                http_200_responses=0,
+                accepted_responses=0,
+                actual_cost=0.0,
+                planner_cost=0.0,
+            )
+
+    first_calls = 0
+
+    class InterruptingPlanner:
+        def __init__(self, provider) -> None:
+            self.provider = provider
+
+        def get_calibrated_plan(self, _repo, _feature, *, seed: int):
+            nonlocal first_calls
+            first_calls += 1
+            if first_calls == 2:
+                raise KeyboardInterrupt()
+            return {
+                "valid": True,
+                "plan": {"files": []},
+                "logical_cost": 0.01,
+                "logical_latency": 1.0,
+                "seed": seed,
+            }
+
+    monkeypatch.setattr(plans_module, "OpenRouterClient", FakeProvider)
+    monkeypatch.setattr(plans_module, "PlannerV1", InterruptingPlanner)
+    monkeypatch.setattr(plans_module, "get_repo", lambda *_args, **_kwargs: tmp_path)
+
+    try:
+        plans_module.freeze_plans(paths, study, tasks)
+    except KeyboardInterrupt:
+        pass
+    else:  # pragma: no cover - defensive assertion
+        raise AssertionError("expected the synthetic planner interruption")
+
+    partial = plans_module.load_plan_bundle(paths.frozen_plans_file)
+    assert set(partial["pairs"][pairs[0].key]) == {"A"}
+    partial_status = plans_module.planner_checkpoint_status(
+        paths.frozen_plans_file, study
+    )
+    assert partial_status["completed_units"] == 1
+    assert partial_status["expected_units"] == 60
+
+    resumed_calls = 0
+
+    class ResumingPlanner:
+        def __init__(self, provider) -> None:
+            self.provider = provider
+
+        def get_calibrated_plan(self, _repo, _feature, *, seed: int):
+            nonlocal resumed_calls
+            resumed_calls += 1
+            return {
+                "valid": True,
+                "plan": {"files": []},
+                "logical_cost": 0.01,
+                "logical_latency": 1.0,
+                "seed": seed,
+            }
+
+    monkeypatch.setattr(plans_module, "PlannerV1", ResumingPlanner)
+    capsys.readouterr()
+    manifest = plans_module.freeze_plans(paths, study, tasks)
+    progress_output = capsys.readouterr().err
+
+    assert "60 plans" in progress_output
+    assert "resume 1/60" in progress_output
+    assert "result FROZEN" in progress_output
+    assert "spent $" in progress_output
+    assert "[complete] 60/60" in progress_output
+    assert resumed_calls == 59
+    assert manifest["pair_count"] == 30
+    assert (
+        plans_module.planner_checkpoint_status(
+            paths.frozen_plans_file,
+            study,
+            manifest_exists=paths.frozen_plan_manifest_file.exists(),
+        )["state"]
+        == "complete"
     )

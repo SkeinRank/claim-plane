@@ -73,3 +73,27 @@ def test_progress_resume_uses_historical_arm_durations_for_eta() -> None:
     assert "resume 2/4" in output
     assert "50.0%" in output
     assert "ETA ~00:00:40" in output
+
+
+def test_progress_supports_planner_units_and_cumulative_cost() -> None:
+    stream = io.StringIO()
+    units = (
+        ProgressUnit("p1/A", "p1 · planner A · feature 1", "planner"),
+        ProgressUnit("p1/B", "p1 · planner B · feature 2", "planner"),
+    )
+    progress = ResearchProgress(
+        "confirmatory planner freeze",
+        units,
+        stream=stream,
+        unit_noun="plans",
+    )
+
+    progress.start()
+    progress.start_unit("p1/A")
+    progress.complete_unit("p1/A", duration_seconds=12.0, result="FROZEN", cost=0.15)
+
+    output = stream.getvalue()
+    assert "2 plans" in output
+    assert "planner A · feature 1" in output
+    assert "result FROZEN" in output
+    assert "spent $0.1500" in output

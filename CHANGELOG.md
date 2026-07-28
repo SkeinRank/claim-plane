@@ -8,6 +8,18 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-07-28
+
+### Added
+
+- Add live progress to the one-time confirmatory Planner v1 freeze, including the current pair and feature, elapsed time, ETA, per-plan cost, and cumulative spend.
+- Report durable planner-freeze completion in `confirmatory status` so interrupted planning can be inspected without debug tooling.
+
+### Changed
+
+- Persist each completed feature declaration atomically instead of waiting for both declarations in a pair, allowing `freeze-plans` to resume at feature granularity after interruption.
+- Handle `Ctrl+C` as a normal resumable research interruption without a Python traceback.
+
 ## [0.9.3] — 2026-07-28
 
 ### Added

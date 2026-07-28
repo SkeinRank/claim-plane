@@ -36,14 +36,18 @@ class ResearchProgress:
         historical_durations: dict[str, float] | None = None,
         stream: TextIO | None = None,
         heartbeat_seconds: float = 1.0,
+        unit_noun: str = "executions",
+        historical_costs: dict[str, float] | None = None,
     ) -> None:
         self.title = title
         self.units = tuple(units)
         self.stream = stream or sys.stderr
         self.heartbeat_seconds = max(float(heartbeat_seconds), 0.2)
+        self.unit_noun = unit_noun.strip() or "executions"
         self._completed = set(completed_units)
         self._durations_by_arm: dict[str, list[float]] = {}
         self._duration_by_unit: dict[str, float] = {}
+        self._cost_by_unit: dict[str, float] = {}
         self._started_at = time.monotonic()
         self._current: ProgressUnit | None = None
         self._current_started_at: float | None = None
@@ -64,6 +68,10 @@ class ResearchProgress:
             if unit is None or seconds <= 0:
                 continue
             self._remember_duration(unit, float(seconds))
+        for unit_id, cost in (historical_costs or {}).items():
+            if self._unit_by_id(unit_id) is None or cost < 0:
+                continue
+            self._cost_by_unit[unit_id] = float(cost)
 
     @property
     def total(self) -> int:
@@ -78,7 +86,7 @@ class ResearchProgress:
             return
         resume = f" · resume {self.completed}/{self.total}" if self.completed else ""
         self._write_line(
-            f"Claim Plane research · {self.title} · {self.total} executions{resume}"
+            f"Claim Plane research · {self.title} · {self.total} {self.unit_noun}{resume}"
         )
         self._write_line(self._summary_line())
 
@@ -139,6 +147,8 @@ class ResearchProgress:
         )
         self._stop_heartbeat()
         self._remember_duration(unit, duration)
+        if cost is not None:
+            self._cost_by_unit[unit_id] = float(cost)
         self._completed.add(unit_id)
         with self._lock:
             self._current = None
@@ -248,6 +258,13 @@ class ResearchProgress:
             f"[{completed:>2}/{total}] {bar} {percent:5.1f}%"
             f" · elapsed {format_duration(elapsed)} · {eta_text}"
         )
+        completed_cost = sum(
+            self._cost_by_unit.get(unit.unit_id, 0.0)
+            for unit in self.units
+            if unit.unit_id in self._completed
+        )
+        if self._cost_by_unit:
+            line += f" · spent ${completed_cost:.4f}"
         if current is not None:
             line += f" · {current.label} · running {format_duration(current_elapsed)}"
         return line

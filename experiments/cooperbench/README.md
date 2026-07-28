@@ -142,7 +142,10 @@ python -m experiments.cooperbench confirmatory prepare \
 ```
 
 Freeze Planner v1 once. The planner seed for each pair/agent is derived from the V9
-`planner-freeze` identity and is independent of coder seed:
+`planner-freeze` identity and is independent of coder seed. The command reports live
+progress for all 60 feature declarations, including the current pair/feature, elapsed
+time, ETA, and cost. Each completed declaration is persisted atomically, so rerunning
+the same command resumes from the last durable feature after interruption:
 
 ```bash
 OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory freeze-plans \

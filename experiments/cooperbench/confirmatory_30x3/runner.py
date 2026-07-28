@@ -49,7 +49,12 @@ from .config import (
     ConfirmatoryPaths,
     build_study,
 )
-from .plans import freeze_plans, load_plan_bundle, validate_plan_bundle
+from .plans import (
+    freeze_plans,
+    load_plan_bundle,
+    planner_checkpoint_status,
+    validate_plan_bundle,
+)
 from .selection import enumerate_pairs, freeze_gold_valid_pairs, select_candidate_stream
 
 
@@ -490,13 +495,12 @@ def study_status(paths: ConfirmatoryPaths) -> dict[str, Any]:
     if not paths.study_file.exists():
         return {"prepared": False, "protocol_dir": str(paths.protocol_dir)}
     study = load_confirmatory_study(paths)
-    frozen = False
-    if paths.frozen_plans_file.exists():
-        try:
-            validate_plan_bundle(load_plan_bundle(paths.frozen_plans_file), study)
-            frozen = True
-        except (ValueError, RuntimeError, json.JSONDecodeError):
-            frozen = False
+    planner_freeze = planner_checkpoint_status(
+        paths.frozen_plans_file,
+        study,
+        manifest_exists=paths.frozen_plan_manifest_file.exists(),
+    )
+    frozen = planner_freeze["state"] == "complete"
 
     fingerprint = study_fingerprint(study)
     study_dir = paths.artifact_root / study.study_id / fingerprint[:12]
@@ -531,6 +535,7 @@ def study_status(paths: ConfirmatoryPaths) -> dict[str, Any]:
     return {
         "prepared": True,
         "plans_frozen": frozen,
+        "planner_freeze": planner_freeze,
         "study_fingerprint": fingerprint,
         "pairs": len(study.pairs),
         "coder_seeds": list(study.coder_seeds),

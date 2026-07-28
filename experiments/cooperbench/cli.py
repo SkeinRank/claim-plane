@@ -533,6 +533,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
+    except KeyboardInterrupt:
+        print(
+            "interrupted: durable research progress was saved; rerun the same command to resume",
+            file=sys.stderr,
+        )
+        return 130
     except (
         FileNotFoundError,
         KeyError,
