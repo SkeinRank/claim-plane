@@ -254,3 +254,237 @@ def test_connect_detects_inline_hooks_without_modifying_config(tmp_path: Path) -
 
     assert result["inline_hooks_present"] is True
     assert config.read_text(encoding="utf-8") == original
+
+
+def _bootstrap_task(repo: Path, session_id: str = "thr_bootstrap") -> dict[str, object]:
+    codex.init_project(repo)
+    codex.connect_codex(repo)
+    assert (
+        codex.handle_codex_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": session_id,
+                "cwd": str(repo),
+                "source": "startup",
+            }
+        )
+        == 0
+    )
+    output = __import__("io").StringIO()
+    assert (
+        codex.handle_codex_hook(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": session_id,
+                "cwd": str(repo),
+                "prompt": "Fix the cache race without changing the public API.",
+            },
+            output=output,
+        )
+        == 0
+    )
+    payload = json.loads(output.getvalue())
+    assert payload["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    return payload
+
+
+def _proposal(*, path: str = "src/cache.py") -> dict[str, object]:
+    return {
+        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+        "goal": "Fix the session cache race condition",
+        "operations": [
+            {
+                "access": "write",
+                "kind": "file",
+                "identifier": path,
+                "commitment": "committed",
+            },
+            {
+                "access": "write",
+                "kind": "file",
+                "identifier": "src/locking.py",
+                "commitment": "contingent",
+                "required": False,
+            },
+            {
+                "access": "test",
+                "kind": "file",
+                "identifier": "tests/test_cache.py",
+            },
+        ],
+        "preserves": ["path-unchanged:src/public_api/**"],
+        "acceptance": ["pytest tests/test_cache.py"],
+    }
+
+
+def test_user_prompt_bootstraps_session_bound_task_without_persisting_prompt(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_private_prompt"
+    payload = _bootstrap_task(repo, session_id)
+
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "Before the first repository mutation" in context
+    assert "claim-plane codex-intent admit" in context
+    assert codex.CODEX_INTENT_PROPOSAL_PROTOCOL in context
+
+    session_files = list((repo / ".claim-plane/codex/sessions").glob("*.json"))
+    assert len(session_files) == 1
+    text = session_files[0].read_text(encoding="utf-8")
+    state = json.loads(text)
+    assert state["protocol"] == codex.CODEX_SESSION_PROTOCOL
+    assert state["session_id"] == session_id
+    assert state["task_id"].startswith("codex-task-")
+    assert state["reserved_intent_id"].startswith("codex-intent-")
+    assert state["task_base_commit"] == subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    assert state["task_state"] == "awaiting_intent"
+    assert "Fix the cache race" not in text
+    assert state["prompt_sha256"]
+    assert state["prompt_length"] > 0
+
+
+def test_codex_intent_admission_binds_identity_base_and_scope_to_session(
+    tmp_path: Path,
+) -> None:
+    from claim_plane.core import Plane
+
+    repo = _repo(tmp_path)
+    session_id = "thr_admit"
+    _bootstrap_task(repo, session_id)
+
+    result = codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_proposal()
+    )
+
+    assert result["protocol"] == codex.CODEX_INTENT_ADMISSION_PROTOCOL
+    assert result["allowed"] is True
+    assert result["state"] == "active"
+    assert result["intent_id"].startswith("codex-intent-")
+    assert result["owner"].startswith("codex:")
+    assert result["goal"] == "Fix the session cache race condition"
+    assert [item["identifier"] for item in result["committed_scope"]] == [
+        "src/cache.py",
+        "tests/test_cache.py",
+    ]
+    assert [item["identifier"] for item in result["contingent_scope"]] == [
+        "src/locking.py"
+    ]
+
+    plane = Plane.open(repo / ".claim-plane/plane.db")
+    try:
+        intent = plane.intent(str(result["intent_id"]))
+        assert intent is not None
+        assert intent.base_commit == result["base_commit"]
+        assert intent.base_revision == result["base_commit"]
+        assert intent.task_id == result["task_id"]
+        assert intent.metadata["goal"] == result["goal"]
+        record = next(
+            item
+            for item in plane.intents()
+            if item["intent_id"] == result["intent_id"]
+        )
+        assert record["state"] == "active"
+    finally:
+        plane.close()
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["intent_id"] == result["intent_id"]
+    assert status["state"] == "active"
+    assert status["goal"] == result["goal"]
+
+
+def test_codex_intent_admission_is_idempotent_for_identical_proposal(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_idempotent_intent"
+    _bootstrap_task(repo, session_id)
+    proposal = _proposal()
+
+    first = codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
+    second = codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
+
+    assert first["allowed"] is True
+    assert second["allowed"] is True
+    assert second["intent_id"] == first["intent_id"]
+    assert second["base_commit"] == first["base_commit"]
+
+
+def test_codex_intent_admission_rejects_changed_head_before_plan_is_admitted(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_stale_base"
+    _bootstrap_task(repo, session_id)
+
+    (repo / "after-bootstrap.txt").write_text("changed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "after-bootstrap.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "advance base"], cwd=repo, check=True)
+
+    with pytest.raises(ValueError, match="base revision changed before admission"):
+        codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+
+def test_codex_intent_proposal_cannot_escape_repository(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_escape"
+    _bootstrap_task(repo, session_id)
+
+    with pytest.raises(ValueError, match="cannot escape the repository"):
+        codex.admit_codex_intent(
+            repo,
+            session_id=session_id,
+            proposal=_proposal(path="../outside.py"),
+        )
+
+
+def test_second_prompt_reuses_session_task_and_active_intent(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_followup"
+    first_hook = _bootstrap_task(repo, session_id)
+    first_context = first_hook["hookSpecificOutput"]["additionalContext"]
+    assert "Before the first repository mutation" in first_context
+
+    admitted = codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_proposal()
+    )
+    output = __import__("io").StringIO()
+    codex.handle_codex_hook(
+        {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": session_id,
+            "cwd": str(repo),
+            "prompt": "Please also explain the locking choice.",
+        },
+        output=output,
+    )
+    second_context = json.loads(output.getvalue())["hookSpecificOutput"][
+        "additionalContext"
+    ]
+
+    assert "execution contract is active" in second_context
+    assert admitted["intent_id"] in second_context
+    assert "src/cache.py" in second_context
+    assert "src/locking.py" in second_context
+    assert "path-unchanged:src/public_api/**" in second_context
+
+
+def test_codex_intent_proposal_cannot_override_authority_fields(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_authority"
+    _bootstrap_task(repo, session_id)
+    proposal = _proposal()
+    proposal["owner"] = "model-selected-owner"
+    proposal["base_commit"] = "0" * 40
+
+    with pytest.raises(ValueError, match="unsupported Codex intent proposal field"):
+        codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)

@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.10.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.11.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -87,7 +87,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - read-only-by-default worker and integration acceptance guards that reject tracked or non-ignored untracked mutations;
 - SHA-256 evidence binding worker patches, manifests, result trees, result commits, and reproducible result patches;
 - transparent economy/standard/frontier worker-tier recommendations;
-- project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, non-destructive coexistence with existing project hooks, enrollment diagnostics, and session handshakes;
+- project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, non-destructive coexistence with existing project hooks, enrollment diagnostics, session-bound task bootstrap, pinned Git bases, and atomic ChangeIntent admission;
 - CLI, stdio MCP, JSON Schemas, examples, and a deterministic protocol benchmark.
 
 The base package has no runtime dependencies. Agent Lexicon remains an optional semantic layer.
@@ -140,7 +140,13 @@ codex
 
 The connector registers one stable dispatcher for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, and `SessionEnd`. Codex discovers these project-local hooks automatically for trusted projects. On the first Codex session, open `/hooks` to review and trust the command hooks; Codex records trust against the hook definition.
 
-Version 0.10.0 uses this bridge for enrollment health and session handshakes. Existing Claim Plane admission, brokered execution, and verification remain explicit control-plane operations. The lifecycle bridge does not depend on MCP for interception.
+For the first task in a session, Claim Plane pins the current Git commit, creates a private session-bound task identity, and injects model-visible coordination context through `UserPromptSubmit`. Codex can inspect the repository read-only, propose the expected committed and contingent scope, preserve requirements, and acceptance checks, then submit that proposal through the local CLI. Claim Plane supplies the intent ID, owner, task ID, and immutable base commit itself before performing normal atomic admission.
+
+The raw user prompt is not stored in connector state. The task record keeps a SHA-256 digest and prompt length for correlation, while the admitted intent stores the explicit goal and execution contract that Codex proposed. Repeated admission of identical content is idempotent, and a changed Git `HEAD` before admission is rejected as a stale bootstrap.
+
+Once admitted, normal Codex prompt and tool lifecycle events renew the active intent lease automatically. The model does not need to issue a separate heartbeat command during an active session.
+
+The session-bound proposal protocol is documented by [`schemas/codex-intent-proposal.schema.json`](schemas/codex-intent-proposal.schema.json). The lifecycle bridge does not depend on MCP. Repository mutation authority remains the responsibility of Claim Plane admission and brokered execution; the connector does not treat model cooperation as an authorization boundary.
 
 To remove the integration without disturbing other Codex hooks:
 

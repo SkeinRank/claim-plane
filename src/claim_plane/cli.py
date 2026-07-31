@@ -13,6 +13,8 @@ from typing import Any
 
 from claim_plane import __version__
 from claim_plane.connectors import (
+    admit_codex_intent,
+    codex_intent_status,
     connect_codex,
     disconnect_codex,
     doctor_codex,
@@ -138,7 +140,44 @@ def cmd_codex_hook(args: argparse.Namespace) -> int:
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("Codex hook input must be a JSON object")
-    return handle_codex_hook(payload)
+    return handle_codex_hook(payload, output=sys.stdout)
+
+
+def _read_stdin_json_object() -> dict[str, Any]:
+    raw = sys.stdin.read()
+    if not raw.strip():
+        raise ValueError("expected a JSON object on stdin")
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("stdin must contain a JSON object")
+    return payload
+
+
+def cmd_codex_intent_admit(args: argparse.Namespace) -> int:
+    proposal = _read_json(args.proposal) if args.proposal else _read_stdin_json_object()
+    result = admit_codex_intent(
+        args.repo,
+        session_id=args.session_id,
+        proposal=proposal,
+    )
+    _write_json(result)
+    return 0 if result["allowed"] else 2
+
+
+def cmd_codex_intent_status(args: argparse.Namespace) -> int:
+    result = codex_intent_status(args.repo, session_id=args.session_id)
+    if args.json:
+        _write_json(result)
+    else:
+        print(f"Codex session: {result['session_id']}")
+        print(f"Task: {result.get('task_id') or 'not bootstrapped'}")
+        print(f"Intent: {result.get('intent_id') or 'not admitted'}")
+        print(f"State: {result.get('state') or 'unknown'}")
+        if result.get("base_commit"):
+            print(f"Base commit: {result['base_commit']}")
+        if result.get("goal"):
+            print(f"Goal: {result['goal']}")
+    return 0
 
 
 def cmd_claim(args: argparse.Namespace) -> int:
@@ -733,6 +772,33 @@ def build_parser() -> argparse.ArgumentParser:
         "codex-hook", help="Internal Codex lifecycle dispatcher."
     )
     codex_hook.set_defaults(func=cmd_codex_hook)
+
+    codex_intent = sub.add_parser(
+        "codex-intent",
+        help="Manage the ChangeIntent bound to an enrolled Codex session.",
+    )
+    codex_intent_sub = codex_intent.add_subparsers(
+        dest="codex_intent_command", required=True
+    )
+    codex_intent_admit = codex_intent_sub.add_parser(
+        "admit",
+        help="Bind and atomically admit a model-proposed ChangeIntent for a session.",
+    )
+    codex_intent_admit.add_argument("--session-id", required=True)
+    codex_intent_admit.add_argument("--repo", default=".")
+    codex_intent_admit.add_argument(
+        "--proposal",
+        help="Read the proposal from a JSON file instead of stdin.",
+    )
+    codex_intent_admit.set_defaults(func=cmd_codex_intent_admit)
+
+    codex_intent_status_parser = codex_intent_sub.add_parser(
+        "status", help="Show the session-bound task and admitted intent."
+    )
+    codex_intent_status_parser.add_argument("--session-id", required=True)
+    codex_intent_status_parser.add_argument("--repo", default=".")
+    codex_intent_status_parser.add_argument("--json", action="store_true")
+    codex_intent_status_parser.set_defaults(func=cmd_codex_intent_status)
 
     claim = sub.add_parser(
         "claim", help="Request a legacy fine-grained artifact claim."

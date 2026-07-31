@@ -8,6 +8,22 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-31
+
+### Added
+
+- Bind the first Codex task in each enrolled session to connector-owned task, intent, owner, and exact Git base identities.
+- Inject a model-visible `UserPromptSubmit` bootstrap contract for read-only repository discovery followed by structured ChangeIntent proposal and atomic admission.
+- Add `claim-plane codex-intent admit` and `claim-plane codex-intent status` for the session-bound execution contract.
+- Add `claim-plane.codex-intent-proposal.v1` with committed and contingent operations, preserve requirements, acceptance checks, dependencies, and metadata.
+- Renew active session intent leases from Codex prompt and tool lifecycle events instead of requiring model-authored heartbeat calls.
+
+### Changed
+
+- Keep raw Codex prompts out of connector state while retaining a SHA-256 digest and prompt length for local correlation.
+- Reject session intent admission when Git `HEAD` changes after task bootstrap, and validate file/document resources as repository-relative before admission.
+- Reuse the 0.10 lifecycle enrollment unchanged so existing connected repositories receive session bootstrap behavior after upgrading Claim Plane.
+
 ## [0.10.0] — 2026-07-31
 
 ### Added

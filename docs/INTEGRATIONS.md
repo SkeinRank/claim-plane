@@ -1,5 +1,23 @@
 # Integration patterns
 
+## Codex session bootstrap
+
+One enrollment applies to ordinary Codex sessions launched inside the Git worktree:
+
+```bash
+claim-plane init
+claim-plane connect codex
+codex
+```
+
+`SessionStart` establishes private connector state. On the first `UserPromptSubmit`, Claim Plane pins the current `HEAD`, derives connector-owned task and intent identities, and returns model-visible bootstrap context. Codex performs repository discovery without mutating the worktree, then submits one proposal containing the intended goal, committed scope, plausible contingent scope, preserve requirements, and acceptance checks.
+
+The proposal uses `claim-plane.codex-intent-proposal.v1`. Claim Plane binds identity and base revision rather than accepting those authority-bearing fields from the model, converts the proposal into a canonical `ChangeIntent`, performs governed atomic admission, and activates the intent when admitted. Identical retries are safe. A changed `HEAD` between task bootstrap and admission is rejected.
+
+The connector keeps the raw user prompt out of local session state. The persisted bootstrap contains only a prompt digest and length until an explicit goal is admitted as part of the execution contract.
+
+MCP remains available for agent interaction, but Codex enrollment and session binding do not require an MCP call. Mutation enforcement belongs to the Claim Plane authority path rather than to a voluntary model tool invocation.
+
 ## Planner and workers
 
 1. A planner emits one `ChangeIntent` per worker.

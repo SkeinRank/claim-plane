@@ -62,7 +62,13 @@ Workers remain in Git branches, worktrees, or external sandboxes. Claim Plane gi
 
 ### Coding-agent connectors
 
-Project-local connectors bind an external coding runtime to Claim Plane without making the model responsible for invoking the control plane. The Codex connector installs a stable lifecycle dispatcher in `.codex/hooks.json`, preserves unrelated project hooks, and keeps its mutable enrollment state under `.claim-plane/`. Enrollment is idempotent and respects project-local Codex policy that disables hooks.
+Project-local connectors bind an external coding runtime to Claim Plane without replacing the runtime's normal entry point. The Codex connector installs a stable lifecycle dispatcher in `.codex/hooks.json`, preserves unrelated project hooks, and keeps mutable connector state under `.claim-plane/`. Enrollment is idempotent and respects project-local Codex policy that disables hooks.
+
+Each Codex session has a private local record keyed by a digest of the runtime session ID. The first submitted task pins the current Git commit and receives connector-owned task, intent, and owner identities. The user prompt itself is not persisted in connector state. `UserPromptSubmit` supplies Codex with the bootstrap contract required to perform read-only discovery and submit a structured intent proposal. Claim Plane converts that proposal into the canonical `ChangeIntent`, binds the pinned base, performs atomic admission, activates successful work, and records the resulting committed and contingent scope on the session.
+
+Active Codex lifecycle traffic renews the bound intent lease through Claim Plane. Lease maintenance is connector-owned rather than delegated to model behavior.
+
+The model may propose goal, scope, preserve requirements, acceptance checks, and explicit dependencies. It cannot choose the authoritative intent ID, task ID, owner, or base revision for the session. Repository-relative file and document declarations are validated before admission, and a changed Git `HEAD` invalidates the bootstrap before any intent is admitted.
 
 The connector is an integration boundary, not a replacement for Claim Plane authority. Lifecycle events provide deterministic interception points and evidence plumbing; admission, broker capabilities, repository identity, and verification remain the sources of authorization and proof. This separation lets the runtime adapter evolve without weakening the core protocol or making MCP participation a prerequisite for enforcement.
 

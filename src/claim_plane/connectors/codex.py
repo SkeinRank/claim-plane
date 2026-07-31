@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -11,10 +13,15 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
+
+from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind
 
 PROJECT_PROTOCOL = "claim-plane.project.v1"
 CODEX_ENROLLMENT_PROTOCOL = "claim-plane.codex-enrollment.v1"
+CODEX_SESSION_PROTOCOL = "claim-plane.codex-session.v1"
+CODEX_INTENT_PROPOSAL_PROTOCOL = "claim-plane.codex-intent-proposal.v1"
+CODEX_INTENT_ADMISSION_PROTOCOL = "claim-plane.codex-intent-admission.v1"
 CODEX_HOOK_COMMAND = "claim-plane codex-hook"
 CODEX_HOOK_EVENTS = (
     "SessionStart",
@@ -27,6 +34,8 @@ CODEX_HOOK_EVENTS = (
 
 _PROJECT_STATE = Path(".claim-plane/project.json")
 _CODEX_STATE = Path(".claim-plane/codex.json")
+_CODEX_SESSIONS = Path(".claim-plane/codex/sessions")
+_PLANE_DB = Path(".claim-plane/plane.db")
 _CODEX_HOOKS = Path(".codex/hooks.json")
 _CODEX_CONFIG = Path(".codex/config.toml")
 
@@ -54,6 +63,18 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _session_key(session_id: str) -> str:
+    return _sha256_text(session_id)[:24]
+
+
+def _session_state_path(root: Path, session_id: str) -> Path:
+    return root / _CODEX_SESSIONS / f"{_session_key(session_id)}.json"
+
+
 def _git(root_or_child: str | Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", *args],
@@ -66,6 +87,23 @@ def _git(root_or_child: str | Path, *args: str) -> str:
         detail = completed.stderr.strip() or completed.stdout.strip() or "git failed"
         raise ValueError(detail)
     return completed.stdout.strip()
+
+
+def _head_commit(root: Path) -> str:
+    commit = _git(root, "rev-parse", "--verify", "HEAD^{commit}").lower()
+    if not re.fullmatch(r"[0-9a-f]{40,64}", commit):
+        raise ValueError("Git HEAD did not resolve to a full object id")
+    return commit
+
+
+def _branch_name(root: Path) -> str:
+    value = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    return value or "HEAD"
+
+
+def _worktree_status(root: Path) -> tuple[bool, str]:
+    status = _git(root, "status", "--porcelain=v1", "--untracked-files=all")
+    return bool(status), _sha256_text(status)
 
 
 def resolve_project_root(root_or_child: str | Path = ".") -> Path:
@@ -514,12 +552,20 @@ def doctor_codex(root_or_child: str | Path = ".") -> CodexDoctorReport:
     )
 
 
-def _record_session_handshake(root: Path, payload: dict[str, Any]) -> None:
+def _enrollment_state(root: Path) -> dict[str, Any] | None:
     state_path = root / _CODEX_STATE
     if not state_path.exists():
-        return
+        return None
     state = _read_json_object(state_path)
     if state.get("protocol") != CODEX_ENROLLMENT_PROTOCOL:
+        return None
+    return state
+
+
+def _record_enrollment_event(root: Path, payload: dict[str, Any]) -> None:
+    state_path = root / _CODEX_STATE
+    state = _enrollment_state(root)
+    if state is None:
         return
     state["last_seen_at"] = _utc_now()
     state["last_session_id"] = payload.get("session_id")
@@ -527,12 +573,462 @@ def _record_session_handshake(root: Path, payload: dict[str, Any]) -> None:
     _atomic_write_json(state_path, state)
 
 
-def handle_codex_hook(payload: dict[str, Any]) -> int:
+def _load_session(root: Path, session_id: str) -> dict[str, Any]:
+    path = _session_state_path(root, session_id)
+    if not path.exists():
+        raise ValueError(
+            "Codex session is not bootstrapped; start Codex in the enrolled project first"
+        )
+    state = _read_json_object(path)
+    if state.get("protocol") != CODEX_SESSION_PROTOCOL:
+        raise ValueError(f"unsupported Codex session protocol in {path}")
+    if state.get("session_id") != session_id:
+        raise ValueError("Codex session identity does not match local session state")
+    return state
+
+
+def _write_session(root: Path, session: dict[str, Any]) -> None:
+    session_id = str(session["session_id"])
+    session["updated_at"] = _utc_now()
+    _atomic_write_json(_session_state_path(root, session_id), session)
+
+
+def _record_session_handshake(
+    root: Path, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    if _enrollment_state(root) is None:
+        return None
+    _record_enrollment_event(root, payload)
+
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        return None
+    session_id = session_id.strip()
+    path = _session_state_path(root, session_id)
+    now = _utc_now()
+    if path.exists():
+        session = _load_session(root, session_id)
+        session["source"] = str(payload.get("source") or session.get("source") or "startup")
+        session["last_event"] = "SessionStart"
+        session["last_seen_at"] = now
+        _write_session(root, session)
+        return session
+
+    dirty, status_digest = _worktree_status(root)
+    session = {
+        "protocol": CODEX_SESSION_PROTOCOL,
+        "session_id": session_id,
+        "root": str(root),
+        "source": str(payload.get("source") or "startup"),
+        "created_at": now,
+        "updated_at": now,
+        "last_seen_at": now,
+        "last_event": "SessionStart",
+        "session_open_commit": _head_commit(root),
+        "session_open_branch": _branch_name(root),
+        "session_open_worktree_dirty": dirty,
+        "session_open_status_sha256": status_digest,
+        "task_id": None,
+        "reserved_intent_id": None,
+        "owner": None,
+        "task_base_commit": None,
+        "task_state": "awaiting_prompt",
+        "active_intent_id": None,
+    }
+    _write_session(root, session)
+    return session
+
+
+def _ensure_session(root: Path, payload: dict[str, Any]) -> dict[str, Any] | None:
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        return None
+    session_id = session_id.strip()
+    path = _session_state_path(root, session_id)
+    if path.exists():
+        return _load_session(root, session_id)
+    synthetic = dict(payload)
+    synthetic["hook_event_name"] = "SessionStart"
+    synthetic.setdefault("source", "startup")
+    return _record_session_handshake(root, synthetic)
+
+
+def _ensure_task_bootstrap(
+    root: Path, payload: dict[str, Any]
+) -> dict[str, Any] | None:
+    session = _ensure_session(root, payload)
+    if session is None:
+        return None
+    if session.get("task_id"):
+        session["last_event"] = "UserPromptSubmit"
+        session["last_seen_at"] = _utc_now()
+        _write_session(root, session)
+        return session
+
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str):
+        prompt = ""
+    prompt_digest = _sha256_text(prompt)
+    base_commit = _head_commit(root)
+    token = _sha256_text(
+        f"{session['session_id']}\0{base_commit}\0{prompt_digest}"
+    )[:20]
+    dirty, status_digest = _worktree_status(root)
+    session.update(
+        {
+            "task_id": f"codex-task-{token}",
+            "reserved_intent_id": f"codex-intent-{token}",
+            "owner": f"codex:{_session_key(str(session['session_id']))}",
+            "task_base_commit": base_commit,
+            "task_base_revision": base_commit,
+            "task_branch": _branch_name(root),
+            "task_worktree_dirty": dirty,
+            "task_status_sha256": status_digest,
+            "prompt_sha256": prompt_digest,
+            "prompt_length": len(prompt),
+            "task_bootstrapped_at": _utc_now(),
+            "task_state": "awaiting_intent",
+            "last_event": "UserPromptSubmit",
+            "last_seen_at": _utc_now(),
+        }
+    )
+    _write_session(root, session)
+    return session
+
+
+def _string_list(value: Any, *, field: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, list):
+        raise ValueError(f"Codex intent proposal '{field}' must be a JSON array")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(
+                f"Codex intent proposal '{field}' entries must be non-empty strings"
+            )
+        result.append(item.strip())
+    return tuple(result)
+
+
+def _validate_operation_path(operation: IntentOperation) -> None:
+    if operation.resource.kind not in {ResourceKind.FILE, ResourceKind.DOCUMENT}:
+        return
+    raw = operation.resource.identifier.replace("\\", "/").strip()
+    if raw.startswith("/") or re.match(r"^[A-Za-z]:/", raw):
+        raise ValueError("Codex file/document resources must be repository-relative")
+    normalized = posixpath.normpath(raw)
+    if normalized == ".." or normalized.startswith("../"):
+        raise ValueError("Codex file/document resources cannot escape the repository")
+
+
+def _intent_from_proposal(
+    session: dict[str, Any], proposal: dict[str, Any]
+) -> tuple[ChangeIntent, str]:
+    allowed_keys = {
+        "protocol",
+        "goal",
+        "operations",
+        "preserves",
+        "acceptance",
+        "dependencies",
+        "metadata",
+    }
+    unknown = sorted(set(proposal) - allowed_keys)
+    if unknown:
+        raise ValueError(
+            "unsupported Codex intent proposal field(s): " + ", ".join(unknown)
+        )
+    if proposal.get("protocol") != CODEX_INTENT_PROPOSAL_PROTOCOL:
+        raise ValueError(
+            f"Codex intent proposal protocol must be {CODEX_INTENT_PROPOSAL_PROTOCOL!r}"
+        )
+    goal = proposal.get("goal")
+    if not isinstance(goal, str) or not goal.strip():
+        raise ValueError("Codex intent proposal requires a non-empty 'goal'")
+    goal = goal.strip()
+
+    raw_operations = proposal.get("operations")
+    if not isinstance(raw_operations, list) or not raw_operations:
+        raise ValueError("Codex intent proposal requires a non-empty 'operations' array")
+    operations = tuple(IntentOperation.from_dict(item) for item in raw_operations)
+    for operation in operations:
+        _validate_operation_path(operation)
+
+    proposal_metadata = proposal.get("metadata") or {}
+    if not isinstance(proposal_metadata, dict):
+        raise ValueError("Codex intent proposal 'metadata' must be a JSON object")
+    metadata = {
+        **proposal_metadata,
+        "goal": goal,
+        "connector": "codex",
+        "codex_session_id": str(session["session_id"]),
+        "prompt_sha256": str(session.get("prompt_sha256") or ""),
+        "bootstrap_protocol": CODEX_SESSION_PROTOCOL,
+    }
+
+    intent = ChangeIntent(
+        intent_id=str(session["reserved_intent_id"]),
+        task_id=str(session["task_id"]),
+        owner=str(session["owner"]),
+        base_revision=str(session["task_base_revision"]),
+        base_commit=str(session["task_base_commit"]),
+        operations=operations,
+        preserves=_string_list(proposal.get("preserves"), field="preserves"),
+        acceptance=_string_list(proposal.get("acceptance"), field="acceptance"),
+        dependencies=_string_list(proposal.get("dependencies"), field="dependencies"),
+        metadata=metadata,
+    )
+    return intent, goal
+
+
+def _operation_summary(operation: IntentOperation) -> dict[str, Any]:
+    return {
+        "access": operation.access.value,
+        "kind": operation.resource.kind.value,
+        "identifier": operation.resource.identifier,
+        "region": operation.resource.region,
+        "commitment": operation.commitment.value,
+    }
+
+
+def admit_codex_intent(
+    root_or_child: str | Path,
+    *,
+    session_id: str,
+    proposal: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind and atomically admit one model-proposed intent to a Codex session."""
+
+    root = resolve_project_root(root_or_child)
+    _require_initialized(root)
+    if _enrollment_state(root) is None:
+        raise ValueError("Codex is not enrolled; run 'claim-plane connect codex' first")
+    session = _load_session(root, session_id)
+    if not session.get("task_id") or not session.get("task_base_commit"):
+        raise ValueError("Codex session has no task bootstrap; submit a prompt first")
+
+    expected_base = str(session["task_base_commit"])
+    current_base = _head_commit(root)
+    if current_base != expected_base:
+        raise ValueError(
+            "Codex task base revision changed before admission; "
+            "start a fresh session or task bootstrap"
+        )
+
+    intent, goal = _intent_from_proposal(session, proposal)
+    plane = Plane.open(root / _PLANE_DB)
+    try:
+        decision = plane.admit(intent)
+        if decision.allowed:
+            plane.activate(intent.intent_id)
+    finally:
+        plane.close()
+
+    now = _utc_now()
+    session["last_event"] = "IntentAdmission"
+    session["last_seen_at"] = now
+    session["last_admission_at"] = now
+    session["last_admission_allowed"] = decision.allowed
+    if decision.allowed:
+        session["active_intent_id"] = intent.intent_id
+        session["intent_fingerprint"] = intent.fingerprint()
+        session["intent_goal"] = goal
+        session["intent_admitted_at"] = now
+        session["task_state"] = "active"
+        session["committed_scope"] = [
+            _operation_summary(item) for item in intent.committed_operations
+        ]
+        session["contingent_scope"] = [
+            _operation_summary(item) for item in intent.contingent_operations
+        ]
+        session["preserves"] = list(intent.preserves)
+        session["acceptance"] = list(intent.acceptance)
+    else:
+        session["task_state"] = "blocked"
+    _write_session(root, session)
+
+    return {
+        "protocol": CODEX_INTENT_ADMISSION_PROTOCOL,
+        "allowed": decision.allowed,
+        "session_id": session_id,
+        "task_id": intent.task_id,
+        "intent_id": intent.intent_id,
+        "owner": intent.owner,
+        "base_commit": intent.base_commit,
+        "goal": goal,
+        "state": "active" if decision.allowed else "blocked",
+        "committed_scope": [
+            _operation_summary(item) for item in intent.committed_operations
+        ],
+        "contingent_scope": [
+            _operation_summary(item) for item in intent.contingent_operations
+        ],
+        "preserves": list(intent.preserves),
+        "acceptance": list(intent.acceptance),
+        "decision": decision.to_dict(),
+    }
+
+
+def codex_intent_status(
+    root_or_child: str | Path, *, session_id: str
+) -> dict[str, Any]:
+    """Return the local session-to-intent binding without exposing prompt text."""
+
+    root = resolve_project_root(root_or_child)
+    session = _load_session(root, session_id)
+    return {
+        "protocol": "claim-plane.codex-intent-status.v1",
+        "session_id": session_id,
+        "task_id": session.get("task_id"),
+        "intent_id": session.get("active_intent_id"),
+        "state": session.get("task_state"),
+        "base_commit": session.get("task_base_commit"),
+        "goal": session.get("intent_goal"),
+        "committed_scope": list(session.get("committed_scope") or ()),
+        "contingent_scope": list(session.get("contingent_scope") or ()),
+        "preserves": list(session.get("preserves") or ()),
+        "acceptance": list(session.get("acceptance") or ()),
+        "worktree_dirty_at_bootstrap": bool(session.get("task_worktree_dirty")),
+    }
+
+
+def _scope_lines(items: Any) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    lines: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        access = str(item.get("access") or "")
+        kind = str(item.get("kind") or "")
+        identifier = str(item.get("identifier") or "")
+        commitment = str(item.get("commitment") or "committed")
+        suffix = " (contingent)" if commitment == "contingent" else ""
+        lines.append(f"- {access} {kind}:{identifier}{suffix}")
+    return lines
+
+
+def _task_context(session: dict[str, Any]) -> str:
+    if session.get("active_intent_id"):
+        committed = _scope_lines(session.get("committed_scope")) or ["- none"]
+        contingent = _scope_lines(session.get("contingent_scope")) or ["- none"]
+        preserves = [f"- {item}" for item in session.get("preserves") or ()] or [
+            "- none"
+        ]
+        acceptance = [
+            f"- {item}" for item in session.get("acceptance") or ()
+        ] or ["- none"]
+        return "\n".join(
+            [
+                "Claim Plane execution contract is active for this Codex session.",
+                f"Task: {session.get('task_id')}",
+                f"Intent: {session.get('active_intent_id')}",
+                f"Base commit: {session.get('task_base_commit')}",
+                f"Goal: {session.get('intent_goal')}",
+                "Committed scope:",
+                *committed,
+                "Contingent scope:",
+                *contingent,
+                "Preserve requirements:",
+                *preserves,
+                "Acceptance:",
+                *acceptance,
+                "Treat this admitted ChangeIntent as the authority boundary for the task.",
+            ]
+        )
+
+    dirty_note = (
+        "The worktree already had local changes when the task was bootstrapped; "
+        "do not treat them as agent-authored changes."
+        if session.get("task_worktree_dirty")
+        else "The worktree was clean when the task was bootstrapped."
+    )
+    session_id = str(session["session_id"])
+    return "\n".join(
+        [
+            "Claim Plane is enrolled for this Codex session.",
+            f"Session: {session_id}",
+            f"Task: {session.get('task_id')}",
+            f"Pinned base commit: {session.get('task_base_commit')}",
+            dirty_note,
+            "Before the first repository mutation, inspect the repository read-only "
+            "and admit one ChangeIntent for this task.",
+            "Submit the proposal as JSON on stdin with:",
+            f"claim-plane codex-intent admit --session-id {json.dumps(session_id)} --repo .",
+            "Proposal shape:",
+            json.dumps(
+                {
+                    "protocol": CODEX_INTENT_PROPOSAL_PROTOCOL,
+                    "goal": "concise intended outcome",
+                    "operations": [
+                        {
+                            "access": "write",
+                            "kind": "file",
+                            "identifier": "path/to/file.py",
+                            "commitment": "committed",
+                        },
+                        {
+                            "access": "write",
+                            "kind": "file",
+                            "identifier": "plausible/fallback.py",
+                            "commitment": "contingent",
+                            "required": False,
+                        },
+                    ],
+                    "preserves": [],
+                    "acceptance": [],
+                },
+                separators=(",", ":"),
+            ),
+            "Use committed scope for expected changes and contingent scope only for "
+            "plausible fallback surfaces. Do not provide intent_id, owner, or base "
+            "revision; Claim Plane binds those to this session.",
+        ]
+    )
+
+
+def _write_hook_output(output: TextIO | None, payload: dict[str, Any]) -> None:
+    if output is None:
+        return
+    json.dump(payload, output, ensure_ascii=False, separators=(",", ":"))
+    output.write("\n")
+
+
+def _record_session_lifecycle_event(root: Path, payload: dict[str, Any]) -> None:
+    session = _ensure_session(root, payload)
+    if session is None:
+        return
+    event = str(payload.get("hook_event_name") or "")
+    session["last_event"] = event
+    session["last_seen_at"] = _utc_now()
+    if event == "SessionEnd":
+        session["ended_at"] = _utc_now()
+        reason = payload.get("reason")
+        if isinstance(reason, str):
+            session["end_reason"] = reason
+    _write_session(root, session)
+
+
+def _heartbeat_session_intent(root: Path, session: dict[str, Any]) -> None:
+    intent_id = session.get("active_intent_id")
+    if not isinstance(intent_id, str) or not intent_id:
+        return
+    plane = Plane.open(root / _PLANE_DB)
+    try:
+        plane.heartbeat(intent_id)
+    finally:
+        plane.close()
+
+
+def handle_codex_hook(
+    payload: dict[str, Any], *, output: TextIO | None = None
+) -> int:
     """Dispatch a Codex lifecycle event for an enrolled project.
 
-    Enrollment deliberately keeps this dispatcher stable. Later runtime policies can
-    strengthen individual lifecycle events without changing the project-local hook
-    definition or requiring a new enrollment command.
+    The project hook command remains stable across connector versions. Session and
+    task binding can therefore evolve without rewriting or re-trusting the project
+    hook definition.
     """
 
     event = payload.get("hook_event_name")
@@ -545,6 +1041,35 @@ def handle_codex_hook(payload: dict[str, Any]) -> int:
         root = resolve_project_root(cwd)
     except (FileNotFoundError, ValueError):
         return 0
+    if _enrollment_state(root) is None:
+        return 0
+
     if event == "SessionStart":
         _record_session_handshake(root, payload)
+        return 0
+
+    _record_enrollment_event(root, payload)
+    if event == "UserPromptSubmit":
+        session = _ensure_task_bootstrap(root, payload)
+        if session is None:
+            return 0
+        _heartbeat_session_intent(root, session)
+        _write_hook_output(
+            output,
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": _task_context(session),
+                }
+            },
+        )
+        return 0
+
+    if event in {"PreToolUse", "PostToolUse", "Stop"}:
+        session = _ensure_session(root, payload)
+        if session is not None:
+            _heartbeat_session_intent(root, session)
+
+    if event in {"Stop", "SessionEnd"}:
+        _record_session_lifecycle_event(root, payload)
     return 0
