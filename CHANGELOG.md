@@ -8,6 +8,22 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-07-31
+
+### Added
+
+- Verify active Codex tasks automatically at `Stop` against the admitted ChangeIntent, actual Git changes, preserve and contract policies, and declared acceptance commands.
+- Mark clean Codex work as `VERIFIED`, complete the admitted intent, and expose a machine-readable `claim-plane.codex-completion.v1` result through session status and `claim-plane codex-intent verify`.
+- Return bounded verification findings to Codex when completion fails so the current turn can continue and repair the admitted work before another completion attempt.
+- Track authorized and denied mutation calls separately from read-only tool traffic, retain admitted scope-amendment history, and summarize changed files, acceptance outcome, and executed authority violations.
+- Include untracked repository files in Git verification so newly created undeclared files cannot disappear from completion evidence.
+
+### Changed
+
+- Give the Codex `Stop` handler a bounded verification window suitable for acceptance execution while keeping `SessionEnd` lightweight.
+- Avoid repeated Stop-hook continuation loops: one failed completion may request another model turn, while a still-failing continuation remains explicitly `UNVERIFIED` instead of blocking indefinitely.
+- Exclude connector-owned control surfaces from task-change accounting while retaining them as non-grantable mutation surfaces under the pre-mutation guard.
+
 ## [0.13.0] — 2026-07-31
 
 ### Added

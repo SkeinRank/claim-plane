@@ -1237,3 +1237,262 @@ def test_pretool_protected_connector_surface_is_denied_without_amendment_ticket(
     assert "connector control state" in decision["permissionDecisionReason"]
     assert status["guard"]["last_reason_code"] == "protected_control_surface"
     assert status["scope_amendment"]["pending"] == {}
+
+
+def _completion_proposal(*, acceptance: list[str] | None = None) -> dict[str, object]:
+    return {
+        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+        "goal": "Update the project fixture safely",
+        "operations": [
+            {
+                "access": "write",
+                "kind": "file",
+                "identifier": "README.md",
+                "commitment": "committed",
+            }
+        ],
+        "preserves": [],
+        "acceptance": acceptance if acceptance is not None else ["git diff --check"],
+    }
+
+
+def _stop(repo: Path, session_id: str, *, stop_hook_active: bool = False) -> str:
+    output = __import__("io").StringIO()
+    assert (
+        codex.handle_codex_hook(
+            {
+                "hook_event_name": "Stop",
+                "session_id": session_id,
+                "cwd": str(repo),
+                "last_assistant_message": "Task complete.",
+                "model": "gpt-5",
+                "permission_mode": "default",
+                "stop_hook_active": stop_hook_active,
+                "transcript_path": None,
+                "turn_id": "turn_verify",
+            },
+            output=output,
+        )
+        == 0
+    )
+    return output.getvalue()
+
+
+def test_stop_verifies_clean_codex_task_and_completes_intent(tmp_path: Path) -> None:
+    from claim_plane.core import Plane
+
+    repo = _repo(tmp_path)
+    session_id = "thr_completion_clean"
+    _bootstrap_task(repo, session_id)
+    admitted = codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_completion_proposal()
+    )
+    assert admitted["allowed"] is True
+
+    raw_guard = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md",
+                "@@",
+                "-# fixture",
+                "+# fixture updated",
+            )
+        },
+    )
+    assert raw_guard == ""
+    (repo / "README.md").write_text("# fixture updated\n", encoding="utf-8")
+
+    raw_stop = _stop(repo, session_id)
+    stop_payload = json.loads(raw_stop)
+    assert "decision" not in stop_payload
+    assert "Claim Plane — VERIFIED" in stop_payload["systemMessage"]
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    completion = status["completion"]
+    assert status["state"] == "verified"
+    assert completion["protocol"] == codex.CODEX_COMPLETION_PROTOCOL
+    assert completion["verified"] is True
+    assert completion["changed_files"] == 1
+    assert completion["changed_paths"] == ["README.md"]
+    assert completion["authorized_mutation_calls"] == 1
+    assert completion["executed_violations"] == 0
+    assert completion["acceptance_passed"] is True
+
+    plane = Plane.open(repo / ".claim-plane/plane.db")
+    try:
+        record = next(
+            item for item in plane.intents() if item["intent_id"] == admitted["intent_id"]
+        )
+        assert record["state"] == "completed"
+    finally:
+        plane.close()
+
+
+def test_stop_blocks_failed_acceptance_then_verifies_after_repair(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_completion_repair"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_completion_proposal()
+    )
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md",
+                "@@",
+                "-# fixture",
+                "+# fixture bad",
+            )
+        },
+    )
+    (repo / "README.md").write_text("# fixture bad   \n", encoding="utf-8")
+
+    first = json.loads(_stop(repo, session_id))
+    assert first["decision"] == "block"
+    assert "did not verify completion" in first["reason"]
+    assert "Claim Plane — UNVERIFIED" in first["systemMessage"]
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["state"] == "verification_failed"
+    assert status["completion"]["acceptance_passed"] is False
+
+    # A continuation that makes no progress is not blocked forever.
+    second = json.loads(_stop(repo, session_id, stop_hook_active=True))
+    assert "decision" not in second
+    assert "remains UNVERIFIED" in second["systemMessage"]
+
+    (repo / "README.md").write_text("# fixture repaired\n", encoding="utf-8")
+    final = json.loads(_stop(repo, session_id, stop_hook_active=True))
+    assert "Claim Plane — VERIFIED" in final["systemMessage"]
+    assert codex.codex_intent_status(repo, session_id=session_id)["state"] == "verified"
+
+
+def test_completion_evidence_catches_external_undeclared_change(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_completion_bypass"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_completion_proposal(acceptance=[])
+    )
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md",
+                "@@",
+                "-# fixture",
+                "+# fixture updated",
+            )
+        },
+    )
+    (repo / "README.md").write_text("# fixture updated\n", encoding="utf-8")
+    # Simulate an out-of-band write that never passed through the Codex hook.
+    (repo / "auth.py").write_text("SECRET = True\n", encoding="utf-8")
+
+    stop_payload = json.loads(_stop(repo, session_id))
+    assert stop_payload["decision"] == "block"
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    completion = status["completion"]
+    assert completion["verified"] is False
+    assert completion["executed_violations"] >= 1
+    assert any(item["code"] == "undeclared_change" for item in completion["findings"])
+
+
+def test_verified_completion_is_idempotent(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_completion_idempotent"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_completion_proposal(acceptance=[])
+    )
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md",
+                "@@",
+                "-# fixture",
+                "+# fixture completed",
+            )
+        },
+    )
+    (repo / "README.md").write_text("# fixture completed\n", encoding="utf-8")
+
+    first = codex.verify_codex_completion(repo, session_id=session_id)
+    second = codex.verify_codex_completion(repo, session_id=session_id)
+    assert first == second
+    assert first["verified"] is True
+    assert codex.codex_intent_status(repo, session_id=session_id)["completion_attempts"] == 1
+
+
+def test_codex_verify_control_command_is_session_local(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_verify_control"
+    _bootstrap_task(repo, session_id)
+
+    allowed = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={
+            "command": (
+                "claim-plane codex-intent verify --session-id thr_verify_control "
+                "--repo . --acceptance-timeout 120"
+            )
+        },
+    )
+    denied = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={
+            "command": (
+                "claim-plane codex-intent verify --session-id another-session --repo ."
+            )
+        },
+    )
+
+    assert allowed == ""
+    assert json.loads(denied)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_completion_detects_connector_control_tamper_after_bootstrap(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_completion_control_tamper"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_completion_proposal(acceptance=[])
+    )
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md",
+                "@@",
+                "-# fixture",
+                "+# fixture changed",
+            )
+        },
+    )
+    (repo / "README.md").write_text("# fixture changed\n", encoding="utf-8")
+
+    hooks = repo / ".codex/hooks.json"
+    hooks.write_text(hooks.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    result = codex.verify_codex_completion(repo, session_id=session_id)
+    assert result["verified"] is False
+    assert any(
+        item["code"] == "undeclared_change" and item["path"] == ".codex/hooks.json"
+        for item in result["findings"]
+    )

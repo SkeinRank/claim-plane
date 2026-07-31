@@ -502,6 +502,7 @@ def _claim_plane_control_command(command: str, *, session_id: str | None) -> boo
     schemas = {
         "admit": ({"session-id", "repo", "proposal-json"}, frozenset()),
         "status": ({"session-id", "repo", "json"}, frozenset({"json"})),
+        "verify": ({"session-id", "repo", "acceptance-timeout"}, frozenset()),
         "amend": ({"session-id", "ticket", "reason", "repo"}, frozenset()),
     }
     schema = schemas.get(action)
@@ -519,6 +520,11 @@ def _claim_plane_control_command(command: str, *, session_id: str | None) -> boo
         return isinstance(options.get("proposal-json"), str)
     if action == "amend":
         return bool(options.get("ticket")) and bool(options.get("reason"))
+    if action == "verify" and "acceptance-timeout" in options:
+        try:
+            return int(str(options["acceptance-timeout"])) > 0
+        except ValueError:
+            return False
     return True
 
 

@@ -61,9 +61,14 @@ class GitChangeCollector:
             "--",
             check=False,
         )
-        changed_files = tuple(
-            line.strip() for line in names.splitlines() if line.strip()
+        tracked_changed = [line.strip() for line in names.splitlines() if line.strip()]
+        untracked_names = self._git(
+            repo, "ls-files", "--others", "--exclude-standard", check=False
         )
+        untracked = [
+            line.strip() for line in untracked_names.splitlines() if line.strip()
+        ]
+        changed_files = tuple(dict.fromkeys([*tracked_changed, *untracked]))
         patch = self._git(
             repo,
             "diff",
@@ -74,7 +79,25 @@ class GitChangeCollector:
             "--",
             check=False,
         )
-        changed_regions = tuple(_parse_changed_regions(patch))
+        region_items = list(_parse_changed_regions(patch))
+        for relative in untracked:
+            path = repo / relative
+            if not path.exists() or not path.is_file():
+                continue
+            try:
+                line_count = len(path.read_text(encoding="utf-8").splitlines())
+            except UnicodeDecodeError:
+                line_count = 1
+            region_items.append(
+                ChangedRegion(
+                    path=relative,
+                    start_line=1,
+                    end_line=max(1, line_count),
+                    old_start_line=0,
+                    old_end_line=0,
+                )
+            )
+        changed_regions = tuple(region_items)
         regions_by_path: dict[str, list[ChangedRegion]] = {}
         for region in changed_regions:
             regions_by_path.setdefault(region.path, []).append(region)
@@ -125,7 +148,7 @@ class GitChangeCollector:
                 "resolved_base_commit": resolved_base or None,
                 "merge_base": merge_base or None,
                 "base_is_ancestor": base_is_ancestor,
-                "collector": "git-diff-unified-0",
+                "collector": "git-diff-unified-0+untracked",
             },
         )
 

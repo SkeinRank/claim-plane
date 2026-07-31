@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.13.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.14.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -87,7 +87,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - read-only-by-default worker and integration acceptance guards that reject tracked or non-ignored untracked mutations;
 - SHA-256 evidence binding worker patches, manifests, result trees, result commits, and reproducible result patches;
 - transparent economy/standard/frontier worker-tier recommendations;
-- project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, session-bound task bootstrap, pinned Git bases, atomic ChangeIntent admission, pre-mutation authorization, and ticketed scope amendment for intercepted repository writes;
+- project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, session-bound task bootstrap, pinned Git bases, atomic ChangeIntent admission, pre-mutation authorization, ticketed scope amendment, and verified completion for autonomous Codex work;
 - CLI, stdio MCP, JSON Schemas, examples, and a deterministic protocol benchmark.
 
 The base package has no runtime dependencies. Agent Lexicon remains an optional semantic layer.
@@ -150,18 +150,23 @@ For intercepted `PreToolUse` calls, Claim Plane classifies repository effects be
 
 When a denial identifies concrete additional file authority, the guard issues a short-lived, session-bound scope-amendment ticket containing only the exact denied mutation set. Codex supplies a rationale through `claim-plane codex-intent amend`; it cannot choose different paths, change the task identity, change the pinned base, or remove existing preserve and acceptance requirements. Claim Plane derives the amended ChangeIntent, checks ticket integrity and intent freshness, performs normal atomic re-admission, and activates the amended intent only when admission succeeds. A rejected amendment leaves the previously active intent unchanged. Multiple contingent resources that cannot be promoted individually in one tool call can therefore be committed together through one inspectable amendment.
 
-The connector also reserves a narrow shell control channel for `claim-plane codex-intent admit`, `status`, and `amend`. The command must target the current Codex session and current repository; initial admission uses `--proposal-json` rather than a shell pipe or repository temporary file. Other Claim Plane commands and opaque shell effects remain subject to the normal fail-closed classification. Connector control state under `.claim-plane/**`, `.git/**`, and `.codex/**` cannot be granted through a session intent or amendment.
+The connector also reserves a narrow shell control channel for `claim-plane codex-intent admit`, `status`, `amend`, and `verify`. The command must target the current Codex session and current repository; initial admission uses `--proposal-json` rather than a shell pipe or repository temporary file. Other Claim Plane commands and opaque shell effects remain subject to the normal fail-closed classification. Connector control state under `.claim-plane/**`, `.git/**`, and `.codex/**` cannot be granted through a session intent or amendment.
+
+When Codex tries to finish an active task, the `Stop` lifecycle event runs verified completion. Claim Plane collects tracked and untracked repository changes, checks the actual work against the admitted scope, preserve and contract policies, executes the declared acceptance commands with worktree-integrity checks, and completes the intent only when the resulting evidence is clean. A failed first completion blocks the stop once and returns concrete findings so Codex can repair the work. If the continuation still fails, the session is allowed to stop as explicitly `UNVERIFIED` rather than entering an unbounded model loop.
+
+A clean completion is persisted on the session and surfaced as `VERIFIED` with changed-file counts, mutation-authority counters, scope expansions, acceptance outcome, and verification findings. The same result is available explicitly through `claim-plane codex-intent verify --session-id <id> --repo .` and `claim-plane codex-intent status`.
 
 ```text
 committed mutation  -> authorize -> Codex sandbox/approval -> execute
 contingent mutation -> promote + re-admit -> authorize -> execute
 undeclared mutation -> deny -> exact ticket -> reason -> re-admit -> retry
 unprovable mutation -> deny before tool execution
+Stop -> collect evidence -> acceptance -> VERIFIED or bounded repair continuation
 ```
 
 `claim-plane doctor codex` also checks that the installed Codex version provides the hook surface required by the guard. Hook interception is an integration boundary, not a substitute for the brokered reference-monitor boundary: runtime hook coverage and timeout behavior remain properties of Codex itself. Claim Plane therefore keeps broker capabilities, repository identity, admission, and verification as the authoritative core primitives.
 
-The session-bound proposal protocol is documented by [`schemas/codex-intent-proposal.schema.json`](schemas/codex-intent-proposal.schema.json), and the ticket format by [`schemas/codex-scope-amendment.schema.json`](schemas/codex-scope-amendment.schema.json). The lifecycle bridge does not depend on MCP; MCP remains an optional interaction surface for status, explanation, and evidence.
+The session-bound proposal protocol is documented by [`schemas/codex-intent-proposal.schema.json`](schemas/codex-intent-proposal.schema.json), the amendment ticket by [`schemas/codex-scope-amendment.schema.json`](schemas/codex-scope-amendment.schema.json), and verified completion by [`schemas/codex-completion.schema.json`](schemas/codex-completion.schema.json). The lifecycle bridge does not depend on MCP; MCP remains an optional interaction surface for status, explanation, and evidence.
 
 To remove the integration without disturbing other Codex hooks:
 

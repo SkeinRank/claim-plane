@@ -24,6 +24,11 @@ from claim_plane.connectors.codex_amendment import (
     mutation_from_dict,
     mutation_to_dict,
 )
+from claim_plane.connectors.codex_completion import (
+    CODEX_COMPLETION_PROTOCOL,
+    stop_block_reason,
+    verify_completion,
+)
 from claim_plane.connectors.codex_guard import (
     CODEX_GUARD_PROTOCOL,
     GuardEvaluation,
@@ -42,6 +47,7 @@ CODEX_INTENT_PROPOSAL_PROTOCOL = "claim-plane.codex-intent-proposal.v1"
 CODEX_INTENT_ADMISSION_PROTOCOL = "claim-plane.codex-intent-admission.v1"
 CODEX_HOOK_COMMAND = "claim-plane codex-hook"
 CODEX_MIN_GUARD_VERSION = (0, 123, 0)
+CODEX_COMPLETION_ACCEPTANCE_TIMEOUT = 300
 CODEX_HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -84,6 +90,19 @@ def _utc_now() -> str:
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _connector_control_fingerprints(root: Path) -> dict[str, str | None]:
+    return {
+        str(_CODEX_HOOKS): _file_sha256(root / _CODEX_HOOKS),
+        str(_CODEX_CONFIG): _file_sha256(root / _CODEX_CONFIG),
+    }
 
 
 def _session_key(session_id: str) -> str:
@@ -243,7 +262,12 @@ def _canonical_group(event: str) -> dict[str, Any]:
     group: dict[str, Any] = {}
     if matcher is not None:
         group["matcher"] = matcher
-    timeout = 3 if event == "SessionEnd" else 30
+    if event == "SessionEnd":
+        timeout = 3
+    elif event == "Stop":
+        timeout = CODEX_COMPLETION_ACCEPTANCE_TIMEOUT + 60
+    else:
+        timeout = 30
     group["hooks"] = [
         {
             "type": "command",
@@ -737,6 +761,7 @@ def _ensure_task_bootstrap(
             "task_branch": _branch_name(root),
             "task_worktree_dirty": dirty,
             "task_status_sha256": status_digest,
+            "connector_control_fingerprints": _connector_control_fingerprints(root),
             "prompt_sha256": prompt_digest,
             "prompt_length": len(prompt),
             "task_bootstrapped_at": _utc_now(),
@@ -1077,7 +1102,7 @@ def amend_codex_scope(
         session["scope_amendment_denied"] = int(
             session.get("scope_amendment_denied") or 0
         ) + 1
-    session["last_scope_amendment"] = {
+    amendment_record = {
         "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
         "ticket_id": ticket_id,
         "allowed": allowed,
@@ -1085,6 +1110,14 @@ def amend_codex_scope(
         "operations": list(applied or raw_mutations),
         "at": now,
     }
+    session["last_scope_amendment"] = amendment_record
+    history = [
+        dict(item)
+        for item in session.get("scope_amendment_history") or ()
+        if isinstance(item, dict)
+    ]
+    history.append(amendment_record)
+    session["scope_amendment_history"] = history[-50:]
     _write_session(root, session)
 
     if decision is None:
@@ -1105,6 +1138,165 @@ def amend_codex_scope(
         "decision": decision.to_dict(),
     }
 
+
+
+def _completion_system_message(result: dict[str, Any]) -> str:
+    changed = int(result.get("changed_files") or 0)
+    authorized = int(result.get("authorized_mutation_calls") or 0)
+    denied = int(result.get("denied_mutation_calls") or 0)
+    expansions = int(result.get("scope_expansions") or 0)
+    violations = int(result.get("executed_violations") or 0)
+    file_word = "file" if changed == 1 else "files"
+    mutation_word = "mutation call" if authorized == 1 else "mutation calls"
+    if result.get("verified"):
+        return "\n".join(
+            [
+                "Claim Plane — VERIFIED",
+                f"✓ {authorized} {mutation_word} authorized",
+                f"✓ {changed} {file_word} changed",
+                "✓ admitted scope verified",
+                "✓ preserve and contract checks passed",
+                "✓ acceptance criteria satisfied",
+                f"Scope expansions: {expansions}",
+                f"Denied mutations: {denied}",
+                f"Executed authority violations: {violations}",
+            ]
+        )
+    return "\n".join(
+        [
+            "Claim Plane — UNVERIFIED",
+            f"Errors: {result.get('errors', 0)}",
+            f"Executed authority violations: {violations}",
+            (
+                "Acceptance: passed"
+                if result.get("acceptance_passed")
+                else "Acceptance: failed"
+            ),
+        ]
+    )
+
+
+def verify_codex_completion(
+    root_or_child: str | Path,
+    *,
+    session_id: str,
+    acceptance_timeout: int = CODEX_COMPLETION_ACCEPTANCE_TIMEOUT,
+) -> dict[str, Any]:
+    """Verify one active Codex task and complete its intent only on clean evidence."""
+
+    root = resolve_project_root(root_or_child)
+    _require_initialized(root)
+    session = _load_session(root, session_id)
+    intent_id = session.get("active_intent_id")
+    if not isinstance(intent_id, str) or not intent_id:
+        raise ValueError("Codex session has no active ChangeIntent to verify")
+
+    existing = session.get("completion")
+    if session.get("task_state") == "verified" and isinstance(existing, dict):
+        return dict(existing)
+
+    result = verify_completion(
+        root,
+        intent_id=intent_id,
+        run_acceptance=True,
+        acceptance_timeout=acceptance_timeout,
+        connector_control_baseline=(
+            dict(session.get("connector_control_fingerprints") or {})
+        ),
+    )
+    now = _utc_now()
+    history = [
+        dict(item)
+        for item in session.get("scope_amendment_history") or ()
+        if isinstance(item, dict)
+    ]
+    admitted_history = [item for item in history if item.get("allowed") is True]
+    result.update(
+        {
+            "session_id": session_id,
+            "task_id": session.get("task_id"),
+            "goal": session.get("intent_goal"),
+            "base_commit": session.get("task_base_commit"),
+            "verified_at": now if result.get("verified") else None,
+            "checked_at": now,
+            "authorized_mutation_calls": int(
+                session.get("guard_authorized_mutation_calls") or 0
+            ),
+            "denied_mutation_calls": int(
+                session.get("guard_denied_mutation_calls") or 0
+            ),
+            "scope_promotions": int(session.get("guard_promotions") or 0),
+            "scope_expansions": len(admitted_history),
+            "scope_amendments": admitted_history,
+        }
+    )
+    session["completion_attempts"] = int(session.get("completion_attempts") or 0) + 1
+    session["completion"] = result
+    session["last_completion_at"] = now
+    session["task_state"] = "verified" if result.get("verified") else "verification_failed"
+    if result.get("verified"):
+        session.pop("pending_scope_amendment", None)
+    _write_session(root, session)
+    return result
+
+
+def _handle_stop_completion(
+    root: Path,
+    payload: dict[str, Any],
+    session: dict[str, Any],
+    *,
+    output: TextIO | None,
+) -> None:
+    intent_id = session.get("active_intent_id")
+    if not isinstance(intent_id, str) or not intent_id:
+        return
+    try:
+        result = verify_codex_completion(root, session_id=str(session["session_id"]))
+    except Exception as exc:
+        result = {
+            "protocol": CODEX_COMPLETION_PROTOCOL,
+            "verified": False,
+            "errors": 1,
+            "executed_violations": 0,
+            "acceptance_passed": False,
+            "findings": [
+                {
+                    "code": "completion_error",
+                    "severity": "error",
+                    "message": str(exc) or exc.__class__.__name__,
+                }
+            ],
+        }
+        session["completion_attempts"] = int(session.get("completion_attempts") or 0) + 1
+        session["completion"] = result
+        session["task_state"] = "verification_failed"
+        _write_session(root, session)
+
+    message = _completion_system_message(result)
+    if result.get("verified"):
+        _write_hook_output(output, {"systemMessage": message})
+        return
+
+    reason = stop_block_reason(result)
+    if payload.get("stop_hook_active") is True:
+        # Avoid an unbounded continuation loop. The task remains explicitly
+        # unverified and the user can inspect or resume it.
+        _write_hook_output(
+            output,
+            {
+                "systemMessage": message
+                + "\nClaim Plane did not block Stop again because this is already a Stop-hook continuation. The task remains UNVERIFIED."
+            },
+        )
+        return
+    _write_hook_output(
+        output,
+        {
+            "decision": "block",
+            "reason": reason,
+            "systemMessage": message,
+        },
+    )
 
 def codex_intent_status(
     root_or_child: str | Path, *, session_id: str
@@ -1145,7 +1337,14 @@ def codex_intent_status(
             "denied": int(session.get("scope_amendment_denied") or 0),
             "pending": dict(session.get("pending_scope_amendment") or {}),
             "last": dict(session.get("last_scope_amendment") or {}),
+            "history": [
+                dict(item)
+                for item in session.get("scope_amendment_history") or ()
+                if isinstance(item, dict)
+            ],
         },
+        "completion": dict(session.get("completion") or {}),
+        "completion_attempts": int(session.get("completion_attempts") or 0),
     }
 
 
@@ -1398,6 +1597,16 @@ def _record_guard_evaluation(
         )
     else:
         session["guard_denied_calls"] = int(session.get("guard_denied_calls") or 0) + 1
+    if evaluation.mutating:
+        session["guard_mutation_calls"] = int(session.get("guard_mutation_calls") or 0) + 1
+        if evaluation.allowed:
+            session["guard_authorized_mutation_calls"] = int(
+                session.get("guard_authorized_mutation_calls") or 0
+            ) + 1
+        else:
+            session["guard_denied_mutation_calls"] = int(
+                session.get("guard_denied_mutation_calls") or 0
+            ) + 1
     if promoted:
         session["guard_promotions"] = int(session.get("guard_promotions") or 0) + 1
     session["guard_last_decision"] = "allow" if evaluation.allowed else "deny"
@@ -1578,6 +1787,8 @@ def handle_codex_hook(
         session = _ensure_session(root, payload)
         if session is not None:
             _heartbeat_session_intent(root, session)
+            if event == "Stop":
+                _handle_stop_completion(root, payload, session, output=output)
 
     if event in {"Stop", "SessionEnd"}:
         _record_session_lifecycle_event(root, payload)

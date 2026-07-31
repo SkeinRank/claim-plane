@@ -16,6 +16,7 @@ from claim_plane.connectors import (
     admit_codex_intent,
     amend_codex_scope,
     codex_intent_status,
+    verify_codex_completion,
     connect_codex,
     disconnect_codex,
     doctor_codex,
@@ -183,6 +184,16 @@ def cmd_codex_intent_amend(args: argparse.Namespace) -> int:
     return 0 if result["allowed"] else 2
 
 
+
+def cmd_codex_intent_verify(args: argparse.Namespace) -> int:
+    result = verify_codex_completion(
+        args.repo,
+        session_id=args.session_id,
+        acceptance_timeout=args.acceptance_timeout,
+    )
+    _write_json(result)
+    return 0 if result.get("verified") else 2
+
 def cmd_codex_intent_status(args: argparse.Namespace) -> int:
     result = codex_intent_status(args.repo, session_id=args.session_id)
     if args.json:
@@ -209,6 +220,14 @@ def cmd_codex_intent_status(args: argparse.Namespace) -> int:
             f"{amendment.get('admitted', 0)} admitted, "
             f"{amendment.get('denied', 0)} denied"
         )
+        completion = result.get("completion") or {}
+        if completion:
+            label = "VERIFIED" if completion.get("verified") else "UNVERIFIED"
+            print(
+                "Completion: "
+                f"{label}; {completion.get('changed_files', 0)} files changed; "
+                f"{completion.get('authorized_mutation_calls', 0)} mutation calls authorized"
+            )
         pending = amendment.get("pending") or {}
         if pending.get("ticket_id"):
             paths = [
@@ -847,6 +866,14 @@ def build_parser() -> argparse.ArgumentParser:
     codex_intent_amend.add_argument("--reason", required=True)
     codex_intent_amend.add_argument("--repo", default=".")
     codex_intent_amend.set_defaults(func=cmd_codex_intent_amend)
+
+    codex_intent_verify = codex_intent_sub.add_parser(
+        "verify", help="Verify the current Codex worktree and acceptance criteria."
+    )
+    codex_intent_verify.add_argument("--session-id", required=True)
+    codex_intent_verify.add_argument("--repo", default=".")
+    codex_intent_verify.add_argument("--acceptance-timeout", type=int, default=300)
+    codex_intent_verify.set_defaults(func=cmd_codex_intent_verify)
 
     codex_intent_status_parser = codex_intent_sub.add_parser(
         "status", help="Show the session-bound task and admitted intent."

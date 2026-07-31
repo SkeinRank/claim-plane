@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/codex-completion.schema.json",
+  "title": "Claim Plane Codex verified completion",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "protocol",
+    "verified",
+    "session_id",
+    "task_id",
+    "intent_id",
+    "base_commit",
+    "changed_files",
+    "changed_paths",
+    "acceptance_passed",
+    "executed_violations",
+    "findings"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.codex-completion.v1"
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "scope_verified": {
+      "type": "boolean"
+    },
+    "contracts_verified": {
+      "type": "boolean"
+    },
+    "preserves_verified": {
+      "type": "boolean"
+    },
+    "base_verified": {
+      "type": "boolean"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "intent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "goal": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "base_commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "verified_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "checked_at": {
+      "type": "string"
+    },
+    "changed_files": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "changed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "authorized_mutation_calls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "denied_mutation_calls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "scope_promotions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "scope_expansions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "acceptance_commands": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "acceptance_passed": {
+      "type": "boolean"
+    },
+    "executed_violations": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "identifier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
