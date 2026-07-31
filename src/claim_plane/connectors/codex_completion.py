@@ -71,7 +71,10 @@ def _path_fingerprint(path: Path) -> str:
     except FileNotFoundError:
         return "missing"
     if path.is_symlink():
-        return "symlink:" + hashlib.sha256(str(path.readlink()).encode("utf-8")).hexdigest()
+        return (
+            "symlink:"
+            + hashlib.sha256(str(path.readlink()).encode("utf-8")).hexdigest()
+        )
     if path.is_file():
         return "file:" + hashlib.sha256(path.read_bytes()).hexdigest()
     if path.is_dir():
@@ -95,12 +98,18 @@ def _without_unchanged_preexisting_changes(
     ignored_set = set(ignored)
     return replace(
         manifest,
-        changed_files=tuple(path for path in manifest.changed_files if path not in ignored_set),
+        changed_files=tuple(
+            path for path in manifest.changed_files if path not in ignored_set
+        ),
         changed_regions=tuple(
-            region for region in manifest.changed_regions if region.path not in ignored_set
+            region
+            for region in manifest.changed_regions
+            if region.path not in ignored_set
         ),
         artifacts=tuple(
-            artifact for artifact in manifest.artifacts if artifact.path not in ignored_set
+            artifact
+            for artifact in manifest.artifacts
+            if artifact.path not in ignored_set
         ),
         metadata={
             **manifest.metadata,
@@ -131,10 +140,14 @@ def _without_unchanged_connector_control_changes(
             path for path in manifest.changed_files if path not in ignored_set
         ),
         changed_regions=tuple(
-            region for region in manifest.changed_regions if region.path not in ignored_set
+            region
+            for region in manifest.changed_regions
+            if region.path not in ignored_set
         ),
         artifacts=tuple(
-            artifact for artifact in manifest.artifacts if artifact.path not in ignored_set
+            artifact
+            for artifact in manifest.artifacts
+            if artifact.path not in ignored_set
         ),
         metadata={
             **manifest.metadata,
@@ -250,6 +263,10 @@ def stop_block_reason(completion: Mapping[str, Any]) -> str:
         if count >= 6:
             break
     if count == 0:
-        lines.append("- Verification returned a non-clean result without a detailed error.")
-    lines.append("Repair the findings within the admitted ChangeIntent, then stop again.")
+        lines.append(
+            "- Verification returned a non-clean result without a detailed error."
+        )
+    lines.append(
+        "Repair the findings within the admitted ChangeIntent, then stop again."
+    )
     return "\n".join(lines)

@@ -25,9 +25,7 @@ from claim_plane.core import AccessMode, ChangeIntent, IntentOperation, Resource
 
 CODEX_GUARD_PROTOCOL = "claim-plane.codex-pre-mutation-guard.v1"
 
-_WRITE_MODES = frozenset(
-    {AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST}
-)
+_WRITE_MODES = frozenset({AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST})
 
 _READ_ONLY_TOOLS = frozenset(
     {
@@ -201,7 +199,9 @@ def _relative_path(root: Path, cwd: Path, raw: str) -> str:
     return normalized
 
 
-def _patch_mutations(root: Path, cwd: Path, command: str) -> tuple[MutationRequest, ...]:
+def _patch_mutations(
+    root: Path, cwd: Path, command: str
+) -> tuple[MutationRequest, ...]:
     current: MutationRequest | None = None
     mutations: list[MutationRequest] = []
     saw_begin = False
@@ -222,7 +222,9 @@ def _patch_mutations(root: Path, cwd: Path, command: str) -> tuple[MutationReque
         header = _PATCH_HEADER.match(stripped)
         if header:
             if not saw_begin or saw_end:
-                raise ValueError("apply_patch file operation is outside the patch envelope")
+                raise ValueError(
+                    "apply_patch file operation is outside the patch envelope"
+                )
             action, raw_path = header.groups()
             path = _relative_path(root, cwd, raw_path)
             access = {
@@ -335,7 +337,9 @@ def _parse_simple_shell_mutation(
         if not paths:
             return None
         return tuple(
-            MutationRequest(AccessMode.WRITE, _relative_path(root, cwd, item), source="shell")
+            MutationRequest(
+                AccessMode.WRITE, _relative_path(root, cwd, item), source="shell"
+            )
             for item in paths
         )
 
@@ -344,7 +348,9 @@ def _parse_simple_shell_mutation(
         if not paths:
             return None
         return tuple(
-            MutationRequest(AccessMode.DELETE, _relative_path(root, cwd, item), source="shell")
+            MutationRequest(
+                AccessMode.DELETE, _relative_path(root, cwd, item), source="shell"
+            )
             for item in paths
         )
 
@@ -415,7 +421,9 @@ def _candidate_operations(
     )
 
 
-def _operation_authorizes(operation: IntentOperation, mutation: MutationRequest) -> bool:
+def _operation_authorizes(
+    operation: IntentOperation, mutation: MutationRequest
+) -> bool:
     # apply_patch and the direct shell grammar expose whole-file authority, not an
     # exact pre-image line interval.  A bounded declaration must therefore be
     # enforced by the region-aware broker rather than widened here.
@@ -460,6 +468,9 @@ def _parse_control_options(
         raw = token[2:]
         if not raw:
             return None
+
+        value: str | bool
+
         if "=" in raw:
             key, value = raw.split("=", 1)
             if key in boolean_flags or not value:
@@ -558,7 +569,9 @@ def classify_tool_call(
 ) -> tuple[str, tuple[MutationRequest, ...]]:
     """Return ``(classification, mutations)`` without consulting authority state."""
 
-    tool_name = _normalized_tool_name(payload.get("tool_name") or payload.get("toolName"))
+    tool_name = _normalized_tool_name(
+        payload.get("tool_name") or payload.get("toolName")
+    )
     cwd_raw = payload.get("cwd")
     cwd = Path(cwd_raw).resolve() if isinstance(cwd_raw, str) and cwd_raw else root
     try:
@@ -701,7 +714,9 @@ def evaluate_pre_tool_use(
         )
         if protected:
             target = (
-                f" -> {mutation.target_path}" if mutation.target_path is not None else ""
+                f" -> {mutation.target_path}"
+                if mutation.target_path is not None
+                else ""
             )
             return GuardEvaluation(
                 allowed=False,

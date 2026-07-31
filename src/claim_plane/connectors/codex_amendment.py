@@ -37,7 +37,9 @@ def mutation_from_dict(payload: dict[str, Any]) -> MutationRequest:
     allowed = {"access", "path", "target_path"}
     unknown = sorted(set(payload) - allowed)
     if unknown:
-        raise ValueError("unsupported scope-amendment mutation field(s): " + ", ".join(unknown))
+        raise ValueError(
+            "unsupported scope-amendment mutation field(s): " + ", ".join(unknown)
+        )
     access = AccessMode(str(payload.get("access") or ""))
     path = str(payload.get("path") or "").strip()
     if not path:
@@ -49,10 +51,14 @@ def mutation_from_dict(payload: dict[str, Any]) -> MutationRequest:
         raise ValueError("rename scope amendment requires target_path")
     if access is not AccessMode.RENAME and target is not None:
         raise ValueError("target_path is only valid for rename scope amendments")
-    return MutationRequest(access=access, path=path, target_path=target, source="amendment")
+    return MutationRequest(
+        access=access, path=path, target_path=target, source="amendment"
+    )
 
 
-def _operation_matches_mutation(operation: IntentOperation, mutation: MutationRequest) -> bool:
+def _operation_matches_mutation(
+    operation: IntentOperation, mutation: MutationRequest
+) -> bool:
     if operation.resource.kind not in {ResourceKind.FILE, ResourceKind.DOCUMENT}:
         return False
     if operation.resource.region is not None:

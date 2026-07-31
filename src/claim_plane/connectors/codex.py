@@ -304,7 +304,9 @@ def _claim_plane_hook_drift(payload: dict[str, Any], path: Path) -> list[str]:
             if any(_is_claim_plane_handler(handler) for handler in handlers):
                 matches.append(group)
         if len(matches) != 1:
-            problems.append(f"{event}: expected one Claim Plane handler, found {len(matches)}")
+            problems.append(
+                f"{event}: expected one Claim Plane handler, found {len(matches)}"
+            )
             continue
         if matches[0] != _canonical_group(event):
             problems.append(f"{event}: Claim Plane hook definition drifted")
@@ -608,7 +610,9 @@ def doctor_codex(root_or_child: str | Path = ".") -> CodexDoctorReport:
     checks.append(
         {
             "name": "connector_revision",
-            "status": "ok" if connector_revision == CODEX_CONNECTOR_REVISION else "error",
+            "status": "ok"
+            if connector_revision == CODEX_CONNECTOR_REVISION
+            else "error",
             "detail": (
                 f"revision {connector_revision}"
                 if connector_revision == CODEX_CONNECTOR_REVISION
@@ -669,7 +673,9 @@ def doctor_codex(root_or_child: str | Path = ".") -> CodexDoctorReport:
         )
     else:
         guard_status = "ok"
-        guard_detail = f"Codex version supports the required apply_patch hook surface ({minimum}+)"
+        guard_detail = (
+            f"Codex version supports the required apply_patch hook surface ({minimum}+)"
+        )
     checks.append(
         {
             "name": "pre_mutation_guard_compatibility",
@@ -792,7 +798,9 @@ def _other_active_codex_sessions(root: Path, session_id: str) -> list[str]:
         return []
     plane = Plane.open(root / _PLANE_DB)
     try:
-        active = {str(item.get("intent_id")) for item in plane.intents(active_only=True)}
+        active = {
+            str(item.get("intent_id")) for item in plane.intents(active_only=True)
+        }
     finally:
         plane.close()
     if not active:
@@ -851,12 +859,16 @@ def _recover_resumed_session(root: Path, session: dict[str, Any]) -> None:
         expected_base = str(session.get("task_base_commit") or "")
         if not expected_base or _head_commit(root) != expected_base:
             session["task_state"] = "recovery_required"
-            session["recovery_reason"] = "Git HEAD changed while the Codex session was inactive"
+            session["recovery_reason"] = (
+                "Git HEAD changed while the Codex session was inactive"
+            )
             return
         expected_branch = str(session.get("task_branch") or "")
         if expected_branch and _branch_name(root) != expected_branch:
             session["task_state"] = "recovery_required"
-            session["recovery_reason"] = "Git branch changed while the Codex session was inactive"
+            session["recovery_reason"] = (
+                "Git branch changed while the Codex session was inactive"
+            )
             return
         old = plane.intent(intent_id)
         if old is None:
@@ -978,9 +990,9 @@ def _ensure_task_bootstrap(
         prompt = ""
     prompt_digest = _sha256_text(prompt)
     base_commit = _head_commit(root)
-    token = _sha256_text(
-        f"{session['session_id']}\0{base_commit}\0{prompt_digest}"
-    )[:20]
+    token = _sha256_text(f"{session['session_id']}\0{base_commit}\0{prompt_digest}")[
+        :20
+    ]
     dirty, status_digest = _worktree_status(root)
     preexisting = _preexisting_worktree_baseline(root)
     session.update(
@@ -1066,7 +1078,9 @@ def _intent_from_proposal(
 
     raw_operations = proposal.get("operations")
     if not isinstance(raw_operations, list) or not raw_operations:
-        raise ValueError("Codex intent proposal requires a non-empty 'operations' array")
+        raise ValueError(
+            "Codex intent proposal requires a non-empty 'operations' array"
+        )
     operations = tuple(IntentOperation.from_dict(item) for item in raw_operations)
     for operation in operations:
         _validate_operation_path(operation)
@@ -1269,11 +1283,13 @@ def amend_codex_scope(
             "reason_code": "ticket_expired",
             "at": _utc_now(),
         }
-        session["scope_amendment_denied"] = int(
-            session.get("scope_amendment_denied") or 0
-        ) + 1
+        session["scope_amendment_denied"] = (
+            int(session.get("scope_amendment_denied") or 0) + 1
+        )
         _write_session(root, session)
-        raise ValueError("scope-amendment ticket has expired; retry the denied mutation")
+        raise ValueError(
+            "scope-amendment ticket has expired; retry the denied mutation"
+        )
 
     expected_base = str(session.get("task_base_commit") or "")
     if not expected_base or _head_commit(root) != expected_base:
@@ -1285,9 +1301,7 @@ def amend_codex_scope(
     if not isinstance(raw_mutations, list) or not raw_mutations:
         raise ValueError("scope-amendment ticket contains no requested mutations")
     mutations = tuple(
-        mutation_from_dict(item)
-        for item in raw_mutations
-        if isinstance(item, dict)
+        mutation_from_dict(item) for item in raw_mutations if isinstance(item, dict)
     )
     if len(mutations) != len(raw_mutations):
         raise ValueError("scope-amendment ticket contains invalid mutation entries")
@@ -1310,7 +1324,10 @@ def amend_codex_scope(
                 "scope-amendment ticket is stale because the active intent changed; "
                 "retry the denied mutation"
             )
-        if current.base_commit != expected_base or current.base_revision != expected_base:
+        if (
+            current.base_commit != expected_base
+            or current.base_revision != expected_base
+        ):
             raise ValueError("active Codex intent no longer matches the task base")
 
         amended_at = _utc_now()
@@ -1334,19 +1351,19 @@ def amend_codex_scope(
 
     now = _utc_now()
     session.pop("pending_scope_amendment", None)
-    session["scope_amendment_requests"] = int(
-        session.get("scope_amendment_requests") or 0
-    ) + 1
+    session["scope_amendment_requests"] = (
+        int(session.get("scope_amendment_requests") or 0) + 1
+    )
     allowed = bool(decision and decision.allowed)
     if allowed:
-        session["scope_amendment_admitted"] = int(
-            session.get("scope_amendment_admitted") or 0
-        ) + 1
+        session["scope_amendment_admitted"] = (
+            int(session.get("scope_amendment_admitted") or 0) + 1
+        )
         session["task_state"] = "active"
     else:
-        session["scope_amendment_denied"] = int(
-            session.get("scope_amendment_denied") or 0
-        ) + 1
+        session["scope_amendment_denied"] = (
+            int(session.get("scope_amendment_denied") or 0) + 1
+        )
     amendment_record = {
         "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
         "ticket_id": ticket_id,
@@ -1382,7 +1399,6 @@ def amend_codex_scope(
         "contingent_scope": list(session.get("contingent_scope") or ()),
         "decision": decision.to_dict(),
     }
-
 
 
 def _completion_system_message(result: dict[str, Any]) -> str:
@@ -1448,9 +1464,7 @@ def verify_codex_completion(
         connector_control_baseline=(
             dict(session.get("connector_control_fingerprints") or {})
         ),
-        preexisting_worktree_baseline=(
-            dict(session.get("preexisting_worktree") or {})
-        ),
+        preexisting_worktree_baseline=(dict(session.get("preexisting_worktree") or {})),
     )
     now = _utc_now()
     history = [
@@ -1481,7 +1495,9 @@ def verify_codex_completion(
     session["completion_attempts"] = int(session.get("completion_attempts") or 0) + 1
     session["completion"] = result
     session["last_completion_at"] = now
-    session["task_state"] = "verified" if result.get("verified") else "verification_failed"
+    session["task_state"] = (
+        "verified" if result.get("verified") else "verification_failed"
+    )
     if result.get("verified"):
         session.pop("pending_scope_amendment", None)
     _write_session(root, session)
@@ -1515,7 +1531,9 @@ def _handle_stop_completion(
                 }
             ],
         }
-        session["completion_attempts"] = int(session.get("completion_attempts") or 0) + 1
+        session["completion_attempts"] = (
+            int(session.get("completion_attempts") or 0) + 1
+        )
         session["completion"] = result
         session["task_state"] = "verification_failed"
         _write_session(root, session)
@@ -1546,6 +1564,7 @@ def _handle_stop_completion(
         },
     )
 
+
 def abandon_codex_intent(
     root_or_child: str | Path, *, session_id: str
 ) -> dict[str, Any]:
@@ -1554,7 +1573,9 @@ def abandon_codex_intent(
     root = resolve_project_root(root_or_child)
     session = _load_session(root, session_id)
     if session.get("task_state") == "verified":
-        raise ValueError("verified Codex work is already complete and cannot be abandoned")
+        raise ValueError(
+            "verified Codex work is already complete and cannot be abandoned"
+        )
     intent_id = session.get("active_intent_id")
     if isinstance(intent_id, str) and intent_id and (root / _PLANE_DB).exists():
         plane = Plane.open(root / _PLANE_DB)
@@ -1598,7 +1619,9 @@ def codex_intent_status(
         "worktree_dirty_at_bootstrap": bool(session.get("preexisting_worktree")),
         "hardening": {
             "connector_revision": CODEX_CONNECTOR_REVISION,
-            "preexisting_paths": sorted((session.get("preexisting_worktree") or {}).keys()),
+            "preexisting_paths": sorted(
+                (session.get("preexisting_worktree") or {}).keys()
+            ),
             "resume_recoveries": int(session.get("resume_recoveries") or 0),
             "recovered_from_intent_id": session.get("recovered_from_intent_id"),
             "recovery_reason": session.get("recovery_reason"),
@@ -1669,9 +1692,9 @@ def _task_context(session: dict[str, Any]) -> str:
         preserves = [f"- {item}" for item in session.get("preserves") or ()] or [
             "- none"
         ]
-        acceptance = [
-            f"- {item}" for item in session.get("acceptance") or ()
-        ] or ["- none"]
+        acceptance = [f"- {item}" for item in session.get("acceptance") or ()] or [
+            "- none"
+        ]
         return "\n".join(
             [
                 "Claim Plane execution contract is active for this Codex session.",
@@ -1788,7 +1811,9 @@ def _heartbeat_session_intent(root: Path, session: dict[str, Any]) -> bool:
         plane.close()
 
 
-def _scope_amendment_signature(mutations: tuple[Any, ...], intent_fingerprint: str) -> str:
+def _scope_amendment_signature(
+    mutations: tuple[Any, ...], intent_fingerprint: str
+) -> str:
     payload = {
         "intent_fingerprint": intent_fingerprint,
         "mutations": [mutation_to_dict(item) for item in mutations],
@@ -1862,9 +1887,9 @@ def _attach_scope_amendment_ticket(
             .replace("+00:00", "Z"),
         }
         session["pending_scope_amendment"] = ticket
-        session["scope_amendment_tickets_issued"] = int(
-            session.get("scope_amendment_tickets_issued") or 0
-        ) + 1
+        session["scope_amendment_tickets_issued"] = (
+            int(session.get("scope_amendment_tickets_issued") or 0) + 1
+        )
         _write_session(root, session)
 
     session_arg = shlex.quote(str(session["session_id"]))
@@ -1873,7 +1898,7 @@ def _attach_scope_amendment_ticket(
         " Claim Plane opened a one-time scope-amendment ticket for only the denied "
         "mutation(s). If the additional scope is genuinely required, run "
         f"`claim-plane codex-intent amend --session-id {session_arg} --ticket "
-        f"{ticket_arg} --reason \"<why this scope is required>\" --repo .`, then retry "
+        f'{ticket_arg} --reason "<why this scope is required>" --repo .`, then retry '
         "the original tool call. The amendment is re-admitted atomically and may still "
         "be denied by coordination policy."
     )
@@ -1896,15 +1921,17 @@ def _record_guard_evaluation(
     else:
         session["guard_denied_calls"] = int(session.get("guard_denied_calls") or 0) + 1
     if evaluation.mutating:
-        session["guard_mutation_calls"] = int(session.get("guard_mutation_calls") or 0) + 1
+        session["guard_mutation_calls"] = (
+            int(session.get("guard_mutation_calls") or 0) + 1
+        )
         if evaluation.allowed:
-            session["guard_authorized_mutation_calls"] = int(
-                session.get("guard_authorized_mutation_calls") or 0
-            ) + 1
+            session["guard_authorized_mutation_calls"] = (
+                int(session.get("guard_authorized_mutation_calls") or 0) + 1
+            )
         else:
-            session["guard_denied_mutation_calls"] = int(
-                session.get("guard_denied_mutation_calls") or 0
-            ) + 1
+            session["guard_denied_mutation_calls"] = (
+                int(session.get("guard_denied_mutation_calls") or 0) + 1
+            )
     if promoted:
         session["guard_promotions"] = int(session.get("guard_promotions") or 0) + 1
     session["guard_last_decision"] = "allow" if evaluation.allowed else "deny"
@@ -1977,7 +2004,11 @@ def _pre_tool_use_guard(
             baseline = session.get("preexisting_worktree") or {}
             if isinstance(baseline, dict):
                 touched = sorted(
-                    {mutation.path for mutation in evaluation.mutations if mutation.path in baseline}
+                    {
+                        mutation.path
+                        for mutation in evaluation.mutations
+                        if mutation.path in baseline
+                    }
                     | {
                         mutation.target_path
                         for mutation in evaluation.mutations
@@ -1993,7 +2024,9 @@ def _pre_tool_use_guard(
                         reason_code="preexisting_dirty_path",
                         reason=(
                             "Claim Plane will not mutate a path that already had user changes "
-                            "when this task was bootstrapped: " + ", ".join(touched) + ". "
+                            "when this task was bootstrapped: "
+                            + ", ".join(touched)
+                            + ". "
                             "Commit or stash those changes, or start the task in a clean worktree."
                         ),
                         mutations=evaluation.mutations,
@@ -2031,7 +2064,9 @@ def _pre_tool_use_guard(
 
         promoted_intent = plane.intent(intent_id)
         if promoted_intent is None:
-            return _guard_error(evaluation.tool_name, "promoted intent could not be reloaded")
+            return _guard_error(
+                evaluation.tool_name, "promoted intent could not be reloaded"
+            )
         session["intent_fingerprint"] = promoted_intent.fingerprint()
         session["committed_scope"] = [
             _operation_summary(item) for item in promoted_intent.committed_operations
@@ -2049,9 +2084,8 @@ def _pre_tool_use_guard(
     finally:
         plane.close()
 
-def handle_codex_hook(
-    payload: dict[str, Any], *, output: TextIO | None = None
-) -> int:
+
+def handle_codex_hook(payload: dict[str, Any], *, output: TextIO | None = None) -> int:
     """Dispatch a Codex lifecycle event for an enrolled project.
 
     The project hook command remains stable across connector versions. Session and
@@ -2073,7 +2107,11 @@ def handle_codex_hook(
                 output,
                 denied_hook_output(
                     _guard_error(
-                        str(payload.get("tool_name") or payload.get("toolName") or "unknown"),
+                        str(
+                            payload.get("tool_name")
+                            or payload.get("toolName")
+                            or "unknown"
+                        ),
                         f"project root cannot be resolved: {exc}",
                     )
                 ),
@@ -2085,7 +2123,11 @@ def handle_codex_hook(
                 output,
                 denied_hook_output(
                     _guard_error(
-                        str(payload.get("tool_name") or payload.get("toolName") or "unknown"),
+                        str(
+                            payload.get("tool_name")
+                            or payload.get("toolName")
+                            or "unknown"
+                        ),
                         "project-local Claim Plane enrollment state is missing",
                     )
                 ),

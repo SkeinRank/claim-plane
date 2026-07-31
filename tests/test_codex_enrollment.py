@@ -337,13 +337,16 @@ def test_user_prompt_bootstraps_session_bound_task_without_persisting_prompt(
     assert state["session_id"] == session_id
     assert state["task_id"].startswith("codex-task-")
     assert state["reserved_intent_id"].startswith("codex-intent-")
-    assert state["task_base_commit"] == subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.strip()
+    assert (
+        state["task_base_commit"]
+        == subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+    )
     assert state["task_state"] == "awaiting_intent"
     assert "Fix the cache race" not in text
     assert state["prompt_sha256"]
@@ -359,9 +362,7 @@ def test_codex_intent_admission_binds_identity_base_and_scope_to_session(
     session_id = "thr_admit"
     _bootstrap_task(repo, session_id)
 
-    result = codex.admit_codex_intent(
-        repo, session_id=session_id, proposal=_proposal()
-    )
+    result = codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
 
     assert result["protocol"] == codex.CODEX_INTENT_ADMISSION_PROTOCOL
     assert result["allowed"] is True
@@ -386,9 +387,7 @@ def test_codex_intent_admission_binds_identity_base_and_scope_to_session(
         assert intent.task_id == result["task_id"]
         assert intent.metadata["goal"] == result["goal"]
         record = next(
-            item
-            for item in plane.intents()
-            if item["intent_id"] == result["intent_id"]
+            item for item in plane.intents() if item["intent_id"] == result["intent_id"]
         )
         assert record["state"] == "active"
     finally:
@@ -523,12 +522,15 @@ def test_pretool_read_only_is_allowed_before_intent_admission(tmp_path: Path) ->
     session_id = "thr_guard_read"
     _bootstrap_task(repo, session_id)
 
-    assert _pretool(
-        repo,
-        session_id,
-        tool_name="exec_command",
-        tool_input={"command": "rg SessionCache src"},
-    ) == ""
+    assert (
+        _pretool(
+            repo,
+            session_id,
+            tool_name="exec_command",
+            tool_input={"command": "rg SessionCache src"},
+        )
+        == ""
+    )
 
     status = codex.codex_intent_status(repo, session_id=session_id)
     assert status["guard"]["authorized_calls"] == 1
@@ -544,7 +546,9 @@ def test_pretool_mutation_is_denied_before_intent_admission(tmp_path: Path) -> N
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")
+        },
     )
 
     payload = json.loads(raw)
@@ -564,7 +568,9 @@ def test_pretool_committed_apply_patch_is_authorized(tmp_path: Path) -> None:
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")
+        },
     )
 
     assert raw == ""
@@ -583,7 +589,9 @@ def test_pretool_undeclared_apply_patch_is_denied(tmp_path: Path) -> None:
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
 
     decision = json.loads(raw)["hookSpecificOutput"]
@@ -592,7 +600,9 @@ def test_pretool_undeclared_apply_patch_is_denied(tmp_path: Path) -> None:
     assert "outside the admitted ChangeIntent" in decision["permissionDecisionReason"]
 
 
-def test_pretool_contingent_path_is_atomically_promoted_before_allow(tmp_path: Path) -> None:
+def test_pretool_contingent_path_is_atomically_promoted_before_allow(
+    tmp_path: Path,
+) -> None:
     repo = _repo(tmp_path)
     session_id = "thr_guard_promote"
     _bootstrap_task(repo, session_id)
@@ -602,7 +612,9 @@ def test_pretool_contingent_path_is_atomically_promoted_before_allow(tmp_path: P
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: src/locking.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: src/locking.py", "@@", "-a", "+b")
+        },
     )
 
     assert raw == ""
@@ -654,7 +666,10 @@ def test_pretool_multiple_contingent_promotions_are_denied_without_partial_chang
 
     decision = json.loads(raw)["hookSpecificOutput"]
     assert decision["permissionDecision"] == "deny"
-    assert "more than one contingent scope promotion" in decision["permissionDecisionReason"]
+    assert (
+        "more than one contingent scope promotion"
+        in decision["permissionDecisionReason"]
+    )
     status = codex.codex_intent_status(repo, session_id=session_id)
     assert status["guard"]["promotions"] == 0
     assert {item["identifier"] for item in status["contingent_scope"]} >= {
@@ -696,7 +711,7 @@ def test_pretool_opaque_shell_and_unknown_tools_fail_closed(tmp_path: Path) -> N
         repo,
         session_id,
         tool_name="exec_command",
-        tool_input={"command": "python -c 'open(\"src/cache.py\", \"w\").write(\"x\")'"},
+        tool_input={"command": 'python -c \'open("src/cache.py", "w").write("x")\''},
     )
     unknown = _pretool(
         repo,
@@ -722,7 +737,9 @@ def test_pretool_changed_head_denies_mutation(tmp_path: Path) -> None:
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")
+        },
     )
 
     decision = json.loads(raw)["hookSpecificOutput"]
@@ -783,7 +800,9 @@ def test_scope_denial_issues_reusable_exact_amendment_ticket(tmp_path: Path) -> 
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     first_reason = json.loads(first)["hookSpecificOutput"]["permissionDecisionReason"]
     status = codex.codex_intent_status(repo, session_id=session_id)
@@ -800,10 +819,14 @@ def test_scope_denial_issues_reusable_exact_amendment_ticket(tmp_path: Path) -> 
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     second_status = codex.codex_intent_status(repo, session_id=session_id)
-    assert second_status["scope_amendment"]["pending"]["ticket_id"] == pending["ticket_id"]
+    assert (
+        second_status["scope_amendment"]["pending"]["ticket_id"] == pending["ticket_id"]
+    )
     assert second_status["scope_amendment"]["tickets_issued"] == 1
     second_reason = json.loads(second)["hookSpecificOutput"]["permissionDecisionReason"]
     assert pending["ticket_id"] in second_reason
@@ -823,7 +846,9 @@ def test_scope_amendment_readmits_exact_denied_resource_and_retry_is_allowed(
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     status = codex.codex_intent_status(repo, session_id=session_id)
     ticket = status["scope_amendment"]["pending"]["ticket_id"]
@@ -840,16 +865,16 @@ def test_scope_amendment_readmits_exact_denied_resource_and_retry_is_allowed(
     assert result["operations"] == [
         {"access": "write", "path": "auth/token.py", "target_path": None}
     ]
-    assert "auth/token.py" in {
-        item["identifier"] for item in result["committed_scope"]
-    }
+    assert "auth/token.py" in {item["identifier"] for item in result["committed_scope"]}
     assert result["decision"]["allowed"] is True
 
     retry = _pretool(
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     assert retry == ""
 
@@ -911,7 +936,9 @@ def test_multiple_contingent_mutations_can_be_committed_atomically_by_ticket(
     assert json.loads(denied)["hookSpecificOutput"]["permissionDecision"] == "deny"
     status = codex.codex_intent_status(repo, session_id=session_id)
     ticket = status["scope_amendment"]["pending"]["ticket_id"]
-    assert {item["path"] for item in status["scope_amendment"]["pending"]["mutations"]} == {
+    assert {
+        item["path"] for item in status["scope_amendment"]["pending"]["mutations"]
+    } == {
         "src/locking.py",
         "src/fallback.py",
     }
@@ -961,17 +988,24 @@ def test_scope_amendment_is_rejected_when_ticket_is_stale_after_scope_change(
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     stale_status = codex.codex_intent_status(repo, session_id=session_id)
     ticket = stale_status["scope_amendment"]["pending"]["ticket_id"]
 
-    assert _pretool(
-        repo,
-        session_id,
-        tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: src/locking.py", "@@", "-a", "+b")},
-    ) == ""
+    assert (
+        _pretool(
+            repo,
+            session_id,
+            tool_name="apply_patch",
+            tool_input={
+                "command": _patch("*** Update File: src/locking.py", "@@", "-a", "+b")
+            },
+        )
+        == ""
+    )
 
     with pytest.raises(ValueError, match="ticket is stale"):
         codex.amend_codex_scope(
@@ -991,7 +1025,9 @@ def test_scope_amendment_ticket_integrity_is_checked(tmp_path: Path) -> None:
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     status = codex.codex_intent_status(repo, session_id=session_id)
     ticket = status["scope_amendment"]["pending"]["ticket_id"]
@@ -1015,7 +1051,13 @@ def test_scope_amendment_ticket_integrity_is_checked(tmp_path: Path) -> None:
 def test_scope_amendment_can_be_rejected_by_normal_coordination_admission(
     tmp_path: Path,
 ) -> None:
-    from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind, ResourceRef
+    from claim_plane.core import (
+        ChangeIntent,
+        IntentOperation,
+        Plane,
+        ResourceKind,
+        ResourceRef,
+    )
 
     repo = _repo(tmp_path)
     session_id = "thr_amend_conflict"
@@ -1040,7 +1082,9 @@ def test_scope_amendment_can_be_rejected_by_normal_coordination_admission(
             operations=(
                 IntentOperation(
                     access="write",
-                    resource=ResourceRef(kind=ResourceKind.FILE, identifier="auth/token.py"),
+                    resource=ResourceRef(
+                        kind=ResourceKind.FILE, identifier="auth/token.py"
+                    ),
                 ),
             ),
         )
@@ -1054,7 +1098,9 @@ def test_scope_amendment_can_be_rejected_by_normal_coordination_admission(
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     status = codex.codex_intent_status(repo, session_id=session_id)
     ticket = status["scope_amendment"]["pending"]["ticket_id"]
@@ -1112,7 +1158,9 @@ def test_expired_scope_amendment_ticket_is_consumed_and_denied(tmp_path: Path) -
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")
+        },
     )
     status = codex.codex_intent_status(repo, session_id=session_id)
     ticket = status["scope_amendment"]["pending"]["ticket_id"]
@@ -1135,7 +1183,9 @@ def test_expired_scope_amendment_ticket_is_consumed_and_denied(tmp_path: Path) -
     assert status["scope_amendment"]["denied"] == 1
 
 
-def test_control_channel_cannot_target_another_session_or_repository(tmp_path: Path) -> None:
+def test_control_channel_cannot_target_another_session_or_repository(
+    tmp_path: Path,
+) -> None:
     repo = _repo(tmp_path)
     session_id = "thr_control_scope"
     _bootstrap_task(repo, session_id)
@@ -1162,7 +1212,9 @@ def test_control_channel_cannot_target_another_session_or_repository(tmp_path: P
         },
     )
 
-    assert json.loads(wrong_session)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert (
+        json.loads(wrong_session)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    )
     assert json.loads(wrong_repo)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
@@ -1180,7 +1232,9 @@ def test_line_bounded_scope_denial_does_not_offer_unbounded_amendment_ticket(
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+        tool_input={
+            "command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")
+        },
     )
     reason = json.loads(raw)["hookSpecificOutput"]["permissionDecisionReason"]
     status = codex.codex_intent_status(repo, session_id=session_id)
@@ -1324,14 +1378,18 @@ def test_stop_verifies_clean_codex_task_and_completes_intent(tmp_path: Path) -> 
     plane = Plane.open(repo / ".claim-plane/plane.db")
     try:
         record = next(
-            item for item in plane.intents() if item["intent_id"] == admitted["intent_id"]
+            item
+            for item in plane.intents()
+            if item["intent_id"] == admitted["intent_id"]
         )
         assert record["state"] == "completed"
     finally:
         plane.close()
 
 
-def test_stop_blocks_failed_acceptance_then_verifies_after_repair(tmp_path: Path) -> None:
+def test_stop_blocks_failed_acceptance_then_verifies_after_repair(
+    tmp_path: Path,
+) -> None:
     repo = _repo(tmp_path)
     session_id = "thr_completion_repair"
     _bootstrap_task(repo, session_id)
@@ -1431,7 +1489,10 @@ def test_verified_completion_is_idempotent(tmp_path: Path) -> None:
     second = codex.verify_codex_completion(repo, session_id=session_id)
     assert first == second
     assert first["verified"] is True
-    assert codex.codex_intent_status(repo, session_id=session_id)["completion_attempts"] == 1
+    assert (
+        codex.codex_intent_status(repo, session_id=session_id)["completion_attempts"]
+        == 1
+    )
 
 
 def test_codex_verify_control_command_is_session_local(tmp_path: Path) -> None:
@@ -1465,7 +1526,9 @@ def test_codex_verify_control_command_is_session_local(tmp_path: Path) -> None:
     assert json.loads(denied)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_completion_detects_connector_control_tamper_after_bootstrap(tmp_path: Path) -> None:
+def test_completion_detects_connector_control_tamper_after_bootstrap(
+    tmp_path: Path,
+) -> None:
     repo = _repo(tmp_path)
     session_id = "thr_completion_control_tamper"
     _bootstrap_task(repo, session_id)
@@ -1500,7 +1563,11 @@ def test_completion_detects_connector_control_tamper_after_bootstrap(tmp_path: P
 
 def _read_deny_reason(raw: str) -> str:
     payload = json.loads(raw)
-    return str(payload.get("reason") or payload.get("hookSpecificOutput", {}).get("permissionDecisionReason") or "")
+    return str(
+        payload.get("reason")
+        or payload.get("hookSpecificOutput", {}).get("permissionDecisionReason")
+        or ""
+    )
 
 
 def _readme_proposal() -> dict[str, object]:
@@ -1551,25 +1618,35 @@ def test_connect_repairs_legacy_claim_plane_hook_definition(tmp_path: Path) -> N
 
     payload = json.loads(hooks_path.read_text(encoding="utf-8"))
     handlers = _handlers(payload, "PreToolUse")
-    owned = [item for item in handlers if item.get("command") == codex.CODEX_HOOK_COMMAND]
+    owned = [
+        item for item in handlers if item.get("command") == codex.CODEX_HOOK_COMMAND
+    ]
     assert len(owned) == 1
-    assert all(item.get("command") != "claim-plane codex-hook --legacy" for item in handlers)
+    assert all(
+        item.get("command") != "claim-plane codex-hook --legacy" for item in handlers
+    )
     state = json.loads((repo / ".claim-plane/codex.json").read_text(encoding="utf-8"))
     assert state["connector_revision"] == codex.CODEX_CONNECTOR_REVISION
 
 
-def test_doctor_detects_connector_hook_definition_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_detects_connector_hook_definition_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = _repo(tmp_path)
     codex.init_project(repo)
     codex.connect_codex(repo)
-    monkeypatch.setattr(codex, "_codex_version", lambda: ("/usr/bin/codex", "codex-cli 0.123.0"))
+    monkeypatch.setattr(
+        codex, "_codex_version", lambda: ("/usr/bin/codex", "codex-cli 0.123.0")
+    )
     hooks_path = repo / ".codex/hooks.json"
     payload = json.loads(hooks_path.read_text(encoding="utf-8"))
     payload["hooks"]["PreToolUse"][-1]["hooks"][0]["timeout"] = 1
     hooks_path.write_text(json.dumps(payload), encoding="utf-8")
 
     report = codex.doctor_codex(repo)
-    check = next(item for item in report.checks if item["name"] == "connector_hook_definition")
+    check = next(
+        item for item in report.checks if item["name"] == "connector_hook_definition"
+    )
     assert check["status"] == "error"
     assert report.ready is False
 
@@ -1584,7 +1661,11 @@ def test_pretool_fails_closed_when_enrollment_state_disappears(tmp_path: Path) -
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md", "@@", "-# fixture", "+# changed"
+            )
+        },
     )
 
     assert raw
@@ -1602,7 +1683,11 @@ def test_pretool_fails_closed_when_session_state_is_corrupt(tmp_path: Path) -> N
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md", "@@", "-# fixture", "+# changed"
+            )
+        },
     )
 
     assert raw
@@ -1619,14 +1704,20 @@ def test_preexisting_dirty_path_is_protected_but_unrelated_dirty_change_is_not_a
     (repo / "notes.txt").write_text("user work\n", encoding="utf-8")
     session_id = "thr_dirty_baseline"
     _bootstrap_task(repo, session_id)
-    admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=_readme_proposal())
+    admitted = codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_readme_proposal()
+    )
     assert admitted["allowed"] is True
 
     dirty_raw = _pretool(
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: notes.txt", "@@", "-user work", "+agent work")},
+        tool_input={
+            "command": _patch(
+                "*** Update File: notes.txt", "@@", "-user work", "+agent work"
+            )
+        },
     )
     assert "already had user changes" in _read_deny_reason(dirty_raw)
 
@@ -1634,7 +1725,11 @@ def test_preexisting_dirty_path_is_protected_but_unrelated_dirty_change_is_not_a
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md", "@@", "-# fixture", "+# changed"
+            )
+        },
     )
     assert allowed_raw == ""
     (repo / "README.md").write_text("# changed\n", encoding="utf-8")
@@ -1649,12 +1744,16 @@ def test_second_codex_session_cannot_admit_mutation_authority_in_same_worktree(
 ) -> None:
     repo = _repo(tmp_path)
     _bootstrap_task(repo, "thr_owner")
-    first = codex.admit_codex_intent(repo, session_id="thr_owner", proposal=_readme_proposal())
+    first = codex.admit_codex_intent(
+        repo, session_id="thr_owner", proposal=_readme_proposal()
+    )
     assert first["allowed"] is True
 
     _bootstrap_task(repo, "thr_second")
     with pytest.raises(ValueError, match="another active Codex session"):
-        codex.admit_codex_intent(repo, session_id="thr_second", proposal=_readme_proposal())
+        codex.admit_codex_intent(
+            repo, session_id="thr_second", proposal=_readme_proposal()
+        )
 
     status = codex.codex_intent_status(repo, session_id="thr_second")
     assert status["state"] == "blocked_concurrent_session"
@@ -1667,7 +1766,9 @@ def test_resume_re_admits_expired_session_intent_on_same_base(tmp_path: Path) ->
     repo = _repo(tmp_path)
     session_id = "thr_resume_expired"
     _bootstrap_task(repo, session_id)
-    admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=_readme_proposal())
+    admitted = codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_readme_proposal()
+    )
     old_intent = str(admitted["intent_id"])
     with sqlite3.connect(repo / ".claim-plane/plane.db") as conn:
         conn.execute(
@@ -1675,14 +1776,17 @@ def test_resume_re_admits_expired_session_intent_on_same_base(tmp_path: Path) ->
             ("2000-01-01T00:00:00+00:00", old_intent),
         )
 
-    assert codex.handle_codex_hook(
-        {
-            "hook_event_name": "SessionStart",
-            "session_id": session_id,
-            "cwd": str(repo),
-            "source": "resume",
-        }
-    ) == 0
+    assert (
+        codex.handle_codex_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": session_id,
+                "cwd": str(repo),
+                "source": "resume",
+            }
+        )
+        == 0
+    )
 
     status = codex.codex_intent_status(repo, session_id=session_id)
     assert status["state"] == "active"
@@ -1692,13 +1796,17 @@ def test_resume_re_admits_expired_session_intent_on_same_base(tmp_path: Path) ->
     assert status["hardening"]["recovered_from_intent_id"] == old_intent
 
 
-def test_resume_fails_closed_when_head_changed_during_inactivity(tmp_path: Path) -> None:
+def test_resume_fails_closed_when_head_changed_during_inactivity(
+    tmp_path: Path,
+) -> None:
     import sqlite3
 
     repo = _repo(tmp_path)
     session_id = "thr_resume_changed_head"
     _bootstrap_task(repo, session_id)
-    admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=_readme_proposal())
+    admitted = codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_readme_proposal()
+    )
     old_intent = str(admitted["intent_id"])
     with sqlite3.connect(repo / ".claim-plane/plane.db") as conn:
         conn.execute(
@@ -1723,7 +1831,9 @@ def test_resume_fails_closed_when_head_changed_during_inactivity(tmp_path: Path)
     assert "HEAD changed" in str(status["hardening"]["recovery_reason"])
 
 
-def test_pretool_denies_mutation_after_branch_switch_even_at_same_commit(tmp_path: Path) -> None:
+def test_pretool_denies_mutation_after_branch_switch_even_at_same_commit(
+    tmp_path: Path,
+) -> None:
     repo = _repo(tmp_path)
     session_id = "thr_branch_switch"
     _bootstrap_task(repo, session_id)
@@ -1734,12 +1844,18 @@ def test_pretool_denies_mutation_after_branch_switch_even_at_same_commit(tmp_pat
         repo,
         session_id,
         tool_name="apply_patch",
-        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+        tool_input={
+            "command": _patch(
+                "*** Update File: README.md", "@@", "-# fixture", "+# changed"
+            )
+        },
     )
     assert "Git branch changed" in _read_deny_reason(raw)
 
 
-def test_abandon_releases_worktree_authority_for_next_codex_session(tmp_path: Path) -> None:
+def test_abandon_releases_worktree_authority_for_next_codex_session(
+    tmp_path: Path,
+) -> None:
     repo = _repo(tmp_path)
     _bootstrap_task(repo, "thr_abandon_owner")
     first = codex.admit_codex_intent(
@@ -1761,4 +1877,7 @@ def test_abandon_releases_worktree_authority_for_next_codex_session(tmp_path: Pa
         repo, session_id="thr_abandon_next", proposal=_readme_proposal()
     )
     assert second["allowed"] is True
-    assert codex.codex_intent_status(repo, session_id="thr_abandon_owner")["state"] == "abandoned"
+    assert (
+        codex.codex_intent_status(repo, session_id="thr_abandon_owner")["state"]
+        == "abandoned"
+    )

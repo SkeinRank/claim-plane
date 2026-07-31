@@ -191,7 +191,6 @@ def cmd_codex_intent_amend(args: argparse.Namespace) -> int:
     return 0 if result["allowed"] else 2
 
 
-
 def cmd_codex_intent_verify(args: argparse.Namespace) -> int:
     result = verify_codex_completion(
         args.repo,
@@ -200,6 +199,7 @@ def cmd_codex_intent_verify(args: argparse.Namespace) -> int:
     )
     _write_json(result)
     return 0 if result.get("verified") else 2
+
 
 def cmd_codex_intent_status(args: argparse.Namespace) -> int:
     result = codex_intent_status(args.repo, session_id=args.session_id)
