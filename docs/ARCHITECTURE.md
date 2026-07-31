@@ -60,6 +60,12 @@ Every notice records the root producer, direct producer, depth, dependency chain
 
 Workers remain in Git branches, worktrees, or external sandboxes. Claim Plane gives each worker a bounded context pack but does not execute a coding model itself.
 
+### Coding-agent connectors
+
+Project-local connectors bind an external coding runtime to Claim Plane without making the model responsible for invoking the control plane. The Codex connector installs a stable lifecycle dispatcher in `.codex/hooks.json`, preserves unrelated project hooks, and keeps its mutable enrollment state under `.claim-plane/`. Enrollment is idempotent and respects project-local Codex policy that disables hooks.
+
+The connector is an integration boundary, not a replacement for Claim Plane authority. Lifecycle events provide deterministic interception points and evidence plumbing; admission, broker capabilities, repository identity, and verification remain the sources of authorization and proof. This separation lets the runtime adapter evolve without weakening the core protocol or making MCP participation a prerequisite for enforcement.
+
 ### Integration verifier
 
 The verifier compares declared intent with observed work:

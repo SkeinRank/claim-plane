@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.9.4.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.10.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -87,6 +87,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - read-only-by-default worker and integration acceptance guards that reject tracked or non-ignored untracked mutations;
 - SHA-256 evidence binding worker patches, manifests, result trees, result commits, and reproducible result patches;
 - transparent economy/standard/frontier worker-tier recommendations;
+- project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, non-destructive coexistence with existing project hooks, enrollment diagnostics, and session handshakes;
 - CLI, stdio MCP, JSON Schemas, examples, and a deterministic protocol benchmark.
 
 The base package has no runtime dependencies. Agent Lexicon remains an optional semantic layer.
@@ -95,14 +96,16 @@ The brokered boundary is Linux-first. On macOS, the broker and verification pipe
 
 ## Install
 
-Install the public package:
+Install the CLI as an isolated tool with `uv`:
 
 ```bash
-pip install claim-plane
+uv tool install claim-plane
 
 # Optional semantic identity and evidence signing
-pip install "claim-plane[semantic,signing]"
+uv tool install "claim-plane[semantic,signing]"
 ```
+
+`pipx install claim-plane` is also supported when `pipx` is the preferred tool manager.
 
 For development from a checkout:
 
@@ -119,6 +122,33 @@ Run the complete checks and example:
 ./scripts/check.sh
 ./scripts/demo.sh
 ```
+
+## Codex project enrollment
+
+Claim Plane can register a project-local lifecycle bridge for Codex without replacing the normal `codex` command:
+
+```bash
+cd my-project
+claim-plane init
+claim-plane connect codex
+claim-plane doctor codex
+
+codex
+```
+
+`claim-plane init` creates local control-plane state and adds `.claim-plane/` to the repository's Git exclude file. `claim-plane connect codex` installs Claim Plane-owned handlers in `.codex/hooks.json` while preserving unrelated project hooks. Re-running either command is safe and does not duplicate the enrollment.
+
+The connector registers one stable dispatcher for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, and `SessionEnd`. Codex discovers these project-local hooks automatically for trusted projects. On the first Codex session, open `/hooks` to review and trust the command hooks; Codex records trust against the hook definition.
+
+Version 0.10.0 uses this bridge for enrollment health and session handshakes. Existing Claim Plane admission, brokered execution, and verification remain explicit control-plane operations. The lifecycle bridge does not depend on MCP for interception.
+
+To remove the integration without disturbing other Codex hooks:
+
+```bash
+claim-plane disconnect codex
+```
+
+If `.codex/config.toml` explicitly sets `[features] hooks = false`, enrollment fails rather than overriding the project's Codex policy. If inline Codex hooks already exist in that file, Claim Plane leaves them untouched and reports that Codex will merge both project-local hook sources.
 
 ## ChangeIntent
 
@@ -600,6 +630,7 @@ The Integration Verifier answers:
 
 ```text
 src/claim_plane/
+  connectors/     project-local coding-agent enrollment and lifecycle adapters
   coordination/   sound pre-write admission and bounded context packs
   core/           protocol models, storage boundary, registry, semantic bridge, plane facade
   integration/    immutable snapshots, verification, evidence, integration, repair

@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-07-31
+
+### Added
+
+- Add project-local Codex enrollment through `claim-plane init`, `claim-plane connect codex`, `claim-plane disconnect codex`, and `claim-plane doctor codex`.
+- Add a stable Codex lifecycle dispatcher covering session start/end, prompt submission, pre/post tool use, and turn stop events without requiring an MCP call from the model.
+- Record a minimal session handshake in local Claim Plane state without persisting prompt text or tool arguments.
+
+### Changed
+
+- Recommend `uv tool install claim-plane` for the CLI while retaining `pipx` as an isolated-tool alternative.
+- Preserve unrelated `.codex/hooks.json` entries during enrollment changes and fail closed when project configuration explicitly disables Codex hooks.
+
 ## [0.9.4] — 2026-07-28
 
 ### Added

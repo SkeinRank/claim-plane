@@ -12,6 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from claim_plane import __version__
+from claim_plane.connectors import (
+    connect_codex,
+    disconnect_codex,
+    doctor_codex,
+    handle_codex_hook,
+    init_project,
+)
 from claim_plane.core import (
     AccessMode,
     ChangeIntent,
@@ -22,17 +29,17 @@ from claim_plane.core import (
     ResourceKind,
 )
 from claim_plane.core.extract import artifacts_to_claims
-from claim_plane.runtime import (
-    BrokerClient,
-    BrokerPolicy,
-    BrokerServer,
-    build_broker_boundary_command,
-)
 from claim_plane.integration import (
     IntegrationRunSpec,
     SandboxPolicy,
     append_observation,
     verify_evidence_file,
+)
+from claim_plane.runtime import (
+    BrokerClient,
+    BrokerPolicy,
+    BrokerServer,
+    build_broker_boundary_command,
 )
 
 DEFAULT_DB = ".claim-plane/plane.db"
@@ -64,6 +71,74 @@ def _write_json(payload: Any, out: str | None = None) -> None:
         print(f"Wrote {out}")
     else:
         print(text)
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    result = init_project(args.repo)
+    if args.json:
+        _write_json(result)
+    else:
+        print(f"Initialized Claim Plane for {result['root']}.")
+        print("Local state is excluded through the repository Git exclude file.")
+    return 0
+
+
+def cmd_connect_codex(args: argparse.Namespace) -> int:
+    result = connect_codex(args.repo)
+    if args.json:
+        _write_json(result)
+    else:
+        print(f"Connected Codex to Claim Plane for {result['root']}.")
+        print(f"Lifecycle hooks: {', '.join(result['events'])}")
+        print(
+            "Open /hooks in Codex once to review and trust the project-local command hooks."
+        )
+        if result["inline_hooks_present"]:
+            print(
+                "Note: .codex/config.toml also defines inline hooks; "
+                "Codex merges both project-local hook sources."
+            )
+    return 0
+
+
+def cmd_disconnect_codex(args: argparse.Namespace) -> int:
+    result = disconnect_codex(args.repo)
+    if args.json:
+        _write_json(result)
+    else:
+        print(f"Disconnected Codex from Claim Plane for {result['root']}.")
+        print(f"Removed {result['removed_handlers']} Claim Plane hook handler(s).")
+    return 0
+
+
+def cmd_doctor_codex(args: argparse.Namespace) -> int:
+    report = doctor_codex(args.repo)
+    if args.json:
+        _write_json(report.to_dict())
+    else:
+        print(f"Claim Plane Codex enrollment — {report.root}")
+        for item in report.checks:
+            status = str(item["status"]).upper()
+            detail = str(item.get("detail") or "")
+            print(f"[{status:7}] {item['name']}: {detail}")
+            missing = item.get("missing_events")
+            if missing:
+                print(f"          missing events: {', '.join(missing)}")
+        if report.codex_version:
+            print(f"Codex: {report.codex_version}")
+        print("Status: ready" if report.ready else "Status: action required")
+    return 0 if report.ready else 2
+
+
+def cmd_codex_hook(args: argparse.Namespace) -> int:
+    del args
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return 0
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("Codex hook input must be a JSON object")
+    return handle_codex_hook(payload)
 
 
 def cmd_claim(args: argparse.Namespace) -> int:
@@ -591,7 +666,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="claim-plane",
-        description="Semantic concurrency control and integration verification for coding agents.",
+        description=(
+            "Execution control and semantic concurrency for autonomous coding agents."
+        ),
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
@@ -611,6 +688,51 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow unpinned intents for local experiments. Governed admission is the default.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    init = sub.add_parser(
+        "init", help="Initialize local Claim Plane state for a Git project."
+    )
+    init.add_argument("--repo", default=".")
+    init.add_argument("--json", action="store_true")
+    init.set_defaults(func=cmd_init)
+
+    connect = sub.add_parser(
+        "connect", help="Enroll a coding-agent runtime in this project."
+    )
+    connect_sub = connect.add_subparsers(dest="connector", required=True)
+    connect_codex_parser = connect_sub.add_parser(
+        "codex", help="Install the project-local Codex lifecycle bridge."
+    )
+    connect_codex_parser.add_argument("--repo", default=".")
+    connect_codex_parser.add_argument("--json", action="store_true")
+    connect_codex_parser.set_defaults(func=cmd_connect_codex)
+
+    disconnect = sub.add_parser(
+        "disconnect", help="Remove a coding-agent runtime enrollment."
+    )
+    disconnect_sub = disconnect.add_subparsers(dest="connector", required=True)
+    disconnect_codex_parser = disconnect_sub.add_parser(
+        "codex", help="Remove Claim Plane-owned Codex lifecycle hooks."
+    )
+    disconnect_codex_parser.add_argument("--repo", default=".")
+    disconnect_codex_parser.add_argument("--json", action="store_true")
+    disconnect_codex_parser.set_defaults(func=cmd_disconnect_codex)
+
+    doctor = sub.add_parser(
+        "doctor", help="Inspect coding-agent runtime enrollment health."
+    )
+    doctor_sub = doctor.add_subparsers(dest="connector", required=True)
+    doctor_codex_parser = doctor_sub.add_parser(
+        "codex", help="Inspect the project-local Codex lifecycle bridge."
+    )
+    doctor_codex_parser.add_argument("--repo", default=".")
+    doctor_codex_parser.add_argument("--json", action="store_true")
+    doctor_codex_parser.set_defaults(func=cmd_doctor_codex)
+
+    codex_hook = sub.add_parser(
+        "codex-hook", help="Internal Codex lifecycle dispatcher."
+    )
+    codex_hook.set_defaults(func=cmd_codex_hook)
 
     claim = sub.add_parser(
         "claim", help="Request a legacy fine-grained artifact claim."
