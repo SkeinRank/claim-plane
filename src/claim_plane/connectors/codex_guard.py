@@ -504,6 +504,7 @@ def _claim_plane_control_command(command: str, *, session_id: str | None) -> boo
         "status": ({"session-id", "repo", "json"}, frozenset({"json"})),
         "verify": ({"session-id", "repo", "acceptance-timeout"}, frozenset()),
         "amend": ({"session-id", "ticket", "reason", "repo"}, frozenset()),
+        "abandon": ({"session-id", "repo"}, frozenset()),
     }
     schema = schemas.get(action)
     if schema is None:

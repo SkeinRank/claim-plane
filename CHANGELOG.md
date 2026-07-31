@@ -8,6 +8,22 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-07-31
+
+### Added
+
+- Fingerprint pre-existing user worktree changes at Codex task bootstrap so unchanged local work is excluded from completion attribution while those paths remain protected from autonomous mutation.
+- Recover `codex resume` sessions by renewing live intent authority or atomically re-admitting an expired execution contract on the unchanged pinned commit and branch.
+- Expose connector hardening state through Codex intent status, including baseline paths, resume recovery, and concurrent-session blockers.
+- Add `claim-plane codex-intent abandon` to release unfinished session authority explicitly before another Codex session takes ownership of the same worktree.
+- Validate connector revision and canonical Claim Plane-owned hook definitions in `claim-plane doctor codex`.
+
+### Changed
+
+- Serialize mutation authority to one active Codex session per physical worktree; concurrent autonomous work is directed to separate Git worktrees for unambiguous evidence.
+- Fail closed on intercepted mutation calls when project enrollment is missing, local session state is unreadable, the Git root cannot be resolved, or the task branch changed after bootstrap.
+- Make reconnect upgrade-safe by recognizing older Claim Plane Codex dispatcher forms, replacing only connector-owned handlers, and preserving unrelated project hooks.
+
 ## [0.14.0] — 2026-07-31
 
 ### Added

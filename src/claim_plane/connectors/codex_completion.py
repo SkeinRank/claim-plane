@@ -65,6 +65,50 @@ def _current_sha256(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _path_fingerprint(path: Path) -> str:
+    try:
+        stat = path.lstat()
+    except FileNotFoundError:
+        return "missing"
+    if path.is_symlink():
+        return "symlink:" + hashlib.sha256(str(path.readlink()).encode("utf-8")).hexdigest()
+    if path.is_file():
+        return "file:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    if path.is_dir():
+        return "dir"
+    return f"other:{stat.st_mode}"
+
+
+def _without_unchanged_preexisting_changes(
+    manifest: Any,
+    *,
+    root: Path,
+    baseline: Mapping[str, Any],
+) -> Any:
+    ignored = tuple(
+        path
+        for path in manifest.changed_files
+        if path in baseline and _path_fingerprint(root / path) == baseline.get(path)
+    )
+    if not ignored:
+        return manifest
+    ignored_set = set(ignored)
+    return replace(
+        manifest,
+        changed_files=tuple(path for path in manifest.changed_files if path not in ignored_set),
+        changed_regions=tuple(
+            region for region in manifest.changed_regions if region.path not in ignored_set
+        ),
+        artifacts=tuple(
+            artifact for artifact in manifest.artifacts if artifact.path not in ignored_set
+        ),
+        metadata={
+            **manifest.metadata,
+            "completion_ignored_preexisting_paths": list(ignored),
+        },
+    )
+
+
 def _without_unchanged_connector_control_changes(
     manifest: Any,
     *,
@@ -106,6 +150,7 @@ def verify_completion(
     run_acceptance: bool = True,
     acceptance_timeout: int = 300,
     connector_control_baseline: Mapping[str, Any] | None = None,
+    preexisting_worktree_baseline: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Verify the current worktree and complete the intent only when evidence is clean."""
 
@@ -115,6 +160,11 @@ def verify_completion(
             plane.collect_git_manifest(intent_id, root),
             root=root,
             baseline=connector_control_baseline or {},
+        )
+        manifest = _without_unchanged_preexisting_changes(
+            manifest,
+            root=root,
+            baseline=preexisting_worktree_baseline or {},
         )
         if run_acceptance:
             intent = plane.intent(intent_id)

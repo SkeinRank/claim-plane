@@ -14,6 +14,7 @@ from typing import Any
 from claim_plane import __version__
 from claim_plane.connectors import (
     admit_codex_intent,
+    abandon_codex_intent,
     amend_codex_scope,
     codex_intent_status,
     verify_codex_completion,
@@ -171,6 +172,12 @@ def cmd_codex_intent_admit(args: argparse.Namespace) -> int:
     )
     _write_json(result)
     return 0 if result["allowed"] else 2
+
+
+def cmd_codex_intent_abandon(args: argparse.Namespace) -> int:
+    result = abandon_codex_intent(args.repo, session_id=args.session_id)
+    _write_json(result)
+    return 0
 
 
 def cmd_codex_intent_amend(args: argparse.Namespace) -> int:
@@ -856,6 +863,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read the proposal from an inline JSON object; preferred for Codex control calls.",
     )
     codex_intent_admit.set_defaults(func=cmd_codex_intent_admit)
+
+    codex_intent_abandon = codex_intent_sub.add_parser(
+        "abandon",
+        help="Release unfinished session authority so another Codex session may proceed.",
+    )
+    codex_intent_abandon.add_argument("--session-id", required=True)
+    codex_intent_abandon.add_argument("--repo", default=".")
+    codex_intent_abandon.set_defaults(func=cmd_codex_intent_abandon)
 
     codex_intent_amend = codex_intent_sub.add_parser(
         "amend",

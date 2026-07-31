@@ -1496,3 +1496,269 @@ def test_completion_detects_connector_control_tamper_after_bootstrap(tmp_path: P
         item["code"] == "undeclared_change" and item["path"] == ".codex/hooks.json"
         for item in result["findings"]
     )
+
+
+def _read_deny_reason(raw: str) -> str:
+    payload = json.loads(raw)
+    return str(payload.get("reason") or payload.get("hookSpecificOutput", {}).get("permissionDecisionReason") or "")
+
+
+def _readme_proposal() -> dict[str, object]:
+    return {
+        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+        "goal": "Update the fixture README",
+        "operations": [
+            {
+                "access": "write",
+                "kind": "file",
+                "identifier": "README.md",
+                "commitment": "committed",
+            }
+        ],
+        "preserves": [],
+        "acceptance": [],
+    }
+
+
+def test_connect_repairs_legacy_claim_plane_hook_definition(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    codex.init_project(repo)
+    hooks_path = repo / ".codex/hooks.json"
+    hooks_path.parent.mkdir()
+    hooks_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "*",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "claim-plane codex-hook --legacy",
+                                    "timeout": 5,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    codex.connect_codex(repo)
+
+    payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+    handlers = _handlers(payload, "PreToolUse")
+    owned = [item for item in handlers if item.get("command") == codex.CODEX_HOOK_COMMAND]
+    assert len(owned) == 1
+    assert all(item.get("command") != "claim-plane codex-hook --legacy" for item in handlers)
+    state = json.loads((repo / ".claim-plane/codex.json").read_text(encoding="utf-8"))
+    assert state["connector_revision"] == codex.CODEX_CONNECTOR_REVISION
+
+
+def test_doctor_detects_connector_hook_definition_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path)
+    codex.init_project(repo)
+    codex.connect_codex(repo)
+    monkeypatch.setattr(codex, "_codex_version", lambda: ("/usr/bin/codex", "codex-cli 0.123.0"))
+    hooks_path = repo / ".codex/hooks.json"
+    payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+    payload["hooks"]["PreToolUse"][-1]["hooks"][0]["timeout"] = 1
+    hooks_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = codex.doctor_codex(repo)
+    check = next(item for item in report.checks if item["name"] == "connector_hook_definition")
+    assert check["status"] == "error"
+    assert report.ready is False
+
+
+def test_pretool_fails_closed_when_enrollment_state_disappears(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_missing_enrollment"
+    _bootstrap_task(repo, session_id)
+    (repo / ".claim-plane/codex.json").unlink()
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+    )
+
+    assert raw
+    assert "enrollment state is missing" in _read_deny_reason(raw)
+
+
+def test_pretool_fails_closed_when_session_state_is_corrupt(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_corrupt_state"
+    _bootstrap_task(repo, session_id)
+    session_file = next((repo / ".claim-plane/codex/sessions").glob("*.json"))
+    session_file.write_text("{not-json\n", encoding="utf-8")
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+    )
+
+    assert raw
+    assert "session state could not be loaded" in _read_deny_reason(raw)
+
+
+def test_preexisting_dirty_path_is_protected_but_unrelated_dirty_change_is_not_attributed(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    (repo / "notes.txt").write_text("clean\n", encoding="utf-8")
+    subprocess.run(["git", "add", "notes.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add notes"], cwd=repo, check=True)
+    (repo / "notes.txt").write_text("user work\n", encoding="utf-8")
+    session_id = "thr_dirty_baseline"
+    _bootstrap_task(repo, session_id)
+    admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=_readme_proposal())
+    assert admitted["allowed"] is True
+
+    dirty_raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: notes.txt", "@@", "-user work", "+agent work")},
+    )
+    assert "already had user changes" in _read_deny_reason(dirty_raw)
+
+    allowed_raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+    )
+    assert allowed_raw == ""
+    (repo / "README.md").write_text("# changed\n", encoding="utf-8")
+
+    result = codex.verify_codex_completion(repo, session_id=session_id)
+    assert result["verified"] is True
+    assert result["changed_paths"] == ["README.md"]
+
+
+def test_second_codex_session_cannot_admit_mutation_authority_in_same_worktree(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    _bootstrap_task(repo, "thr_owner")
+    first = codex.admit_codex_intent(repo, session_id="thr_owner", proposal=_readme_proposal())
+    assert first["allowed"] is True
+
+    _bootstrap_task(repo, "thr_second")
+    with pytest.raises(ValueError, match="another active Codex session"):
+        codex.admit_codex_intent(repo, session_id="thr_second", proposal=_readme_proposal())
+
+    status = codex.codex_intent_status(repo, session_id="thr_second")
+    assert status["state"] == "blocked_concurrent_session"
+    assert status["hardening"]["concurrent_sessions"] == ["thr_owner"]
+
+
+def test_resume_re_admits_expired_session_intent_on_same_base(tmp_path: Path) -> None:
+    import sqlite3
+
+    repo = _repo(tmp_path)
+    session_id = "thr_resume_expired"
+    _bootstrap_task(repo, session_id)
+    admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=_readme_proposal())
+    old_intent = str(admitted["intent_id"])
+    with sqlite3.connect(repo / ".claim-plane/plane.db") as conn:
+        conn.execute(
+            "UPDATE intents SET lease_expires_at=? WHERE intent_id=?",
+            ("2000-01-01T00:00:00+00:00", old_intent),
+        )
+
+    assert codex.handle_codex_hook(
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": session_id,
+            "cwd": str(repo),
+            "source": "resume",
+        }
+    ) == 0
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["state"] == "active"
+    assert status["intent_id"] != old_intent
+    assert str(status["intent_id"]).startswith(old_intent + "-resume-")
+    assert status["hardening"]["resume_recoveries"] == 1
+    assert status["hardening"]["recovered_from_intent_id"] == old_intent
+
+
+def test_resume_fails_closed_when_head_changed_during_inactivity(tmp_path: Path) -> None:
+    import sqlite3
+
+    repo = _repo(tmp_path)
+    session_id = "thr_resume_changed_head"
+    _bootstrap_task(repo, session_id)
+    admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=_readme_proposal())
+    old_intent = str(admitted["intent_id"])
+    with sqlite3.connect(repo / ".claim-plane/plane.db") as conn:
+        conn.execute(
+            "UPDATE intents SET lease_expires_at=? WHERE intent_id=?",
+            ("2000-01-01T00:00:00+00:00", old_intent),
+        )
+    (repo / "advance.txt").write_text("advance\n", encoding="utf-8")
+    subprocess.run(["git", "add", "advance.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "advance"], cwd=repo, check=True)
+
+    codex.handle_codex_hook(
+        {
+            "hook_event_name": "SessionStart",
+            "session_id": session_id,
+            "cwd": str(repo),
+            "source": "resume",
+        }
+    )
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["state"] == "recovery_required"
+    assert "HEAD changed" in str(status["hardening"]["recovery_reason"])
+
+
+def test_pretool_denies_mutation_after_branch_switch_even_at_same_commit(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_branch_switch"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_readme_proposal())
+    subprocess.run(["git", "switch", "-qc", "other"], cwd=repo, check=True)
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: README.md", "@@", "-# fixture", "+# changed")},
+    )
+    assert "Git branch changed" in _read_deny_reason(raw)
+
+
+def test_abandon_releases_worktree_authority_for_next_codex_session(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _bootstrap_task(repo, "thr_abandon_owner")
+    first = codex.admit_codex_intent(
+        repo, session_id="thr_abandon_owner", proposal=_readme_proposal()
+    )
+    assert first["allowed"] is True
+
+    _bootstrap_task(repo, "thr_abandon_next")
+    with pytest.raises(ValueError, match="another active Codex session"):
+        codex.admit_codex_intent(
+            repo, session_id="thr_abandon_next", proposal=_readme_proposal()
+        )
+
+    abandoned = codex.abandon_codex_intent(repo, session_id="thr_abandon_owner")
+    assert abandoned["state"] == "abandoned"
+    assert abandoned["released"] is True
+
+    second = codex.admit_codex_intent(
+        repo, session_id="thr_abandon_next", proposal=_readme_proposal()
+    )
+    assert second["allowed"] is True
+    assert codex.codex_intent_status(repo, session_id="thr_abandon_owner")["state"] == "abandoned"

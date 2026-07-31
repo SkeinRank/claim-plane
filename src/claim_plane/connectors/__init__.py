@@ -1,6 +1,7 @@
 """Project-local connectors for coding-agent runtimes."""
 
 from claim_plane.connectors.codex import (
+    CODEX_CONNECTOR_REVISION,
     CODEX_ENROLLMENT_PROTOCOL,
     CODEX_HOOK_COMMAND,
     CODEX_HOOK_EVENTS,
@@ -10,6 +11,7 @@ from claim_plane.connectors.codex import (
     CODEX_SESSION_PROTOCOL,
     CodexDoctorReport,
     admit_codex_intent,
+    abandon_codex_intent,
     amend_codex_scope,
     codex_intent_status,
     verify_codex_completion,
@@ -27,6 +29,7 @@ from claim_plane.connectors.codex_guard import CODEX_GUARD_PROTOCOL
 from claim_plane.connectors.codex_completion import CODEX_COMPLETION_PROTOCOL
 
 __all__ = [
+    "CODEX_CONNECTOR_REVISION",
     "CODEX_ENROLLMENT_PROTOCOL",
     "CODEX_HOOK_COMMAND",
     "CODEX_HOOK_EVENTS",
@@ -40,6 +43,7 @@ __all__ = [
     "CODEX_SCOPE_AMENDMENT_TTL_SECONDS",
     "CodexDoctorReport",
     "admit_codex_intent",
+    "abandon_codex_intent",
     "amend_codex_scope",
     "codex_intent_status",
     "verify_codex_completion",

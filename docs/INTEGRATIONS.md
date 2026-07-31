@@ -20,11 +20,22 @@ After admission, `PreToolUse` becomes the connector's pre-mutation authorization
 
 An undeclared mutation with provable file effects can open a short-lived scope-amendment ticket. The ticket is bound to the current session, intent fingerprint, pinned base, and exact denied mutation set. Codex provides only a reason through `claim-plane codex-intent amend`; Claim Plane constructs the candidate amendment and re-runs canonical admission. Successful amendments preserve task identity, base revision, preserve requirements, acceptance checks, and existing scope. Rejected amendments do not replace the active intent. A stale ticket cannot be used after another scope change. Whole-file hook calls are never allowed to widen a line-bounded declaration.
 
-The connector's shell control channel is intentionally narrow. `codex-intent admit`, `status`, `amend`, and `verify` may execute only for the current session and current repository. Admission uses inline proposal JSON so the bootstrap does not require a shell pipe or a repository file before authority exists. `.claim-plane/**`, `.git/**`, and `.codex/**` remain connector-protected and cannot be added to the session authority envelope.
+The connector's shell control channel is intentionally narrow. `codex-intent admit`, `status`, `amend`, `verify`, and `abandon` may execute only for the current session and current repository. Admission uses inline proposal JSON so the bootstrap does not require a shell pipe or a repository file before authority exists. `.claim-plane/**`, `.git/**`, and `.codex/**` remain connector-protected and cannot be added to the session authority envelope.
 
 `Stop` is the verified-completion checkpoint for an active Codex task. Claim Plane collects the current Git delta, including untracked files, removes connector-owned control files from task-change accounting, executes the intent's acceptance commands, proves that acceptance did not alter the worktree, and runs the normal integration verifier. A clean report completes the intent and records `claim-plane.codex-completion.v1`. A non-clean first attempt returns bounded findings and asks Codex to continue; a still-failing Stop-hook continuation is allowed to end as `UNVERIFIED` so the connector cannot create an unbounded continuation loop.
 
 The completion record includes changed paths, authorized and denied mutation-call counts, admitted scope expansions, acceptance outcome, executed authority violations, and the deterministic verifier report. `claim-plane codex-intent verify` exposes the same gate explicitly, while `codex-intent status` returns the most recent result.
+
+### Codex runtime hardening
+
+Task bootstrap fingerprints any pre-existing tracked or untracked user changes outside connector-owned control surfaces. Those paths remain user-owned for the lifetime of the task: the guard rejects Codex mutations that touch them, while verified completion removes unchanged baseline paths from task attribution. This allows a developer to keep unrelated local work without letting an autonomous task absorb or overwrite it.
+
+Mutation authority is single-session per physical worktree. A second Codex session can perform read-only discovery, but intent admission is refused while another enrolled Codex session has an active intent in that same worktree. Parallel work should use separate Git worktrees, preserving Claim Plane's normal cross-worktree coordination model and unambiguous completion evidence.
+An intentionally discarded unfinished session can release its authority with `claim-plane codex-intent abandon --session-id <id> --repo .`; verified sessions are already complete and cannot be abandoned.
+
+`SessionStart` with Codex resume semantics renews an active intent. If the lease expired, Claim Plane creates a successor intent from the previously admitted execution contract and re-runs canonical admission. Recovery succeeds only when the pinned Git commit and branch are unchanged and current coordination policy still permits the work. Released, stale, missing, or conflicting authority remains blocked and is surfaced through session status.
+
+The hook boundary fails closed on mutation calls when enrollment state is missing, session state is unreadable, the Git root cannot be established, or the active branch changes. Re-running `claim-plane connect codex` upgrades or repairs connector-owned handlers without removing unrelated project hooks.
 
 `claim-plane doctor codex` checks the installed runtime for the minimum hook coverage expected by this integration. Hook interception remains runtime-dependent, so the brokered execution path is still the hard reference-monitor boundary for deployments that require non-bypassable repository mutation control.
 

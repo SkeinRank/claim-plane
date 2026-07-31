@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.14.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.15.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -150,11 +150,14 @@ For intercepted `PreToolUse` calls, Claim Plane classifies repository effects be
 
 When a denial identifies concrete additional file authority, the guard issues a short-lived, session-bound scope-amendment ticket containing only the exact denied mutation set. Codex supplies a rationale through `claim-plane codex-intent amend`; it cannot choose different paths, change the task identity, change the pinned base, or remove existing preserve and acceptance requirements. Claim Plane derives the amended ChangeIntent, checks ticket integrity and intent freshness, performs normal atomic re-admission, and activates the amended intent only when admission succeeds. A rejected amendment leaves the previously active intent unchanged. Multiple contingent resources that cannot be promoted individually in one tool call can therefore be committed together through one inspectable amendment.
 
-The connector also reserves a narrow shell control channel for `claim-plane codex-intent admit`, `status`, `amend`, and `verify`. The command must target the current Codex session and current repository; initial admission uses `--proposal-json` rather than a shell pipe or repository temporary file. Other Claim Plane commands and opaque shell effects remain subject to the normal fail-closed classification. Connector control state under `.claim-plane/**`, `.git/**`, and `.codex/**` cannot be granted through a session intent or amendment.
+The connector also reserves a narrow shell control channel for `claim-plane codex-intent admit`, `status`, `amend`, `verify`, and `abandon`. The command must target the current Codex session and current repository; initial admission uses `--proposal-json` rather than a shell pipe or repository temporary file. Other Claim Plane commands and opaque shell effects remain subject to the normal fail-closed classification. Connector control state under `.claim-plane/**`, `.git/**`, and `.codex/**` cannot be granted through a session intent or amendment.
 
 When Codex tries to finish an active task, the `Stop` lifecycle event runs verified completion. Claim Plane collects tracked and untracked repository changes, checks the actual work against the admitted scope, preserve and contract policies, executes the declared acceptance commands with worktree-integrity checks, and completes the intent only when the resulting evidence is clean. A failed first completion blocks the stop once and returns concrete findings so Codex can repair the work. If the continuation still fails, the session is allowed to stop as explicitly `UNVERIFIED` rather than entering an unbounded model loop.
 
 A clean completion is persisted on the session and surfaced as `VERIFIED` with changed-file counts, mutation-authority counters, scope expansions, acceptance outcome, and verification findings. The same result is available explicitly through `claim-plane codex-intent verify --session-id <id> --repo .` and `claim-plane codex-intent status`.
+
+The connector hardens long-running local use as well. Pre-existing user changes are fingerprinted at task bootstrap: unchanged pre-existing paths are excluded from task attribution, while Codex is denied mutation authority over those paths so existing work is not silently mixed into an autonomous task. Only one active Codex session may hold mutation authority in a physical worktree; independent concurrent sessions should use separate Git worktrees, where normal Claim Plane coordination still applies. A resumed session renews a live intent automatically and can re-admit an expired intent only when the pinned commit and branch are unchanged. Changed repository state, released or stale authority, corrupted session state, missing enrollment state, branch switches, and connector hook drift all fail closed. Re-running `claim-plane connect codex` repairs connector-owned hook definitions while preserving unrelated hooks.
+If an unfinished session is intentionally discarded, `claim-plane codex-intent abandon --session-id <id> --repo .` releases its intent authority so another Codex session can use the same worktree immediately.
 
 ```text
 committed mutation  -> authorize -> Codex sandbox/approval -> execute
