@@ -8,6 +8,24 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-07-31
+
+### Added
+
+- Issue short-lived, session-bound scope-amendment tickets when a Codex guard denial identifies exact additional file authority.
+- Add `claim-plane codex-intent amend` so Codex can provide rationale while Claim Plane owns the requested resource set, task identity, pinned base, and atomic re-admission.
+- Support atomic amendment of multiple contingent resources that cannot be safely promoted one at a time within a single tool call.
+- Expose amendment ticket, admitted/rejected counts, and the last amendment outcome through session status without storing denied edit payloads.
+- Add `claim-plane.codex-scope-amendment.v1` and its JSON Schema.
+- Add a session-local Codex control channel for intent admission, status, and scope amendment, including inline proposal JSON for mutation-free bootstrap.
+
+### Changed
+
+- Keep scope amendments monotonic: existing protections, acceptance requirements, identity, and base revision are preserved, and a rejected amendment leaves the active intent unchanged.
+- Bind amendment tickets to the current intent fingerprint and base commit, reject stale or altered tickets, and avoid widening line-bounded declarations from whole-file hook observations.
+- Restrict connector control commands to the current Codex session and repository instead of granting general Claim Plane shell authority.
+- Reserve `.claim-plane/**`, `.git/**`, and `.codex/**` as connector control surfaces that cannot be granted by a session intent or scope amendment.
+
 ## [0.12.0] — 2026-07-31
 
 ### Added

@@ -74,6 +74,10 @@ For supported `PreToolUse` surfaces, the connector derives concrete mutation req
 
 The connector records authorization counters, decision codes, and affected paths without retaining raw tool arguments. This provides a minimal local audit trail while avoiding duplication of model prompts and command bodies in connector state.
 
+A scope denial with concrete repository effects may create a short-lived amendment ticket. The ticket binds the current intent fingerprint and base commit to the exact mutation set observed by the guard. The model can provide rationale but cannot select a wider resource set. The connector reconstructs a monotonic ChangeIntent amendment, preserves existing protections and acceptance requirements, and uses optimistic version checking plus canonical admission before re-activating the intent. Ticket reuse is limited to an unchanged intent, and line-bounded declarations are not widened from whole-file hook observations.
+
+Connector control commands form a separate narrow class from ordinary shell execution. Only session-local `codex-intent admit`, `status`, and `amend` commands are recognized; admission uses inline JSON, and amendment coordinates come from the issued ticket. This keeps the bootstrap and amendment path available without granting general shell mutation authority.
+
 The connector is an integration boundary, not a replacement for Claim Plane authority. Runtime hook coverage and timeout semantics belong to the external coding runtime. Admission, atomic contingent promotion, broker capabilities, repository identity, and verification remain the sources of authorization and proof. The brokered path remains the reference-monitor boundary for deployments that require non-bypassable mutation control. This separation lets the runtime adapter evolve without weakening the core protocol or making MCP participation a prerequisite for enforcement.
 
 ### Integration verifier

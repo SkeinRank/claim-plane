@@ -771,3 +771,469 @@ def test_doctor_rejects_codex_without_apply_patch_hook_coverage(
         if item["name"] == "pre_mutation_guard_compatibility"
     )
     assert check["status"] == "error"
+
+
+def test_scope_denial_issues_reusable_exact_amendment_ticket(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_amend_ticket"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    first = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    first_reason = json.loads(first)["hookSpecificOutput"]["permissionDecisionReason"]
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    pending = status["scope_amendment"]["pending"]
+
+    assert "codex-intent amend" in first_reason
+    assert pending["protocol"] == codex.CODEX_SCOPE_AMENDMENT_PROTOCOL
+    assert pending["mutations"] == [
+        {"access": "write", "path": "auth/token.py", "target_path": None}
+    ]
+    assert status["scope_amendment"]["tickets_issued"] == 1
+
+    second = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    second_status = codex.codex_intent_status(repo, session_id=session_id)
+    assert second_status["scope_amendment"]["pending"]["ticket_id"] == pending["ticket_id"]
+    assert second_status["scope_amendment"]["tickets_issued"] == 1
+    second_reason = json.loads(second)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert pending["ticket_id"] in second_reason
+
+
+def test_scope_amendment_readmits_exact_denied_resource_and_retry_is_allowed(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_amend_allow"
+    _bootstrap_task(repo, session_id)
+    admitted = codex.admit_codex_intent(
+        repo, session_id=session_id, proposal=_proposal()
+    )
+
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    ticket = status["scope_amendment"]["pending"]["ticket_id"]
+
+    result = codex.amend_codex_scope(
+        repo,
+        session_id=session_id,
+        ticket_id=ticket,
+        reason="Cache invalidation is implemented by TokenStore and must be updated atomically.",
+    )
+
+    assert result["allowed"] is True
+    assert result["intent_id"] == admitted["intent_id"]
+    assert result["operations"] == [
+        {"access": "write", "path": "auth/token.py", "target_path": None}
+    ]
+    assert "auth/token.py" in {
+        item["identifier"] for item in result["committed_scope"]
+    }
+    assert result["decision"]["allowed"] is True
+
+    retry = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    assert retry == ""
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["scope_amendment"]["admitted"] == 1
+    assert status["scope_amendment"]["pending"] == {}
+    assert status["scope_amendment"]["last"]["ticket_id"] == ticket
+    assert status["preserves"] == ["path-unchanged:src/public_api/**"]
+    assert status["acceptance"] == ["pytest tests/test_cache.py"]
+
+    from claim_plane.core import Plane
+
+    plane = Plane.open(repo / ".claim-plane/plane.db")
+    try:
+        intent = plane.intent(str(admitted["intent_id"]))
+        assert intent is not None
+        history = intent.metadata["scope_amendments"]
+        assert history[-1]["ticket_id"] == ticket
+        assert history[-1]["reason"].startswith("Cache invalidation")
+    finally:
+        plane.close()
+
+
+def test_multiple_contingent_mutations_can_be_committed_atomically_by_ticket(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_amend_multi"
+    _bootstrap_task(repo, session_id)
+    proposal = _proposal()
+    proposal["operations"].append(
+        {
+            "access": "write",
+            "kind": "file",
+            "identifier": "src/fallback.py",
+            "commitment": "contingent",
+            "required": False,
+        }
+    )
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
+
+    denied = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: src/locking.py",
+                "@@",
+                "-a",
+                "+b",
+                "*** Update File: src/fallback.py",
+                "@@",
+                "-c",
+                "+d",
+            )
+        },
+    )
+    assert json.loads(denied)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    ticket = status["scope_amendment"]["pending"]["ticket_id"]
+    assert {item["path"] for item in status["scope_amendment"]["pending"]["mutations"]} == {
+        "src/locking.py",
+        "src/fallback.py",
+    }
+
+    result = codex.amend_codex_scope(
+        repo,
+        session_id=session_id,
+        ticket_id=ticket,
+        reason="The implementation requires both lock ownership and fallback state changes.",
+    )
+    assert result["allowed"] is True
+    committed = {item["identifier"] for item in result["committed_scope"]}
+    contingent = {item["identifier"] for item in result["contingent_scope"]}
+    assert {"src/locking.py", "src/fallback.py"} <= committed
+    assert "src/locking.py" not in contingent
+    assert "src/fallback.py" not in contingent
+
+    retry = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: src/locking.py",
+                "@@",
+                "-a",
+                "+b",
+                "*** Update File: src/fallback.py",
+                "@@",
+                "-c",
+                "+d",
+            )
+        },
+    )
+    assert retry == ""
+
+
+def test_scope_amendment_is_rejected_when_ticket_is_stale_after_scope_change(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_amend_stale"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    stale_status = codex.codex_intent_status(repo, session_id=session_id)
+    ticket = stale_status["scope_amendment"]["pending"]["ticket_id"]
+
+    assert _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: src/locking.py", "@@", "-a", "+b")},
+    ) == ""
+
+    with pytest.raises(ValueError, match="ticket is stale"):
+        codex.amend_codex_scope(
+            repo,
+            session_id=session_id,
+            ticket_id=ticket,
+            reason="TokenStore is also required.",
+        )
+
+
+def test_scope_amendment_ticket_integrity_is_checked(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_amend_integrity"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    ticket = status["scope_amendment"]["pending"]["ticket_id"]
+
+    session_path = next((repo / ".claim-plane/codex/sessions").glob("*.json"))
+    state = json.loads(session_path.read_text(encoding="utf-8"))
+    state["pending_scope_amendment"]["mutations"].append(
+        {"access": "write", "path": "billing/ledger.py", "target_path": None}
+    )
+    session_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="integrity check failed"):
+        codex.amend_codex_scope(
+            repo,
+            session_id=session_id,
+            ticket_id=ticket,
+            reason="Attempted ticket widening must not work.",
+        )
+
+
+def test_scope_amendment_can_be_rejected_by_normal_coordination_admission(
+    tmp_path: Path,
+) -> None:
+    from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind, ResourceRef
+
+    repo = _repo(tmp_path)
+    session_id = "thr_amend_conflict"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    plane = Plane.open(repo / ".claim-plane/plane.db")
+    try:
+        other = ChangeIntent(
+            intent_id="other-auth-writer",
+            task_id="other-task",
+            owner="other-agent",
+            base_revision=base,
+            base_commit=base,
+            operations=(
+                IntentOperation(
+                    access="write",
+                    resource=ResourceRef(kind=ResourceKind.FILE, identifier="auth/token.py"),
+                ),
+            ),
+        )
+        decision = plane.admit(other)
+        assert decision.allowed is True
+        plane.activate(other.intent_id)
+    finally:
+        plane.close()
+
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    ticket = status["scope_amendment"]["pending"]["ticket_id"]
+
+    result = codex.amend_codex_scope(
+        repo,
+        session_id=session_id,
+        ticket_id=ticket,
+        reason="TokenStore owns the invalidation path.",
+    )
+    assert result["allowed"] is False
+    assert "auth/token.py" not in {
+        item["identifier"] for item in result["committed_scope"]
+    }
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["scope_amendment"]["denied"] == 1
+    assert status["scope_amendment"]["pending"] == {}
+
+
+def test_codex_connector_control_commands_are_allowed_without_broad_shell_authority(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_control_channel"
+    _bootstrap_task(repo, session_id)
+
+    allowed = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={
+            "command": (
+                "claim-plane codex-intent admit --session-id thr_control_channel "
+                "--repo . --proposal-json '{}'"
+            )
+        },
+    )
+    denied = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={"command": "claim-plane amend arbitrary-intent"},
+    )
+
+    assert allowed == ""
+    assert json.loads(denied)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_expired_scope_amendment_ticket_is_consumed_and_denied(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_amend_expired"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+    _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    ticket = status["scope_amendment"]["pending"]["ticket_id"]
+
+    session_path = next((repo / ".claim-plane/codex/sessions").glob("*.json"))
+    state = json.loads(session_path.read_text(encoding="utf-8"))
+    state["pending_scope_amendment"]["expires_at"] = "2000-01-01T00:00:00Z"
+    session_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="has expired"):
+        codex.amend_codex_scope(
+            repo,
+            session_id=session_id,
+            ticket_id=ticket,
+            reason="This should not be accepted after expiry.",
+        )
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["scope_amendment"]["pending"] == {}
+    assert status["scope_amendment"]["denied"] == 1
+
+
+def test_control_channel_cannot_target_another_session_or_repository(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_control_scope"
+    _bootstrap_task(repo, session_id)
+
+    wrong_session = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={
+            "command": (
+                "claim-plane codex-intent status --session-id another-session --repo . --json"
+            )
+        },
+    )
+    wrong_repo = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={
+            "command": (
+                "claim-plane codex-intent status --session-id thr_control_scope "
+                "--repo /tmp/other --json"
+            )
+        },
+    )
+
+    assert json.loads(wrong_session)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert json.loads(wrong_repo)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_line_bounded_scope_denial_does_not_offer_unbounded_amendment_ticket(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_bounded_amend"
+    _bootstrap_task(repo, session_id)
+    proposal = _proposal()
+    proposal["operations"][0]["region"] = "lines:10-20"
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+    )
+    reason = json.loads(raw)["hookSpecificOutput"]["permissionDecisionReason"]
+    status = codex.codex_intent_status(repo, session_id=session_id)
+
+    assert "line-bounded" in reason
+    assert "codex-intent amend" not in reason
+    assert status["scope_amendment"]["pending"] == {}
+
+
+def test_codex_intent_cannot_claim_connector_control_state(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_protected_proposal"
+    _bootstrap_task(repo, session_id)
+
+    for path in (
+        ".claim-plane/plane.db",
+        ".git/config",
+        ".codex/hooks.json",
+        ".codex/config.toml",
+    ):
+        with pytest.raises(ValueError, match="connector control state"):
+            codex.admit_codex_intent(
+                repo,
+                session_id=session_id,
+                proposal=_proposal(path=path),
+            )
+
+
+def test_pretool_protected_connector_surface_is_denied_without_amendment_ticket(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_protected_guard"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: .codex/hooks.json",
+                "@@",
+                "-a",
+                "+b",
+            )
+        },
+    )
+    decision = json.loads(raw)["hookSpecificOutput"]
+    status = codex.codex_intent_status(repo, session_id=session_id)
+
+    assert decision["permissionDecision"] == "deny"
+    assert "connector control state" in decision["permissionDecisionReason"]
+    assert status["guard"]["last_reason_code"] == "protected_control_surface"
+    assert status["scope_amendment"]["pending"] == {}

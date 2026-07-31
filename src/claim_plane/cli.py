@@ -14,6 +14,7 @@ from typing import Any
 from claim_plane import __version__
 from claim_plane.connectors import (
     admit_codex_intent,
+    amend_codex_scope,
     codex_intent_status,
     connect_codex,
     disconnect_codex,
@@ -154,11 +155,29 @@ def _read_stdin_json_object() -> dict[str, Any]:
 
 
 def cmd_codex_intent_admit(args: argparse.Namespace) -> int:
-    proposal = _read_json(args.proposal) if args.proposal else _read_stdin_json_object()
+    if args.proposal_json:
+        proposal = json.loads(args.proposal_json)
+        if not isinstance(proposal, dict):
+            raise ValueError("--proposal-json must contain a JSON object")
+    elif args.proposal:
+        proposal = _read_json(args.proposal)
+    else:
+        proposal = _read_stdin_json_object()
     result = admit_codex_intent(
         args.repo,
         session_id=args.session_id,
         proposal=proposal,
+    )
+    _write_json(result)
+    return 0 if result["allowed"] else 2
+
+
+def cmd_codex_intent_amend(args: argparse.Namespace) -> int:
+    result = amend_codex_scope(
+        args.repo,
+        session_id=args.session_id,
+        ticket_id=args.ticket,
+        reason=args.reason,
     )
     _write_json(result)
     return 0 if result["allowed"] else 2
@@ -184,6 +203,21 @@ def cmd_codex_intent_status(args: argparse.Namespace) -> int:
             f"{guard.get('denied_calls', 0)} denied, "
             f"{guard.get('promotions', 0)} promotions"
         )
+        amendment = result.get("scope_amendment") or {}
+        print(
+            "Scope amendments: "
+            f"{amendment.get('admitted', 0)} admitted, "
+            f"{amendment.get('denied', 0)} denied"
+        )
+        pending = amendment.get("pending") or {}
+        if pending.get("ticket_id"):
+            paths = [
+                item.get("path")
+                for item in pending.get("mutations", [])
+                if isinstance(item, dict)
+            ]
+            joined = ", ".join(str(path) for path in paths if path)
+            print(f"Pending amendment ticket: {pending['ticket_id']} ({joined})")
     return 0
 
 
@@ -793,11 +827,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     codex_intent_admit.add_argument("--session-id", required=True)
     codex_intent_admit.add_argument("--repo", default=".")
-    codex_intent_admit.add_argument(
+    proposal_source = codex_intent_admit.add_mutually_exclusive_group()
+    proposal_source.add_argument(
         "--proposal",
         help="Read the proposal from a JSON file instead of stdin.",
     )
+    proposal_source.add_argument(
+        "--proposal-json",
+        help="Read the proposal from an inline JSON object; preferred for Codex control calls.",
+    )
     codex_intent_admit.set_defaults(func=cmd_codex_intent_admit)
+
+    codex_intent_amend = codex_intent_sub.add_parser(
+        "amend",
+        help="Request the exact scope expansion described by a guard-issued ticket.",
+    )
+    codex_intent_amend.add_argument("--session-id", required=True)
+    codex_intent_amend.add_argument("--ticket", required=True)
+    codex_intent_amend.add_argument("--reason", required=True)
+    codex_intent_amend.add_argument("--repo", default=".")
+    codex_intent_amend.set_defaults(func=cmd_codex_intent_amend)
 
     codex_intent_status_parser = codex_intent_sub.add_parser(
         "status", help="Show the session-bound task and admitted intent."

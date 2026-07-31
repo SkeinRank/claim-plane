@@ -7,22 +7,33 @@ import json
 import os
 import posixpath
 import re
+import secrets
+import shlex
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, TextIO
 
-from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind
+from claim_plane.connectors.codex_amendment import (
+    CODEX_SCOPE_AMENDMENT_PROTOCOL,
+    CODEX_SCOPE_AMENDMENT_TTL_SECONDS,
+    build_scope_amendment,
+    mutation_from_dict,
+    mutation_to_dict,
+)
 from claim_plane.connectors.codex_guard import (
     CODEX_GUARD_PROTOCOL,
     GuardEvaluation,
+    amendment_mutations,
     denied_hook_output,
     evaluate_pre_tool_use,
     promotion_modes,
+    protected_control_path,
 )
+from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind
 
 PROJECT_PROTOCOL = "claim-plane.project.v1"
 CODEX_ENROLLMENT_PROTOCOL = "claim-plane.codex-enrollment.v1"
@@ -762,6 +773,11 @@ def _validate_operation_path(operation: IntentOperation) -> None:
     normalized = posixpath.normpath(raw)
     if normalized == ".." or normalized.startswith("../"):
         raise ValueError("Codex file/document resources cannot escape the repository")
+    if protected_control_path(normalized):
+        raise ValueError(
+            "Codex file/document resources cannot grant Claim Plane, Git, or Codex "
+            "connector control state"
+        )
 
 
 def _intent_from_proposal(
@@ -912,6 +928,184 @@ def admit_codex_intent(
     }
 
 
+def _intent_record_version(plane: Plane, intent_id: str) -> int:
+    record = next(
+        (item for item in plane.intents() if item.get("intent_id") == intent_id),
+        None,
+    )
+    if record is None:
+        raise KeyError(f"unknown intent: {intent_id}")
+    return int(record["version"])
+
+
+def _sync_session_scope(session: dict[str, Any], intent: ChangeIntent) -> None:
+    session["intent_fingerprint"] = intent.fingerprint()
+    session["committed_scope"] = [
+        _operation_summary(item) for item in intent.committed_operations
+    ]
+    session["contingent_scope"] = [
+        _operation_summary(item) for item in intent.contingent_operations
+    ]
+    session["preserves"] = list(intent.preserves)
+    session["acceptance"] = list(intent.acceptance)
+
+
+def amend_codex_scope(
+    root_or_child: str | Path,
+    *,
+    session_id: str,
+    ticket_id: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Atomically amend an active Codex intent from a one-time guard ticket.
+
+    The ticket is created only after Claim Plane has observed an exact denied
+    mutation. The caller supplies rationale, not new authority coordinates: the
+    candidate operations come from the brokered ticket and are re-admitted through
+    the normal ChangeIntent admission path.
+    """
+
+    root = resolve_project_root(root_or_child)
+    _require_initialized(root)
+    if _enrollment_state(root) is None:
+        raise ValueError("Codex is not enrolled; run 'claim-plane connect codex' first")
+    session = _load_session(root, session_id)
+    intent_id = session.get("active_intent_id")
+    if not isinstance(intent_id, str) or not intent_id:
+        raise ValueError("Codex session has no active ChangeIntent to amend")
+
+    pending = session.get("pending_scope_amendment")
+    if not isinstance(pending, dict):
+        raise ValueError("Codex session has no pending scope-amendment ticket")
+    if pending.get("protocol") != CODEX_SCOPE_AMENDMENT_PROTOCOL:
+        raise ValueError("Codex session has an unsupported scope-amendment ticket")
+    if str(pending.get("ticket_id") or "") != ticket_id:
+        raise ValueError("scope-amendment ticket does not match the pending request")
+    if str(pending.get("intent_id") or "") != intent_id:
+        raise ValueError("scope-amendment ticket is bound to a different intent")
+
+    expires_at = pending.get("expires_at")
+    if not isinstance(expires_at, str):
+        raise ValueError("scope-amendment ticket has no expiry")
+    try:
+        expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("scope-amendment ticket has invalid expiry") from exc
+    if datetime.now(timezone.utc) >= expiry:
+        session.pop("pending_scope_amendment", None)
+        session["last_scope_amendment"] = {
+            "ticket_id": ticket_id,
+            "allowed": False,
+            "reason_code": "ticket_expired",
+            "at": _utc_now(),
+        }
+        session["scope_amendment_denied"] = int(
+            session.get("scope_amendment_denied") or 0
+        ) + 1
+        _write_session(root, session)
+        raise ValueError("scope-amendment ticket has expired; retry the denied mutation")
+
+    expected_base = str(session.get("task_base_commit") or "")
+    if not expected_base or _head_commit(root) != expected_base:
+        raise ValueError(
+            "repository HEAD no longer matches the task base; start a fresh task bootstrap"
+        )
+
+    raw_mutations = pending.get("mutations")
+    if not isinstance(raw_mutations, list) or not raw_mutations:
+        raise ValueError("scope-amendment ticket contains no requested mutations")
+    mutations = tuple(
+        mutation_from_dict(item)
+        for item in raw_mutations
+        if isinstance(item, dict)
+    )
+    if len(mutations) != len(raw_mutations):
+        raise ValueError("scope-amendment ticket contains invalid mutation entries")
+    ticket_fingerprint = str(pending.get("intent_fingerprint") or "")
+    expected_signature = _scope_amendment_signature(mutations, ticket_fingerprint)
+    if str(pending.get("request_signature") or "") != expected_signature:
+        raise ValueError("scope-amendment ticket integrity check failed")
+    if str(pending.get("base_commit") or "") != expected_base:
+        raise ValueError("scope-amendment ticket is bound to a different task base")
+
+    plane = Plane.open(root / _PLANE_DB)
+    decision = None
+    applied: tuple[dict[str, Any], ...] = ()
+    try:
+        current = plane.intent(intent_id)
+        if current is None:
+            raise ValueError("active Codex intent disappeared before amendment")
+        if current.fingerprint() != str(pending.get("intent_fingerprint") or ""):
+            raise ValueError(
+                "scope-amendment ticket is stale because the active intent changed; "
+                "retry the denied mutation"
+            )
+        if current.base_commit != expected_base or current.base_revision != expected_base:
+            raise ValueError("active Codex intent no longer matches the task base")
+
+        amended_at = _utc_now()
+        candidate, applied = build_scope_amendment(
+            current,
+            mutations,
+            ticket_id=ticket_id,
+            reason=reason,
+            amended_at=amended_at,
+        )
+        expected_version = _intent_record_version(plane, intent_id)
+        decision = plane.amend(candidate, expected_version=expected_version)
+        if decision.allowed:
+            plane.activate(intent_id)
+            reloaded = plane.intent(intent_id)
+            if reloaded is None:
+                raise ValueError("amended Codex intent could not be reloaded")
+            _sync_session_scope(session, reloaded)
+    finally:
+        plane.close()
+
+    now = _utc_now()
+    session.pop("pending_scope_amendment", None)
+    session["scope_amendment_requests"] = int(
+        session.get("scope_amendment_requests") or 0
+    ) + 1
+    allowed = bool(decision and decision.allowed)
+    if allowed:
+        session["scope_amendment_admitted"] = int(
+            session.get("scope_amendment_admitted") or 0
+        ) + 1
+        session["task_state"] = "active"
+    else:
+        session["scope_amendment_denied"] = int(
+            session.get("scope_amendment_denied") or 0
+        ) + 1
+    session["last_scope_amendment"] = {
+        "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
+        "ticket_id": ticket_id,
+        "allowed": allowed,
+        "reason": reason.strip(),
+        "operations": list(applied or raw_mutations),
+        "at": now,
+    }
+    _write_session(root, session)
+
+    if decision is None:
+        raise RuntimeError("scope amendment finished without an admission decision")
+    return {
+        "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
+        "allowed": decision.allowed,
+        "session_id": session_id,
+        "task_id": session.get("task_id"),
+        "intent_id": intent_id,
+        "base_commit": expected_base,
+        "reason": reason.strip(),
+        "operations": list(applied or raw_mutations),
+        "state": session.get("task_state") or "active",
+        "amendment_state": "admitted" if decision.allowed else "rejected",
+        "committed_scope": list(session.get("committed_scope") or ()),
+        "contingent_scope": list(session.get("contingent_scope") or ()),
+        "decision": decision.to_dict(),
+    }
+
+
 def codex_intent_status(
     root_or_child: str | Path, *, session_id: str
 ) -> dict[str, Any]:
@@ -942,6 +1136,15 @@ def codex_intent_status(
             "last_reason_code": session.get("guard_last_reason_code"),
             "last_tool": session.get("guard_last_tool"),
             "last_paths": list(session.get("guard_last_paths") or ()),
+        },
+        "scope_amendment": {
+            "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
+            "tickets_issued": int(session.get("scope_amendment_tickets_issued") or 0),
+            "requests": int(session.get("scope_amendment_requests") or 0),
+            "admitted": int(session.get("scope_amendment_admitted") or 0),
+            "denied": int(session.get("scope_amendment_denied") or 0),
+            "pending": dict(session.get("pending_scope_amendment") or {}),
+            "last": dict(session.get("last_scope_amendment") or {}),
         },
     }
 
@@ -988,6 +1191,10 @@ def _task_context(session: dict[str, Any]) -> str:
                 "Acceptance:",
                 *acceptance,
                 "Treat this admitted ChangeIntent as the authority boundary for the task.",
+                "If a required repository mutation is denied as outside scope, use only "
+                "the one-time Claim Plane scope-amendment ticket returned by the guard. "
+                "Provide a concrete reason, let Claim Plane re-admit the exact denied "
+                "resource(s), then retry the original mutation.",
             ]
         )
 
@@ -1007,8 +1214,10 @@ def _task_context(session: dict[str, Any]) -> str:
             dirty_note,
             "Before the first repository mutation, inspect the repository read-only "
             "and admit one ChangeIntent for this task.",
-            "Submit the proposal as JSON on stdin with:",
-            f"claim-plane codex-intent admit --session-id {json.dumps(session_id)} --repo .",
+            "Submit the proposal through the connector-owned control command. Use "
+            "--proposal-json so no shell pipe or temporary repository file is required:",
+            f"claim-plane codex-intent admit --session-id {json.dumps(session_id)} "
+            "--repo . --proposal-json '<proposal JSON>'",
             "Proposal shape:",
             json.dumps(
                 {
@@ -1080,6 +1289,98 @@ def _heartbeat_session_intent(root: Path, session: dict[str, Any]) -> bool:
         return False
     finally:
         plane.close()
+
+
+def _scope_amendment_signature(mutations: tuple[Any, ...], intent_fingerprint: str) -> str:
+    payload = {
+        "intent_fingerprint": intent_fingerprint,
+        "mutations": [mutation_to_dict(item) for item in mutations],
+    }
+    return _sha256_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+
+
+def _pending_ticket_is_live(ticket: dict[str, Any]) -> bool:
+    expires_at = ticket.get("expires_at")
+    if not isinstance(expires_at, str):
+        return False
+    try:
+        expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return datetime.now(timezone.utc) < expiry
+
+
+def _attach_scope_amendment_ticket(
+    root: Path,
+    session: dict[str, Any],
+    evaluation: GuardEvaluation,
+) -> GuardEvaluation:
+    """Attach a one-time exact-scope amendment path to eligible guard denials."""
+
+    if evaluation.allowed or evaluation.reason_code not in {
+        "outside_admitted_scope",
+        "multiple_scope_promotions",
+    }:
+        return evaluation
+    intent_id = session.get("active_intent_id")
+    if not isinstance(intent_id, str) or not intent_id:
+        return evaluation
+
+    plane = Plane.open(root / _PLANE_DB)
+    try:
+        intent = plane.intent(intent_id)
+    finally:
+        plane.close()
+    if intent is None:
+        return evaluation
+
+    missing = amendment_mutations(intent, evaluation.mutations)
+    if not missing:
+        return evaluation
+    fingerprint = intent.fingerprint()
+    signature = _scope_amendment_signature(missing, fingerprint)
+    pending = session.get("pending_scope_amendment")
+    if (
+        isinstance(pending, dict)
+        and pending.get("request_signature") == signature
+        and pending.get("intent_id") == intent_id
+        and _pending_ticket_is_live(pending)
+    ):
+        ticket = pending
+    else:
+        now = datetime.now(timezone.utc)
+        ticket = {
+            "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
+            "ticket_id": f"csa_{secrets.token_hex(12)}",
+            "intent_id": intent_id,
+            "intent_fingerprint": fingerprint,
+            "base_commit": str(session.get("task_base_commit") or ""),
+            "request_signature": signature,
+            "reason_code": evaluation.reason_code,
+            "tool_name": evaluation.tool_name,
+            "mutations": [mutation_to_dict(item) for item in missing],
+            "issued_at": now.isoformat().replace("+00:00", "Z"),
+            "expires_at": (now + timedelta(seconds=CODEX_SCOPE_AMENDMENT_TTL_SECONDS))
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        session["pending_scope_amendment"] = ticket
+        session["scope_amendment_tickets_issued"] = int(
+            session.get("scope_amendment_tickets_issued") or 0
+        ) + 1
+        _write_session(root, session)
+
+    session_arg = shlex.quote(str(session["session_id"]))
+    ticket_arg = shlex.quote(str(ticket["ticket_id"]))
+    guidance = (
+        " Claim Plane opened a one-time scope-amendment ticket for only the denied "
+        "mutation(s). If the additional scope is genuinely required, run "
+        f"`claim-plane codex-intent amend --session-id {session_arg} --ticket "
+        f"{ticket_arg} --reason \"<why this scope is required>\" --repo .`, then retry "
+        "the original tool call. The amendment is re-admitted atomically and may still "
+        "be denied by coordination policy."
+    )
+    return replace(evaluation, reason=evaluation.reason + guidance)
 
 
 def _record_guard_evaluation(
@@ -1257,6 +1558,7 @@ def handle_codex_hook(
         _heartbeat_session_intent(root, session)
         try:
             evaluation = _pre_tool_use_guard(root, payload, session)
+            evaluation = _attach_scope_amendment_ticket(root, session, evaluation)
         except Exception as exc:  # fail closed at the runtime integration boundary
             evaluation = _guard_error(
                 str(payload.get("tool_name") or payload.get("toolName") or "unknown"),

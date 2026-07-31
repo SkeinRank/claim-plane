@@ -107,6 +107,23 @@ _PATCH_MOVE = re.compile(r"^\*\*\* Move to: (.+?)\s*$")
 _WINDOWS_ABS = re.compile(r"^[A-Za-z]:[/\\]")
 
 
+def protected_control_path(path: str) -> bool:
+    """Return whether a repository-relative path controls the connector boundary."""
+
+    normalized = path.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    normalized = posixpath.normpath(normalized)
+    return (
+        normalized == ".claim-plane"
+        or normalized.startswith(".claim-plane/")
+        or normalized == ".git"
+        or normalized.startswith(".git/")
+        or normalized == ".codex"
+        or normalized.startswith(".codex/")
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MutationRequest:
     """One concrete repository mutation inferred from a Codex tool call."""
@@ -431,6 +448,104 @@ def _mutation_modes(mutation: MutationRequest) -> tuple[AccessMode, ...]:
     return (mutation.access,)
 
 
+def _parse_control_options(
+    argv: Sequence[str], *, boolean_flags: frozenset[str] = frozenset()
+) -> dict[str, str | bool] | None:
+    options: dict[str, str | bool] = {}
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if not token.startswith("--"):
+            return None
+        raw = token[2:]
+        if not raw:
+            return None
+        if "=" in raw:
+            key, value = raw.split("=", 1)
+            if key in boolean_flags or not value:
+                return None
+        else:
+            key = raw
+            if key in boolean_flags:
+                value = True
+            else:
+                index += 1
+                if index >= len(argv) or argv[index].startswith("--"):
+                    return None
+                value = argv[index]
+        if key in options:
+            return None
+        options[key] = value
+        index += 1
+    return options
+
+
+def _claim_plane_control_command(command: str, *, session_id: str | None) -> bool:
+    """Allow only the session-local connector control surface.
+
+    The control channel cannot point at another repository or session and cannot read
+    a proposal from an arbitrary file. Admission uses inline JSON; amendment scope is
+    derived from a guard-issued ticket rather than caller-selected coordinates.
+    """
+
+    if _has_shell_metacharacters(command):
+        return False
+    try:
+        argv = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if len(argv) < 3 or posixpath.basename(argv[0]) != "claim-plane":
+        return False
+    if argv[1] != "codex-intent":
+        return False
+    action = argv[2]
+    schemas = {
+        "admit": ({"session-id", "repo", "proposal-json"}, frozenset()),
+        "status": ({"session-id", "repo", "json"}, frozenset({"json"})),
+        "amend": ({"session-id", "ticket", "reason", "repo"}, frozenset()),
+    }
+    schema = schemas.get(action)
+    if schema is None:
+        return False
+    allowed, boolean_flags = schema
+    options = _parse_control_options(argv[3:], boolean_flags=boolean_flags)
+    if options is None or not set(options).issubset(allowed):
+        return False
+    if options.get("repo", ".") not in {".", "./"}:
+        return False
+    if not session_id or options.get("session-id") != session_id:
+        return False
+    if action == "admit":
+        return isinstance(options.get("proposal-json"), str)
+    if action == "amend":
+        return bool(options.get("ticket")) and bool(options.get("reason"))
+    return True
+
+
+def amendment_mutations(
+    intent: ChangeIntent, mutations: Iterable[MutationRequest]
+) -> tuple[MutationRequest, ...]:
+    """Return exact mutations that still require a committed capability."""
+
+    result: list[MutationRequest] = []
+    seen: set[tuple[str, str, str | None]] = set()
+    for mutation in mutations:
+        state, _ = _authorization_state(intent, mutation)
+        if state == "committed":
+            continue
+        if any(
+            operation.resource.region is not None
+            for operation in _candidate_operations(intent, mutation)
+        ):
+            # A whole-file hook mutation cannot safely widen a line-bounded declaration.
+            continue
+        key = (mutation.access.value, mutation.path, mutation.target_path)
+        if key not in seen:
+            seen.add(key)
+            result.append(mutation)
+    return tuple(result)
+
+
 def classify_tool_call(
     root: Path, payload: Mapping[str, Any]
 ) -> tuple[str, tuple[MutationRequest, ...]]:
@@ -457,6 +572,10 @@ def classify_tool_call(
         command = _command_from_input(payload)
         if command is None:
             raise ValueError("Codex shell hook input has no command payload")
+        session_value = payload.get("session_id")
+        session_id = session_value if isinstance(session_value, str) else None
+        if _claim_plane_control_command(command, session_id=session_id):
+            return "control_plane", ()
         if _simple_read_only_shell(command):
             return "read_only", ()
         mutations = _parse_simple_shell_mutation(root, cwd, command)
@@ -501,6 +620,16 @@ def evaluate_pre_tool_use(
             classification=classification,
             reason_code="read_only",
             reason="read-only tool call",
+        )
+
+    if classification == "control_plane":
+        return GuardEvaluation(
+            allowed=True,
+            mutating=False,
+            tool_name=tool_name,
+            classification=classification,
+            reason_code="control_plane",
+            reason="connector-owned Claim Plane control command",
         )
 
     if classification == "opaque_shell":
@@ -557,6 +686,29 @@ def evaluate_pre_tool_use(
             ),
             mutations=mutations,
         )
+
+    for mutation in mutations:
+        protected = protected_control_path(mutation.path) or (
+            mutation.target_path is not None
+            and protected_control_path(mutation.target_path)
+        )
+        if protected:
+            target = (
+                f" -> {mutation.target_path}" if mutation.target_path is not None else ""
+            )
+            return GuardEvaluation(
+                allowed=False,
+                mutating=True,
+                tool_name=tool_name,
+                classification=classification,
+                reason_code="protected_control_surface",
+                reason=(
+                    f"Mutation {mutation.access.value} {mutation.path}{target} targets "
+                    "Claim Plane, Git, or Codex connector control state. This surface "
+                    "cannot be granted through a session ChangeIntent."
+                ),
+                mutations=mutations,
+            )
 
     contingent: list[MutationRequest] = []
     for mutation in mutations:
