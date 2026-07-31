@@ -8,6 +8,22 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-07-31
+
+### Added
+
+- Authorize intercepted Codex repository mutations against the live session-bound ChangeIntent before the tool call executes.
+- Classify built-in edit calls and a conservative direct shell subset into concrete file write, delete, and rename requests; allow known read-only discovery without requiring an active intent.
+- Atomically promote one matching contingent mutation surface through normal admission before authorization, while rejecting multi-surface promotion as a single opaque action.
+- Return structured model-visible denials for undeclared scope, stale task bases, missing intent authority, unknown mutating tools, and shell effects that cannot be proven.
+- Expose guard counters, promotion count, last decision code, tool name, and affected paths in Codex intent status without storing raw tool arguments.
+- Add Codex runtime compatibility diagnostics for the file-edit hook coverage required by pre-mutation authorization.
+
+### Changed
+
+- Keep successful Claim Plane authorization additive to Codex's own sandbox and approval flow instead of emitting a positive permission override.
+- Treat lifecycle interception as a runtime integration boundary while retaining brokered execution as the hard reference-monitor boundary for non-bypassable mutation control.
+
 ## [0.11.0] — 2026-07-31
 
 ### Added

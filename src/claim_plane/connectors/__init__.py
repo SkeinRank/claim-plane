@@ -1,9 +1,12 @@
 """Project-local connectors for coding-agent runtimes."""
 
+from claim_plane.connectors.codex_guard import CODEX_GUARD_PROTOCOL
+
 from claim_plane.connectors.codex import (
     CODEX_ENROLLMENT_PROTOCOL,
     CODEX_HOOK_COMMAND,
     CODEX_HOOK_EVENTS,
+    CODEX_MIN_GUARD_VERSION,
     CODEX_INTENT_ADMISSION_PROTOCOL,
     CODEX_INTENT_PROPOSAL_PROTOCOL,
     CODEX_SESSION_PROTOCOL,
@@ -21,6 +24,8 @@ __all__ = [
     "CODEX_ENROLLMENT_PROTOCOL",
     "CODEX_HOOK_COMMAND",
     "CODEX_HOOK_EVENTS",
+    "CODEX_MIN_GUARD_VERSION",
+    "CODEX_GUARD_PROTOCOL",
     "CODEX_INTENT_ADMISSION_PROTOCOL",
     "CODEX_INTENT_PROPOSAL_PROTOCOL",
     "CODEX_SESSION_PROTOCOL",

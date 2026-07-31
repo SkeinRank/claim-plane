@@ -70,7 +70,11 @@ Active Codex lifecycle traffic renews the bound intent lease through Claim Plane
 
 The model may propose goal, scope, preserve requirements, acceptance checks, and explicit dependencies. It cannot choose the authoritative intent ID, task ID, owner, or base revision for the session. Repository-relative file and document declarations are validated before admission, and a changed Git `HEAD` invalidates the bootstrap before any intent is admitted.
 
-The connector is an integration boundary, not a replacement for Claim Plane authority. Lifecycle events provide deterministic interception points and evidence plumbing; admission, broker capabilities, repository identity, and verification remain the sources of authorization and proof. This separation lets the runtime adapter evolve without weakening the core protocol or making MCP participation a prerequisite for enforcement.
+For supported `PreToolUse` surfaces, the connector derives concrete mutation requests from the tool input and checks them against the live session intent. Committed file/document authority passes. One matching contingent surface may be atomically promoted through the canonical registry before execution. A missing active intent, stale pinned base, undeclared path, incompatible destructive capability, unknown mutating surface, or mutation whose effects cannot be proven yields a structured denial. No positive hook override is emitted; successful authorization preserves the runtime's own sandbox and approval path.
+
+The connector records authorization counters, decision codes, and affected paths without retaining raw tool arguments. This provides a minimal local audit trail while avoiding duplication of model prompts and command bodies in connector state.
+
+The connector is an integration boundary, not a replacement for Claim Plane authority. Runtime hook coverage and timeout semantics belong to the external coding runtime. Admission, atomic contingent promotion, broker capabilities, repository identity, and verification remain the sources of authorization and proof. The brokered path remains the reference-monitor boundary for deployments that require non-bypassable mutation control. This separation lets the runtime adapter evolve without weakening the core protocol or making MCP participation a prerequisite for enforcement.
 
 ### Integration verifier
 

@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.11.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.12.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -87,7 +87,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - read-only-by-default worker and integration acceptance guards that reject tracked or non-ignored untracked mutations;
 - SHA-256 evidence binding worker patches, manifests, result trees, result commits, and reproducible result patches;
 - transparent economy/standard/frontier worker-tier recommendations;
-- project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, non-destructive coexistence with existing project hooks, enrollment diagnostics, session-bound task bootstrap, pinned Git bases, and atomic ChangeIntent admission;
+- project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, session-bound task bootstrap, pinned Git bases, atomic ChangeIntent admission, and pre-mutation authorization for intercepted repository writes;
 - CLI, stdio MCP, JSON Schemas, examples, and a deterministic protocol benchmark.
 
 The base package has no runtime dependencies. Agent Lexicon remains an optional semantic layer.
@@ -146,7 +146,18 @@ The raw user prompt is not stored in connector state. The task record keeps a SH
 
 Once admitted, normal Codex prompt and tool lifecycle events renew the active intent lease automatically. The model does not need to issue a separate heartbeat command during an active session.
 
-The session-bound proposal protocol is documented by [`schemas/codex-intent-proposal.schema.json`](schemas/codex-intent-proposal.schema.json). The lifecycle bridge does not depend on MCP. Repository mutation authority remains the responsibility of Claim Plane admission and brokered execution; the connector does not treat model cooperation as an authorization boundary.
+For intercepted `PreToolUse` calls, Claim Plane classifies repository effects before execution. Read-only calls continue normally. A mutation already covered by committed scope continues through Codex's normal sandbox and approval flow. A mutation covered by one contingent declaration is atomically promoted and re-admitted before the tool call continues. Undeclared mutations, stale-base mutations, unknown mutating tool surfaces, and shell commands whose repository effects cannot be proven are denied with model-visible guidance. Claim Plane stores the decision, affected paths, and counters without persisting raw tool arguments.
+
+```text
+committed mutation  -> authorize -> Codex sandbox/approval -> execute
+contingent mutation -> promote + re-admit -> authorize -> execute
+undeclared mutation -> deny before tool execution
+unprovable mutation -> deny before tool execution
+```
+
+`claim-plane doctor codex` also checks that the installed Codex version provides the hook surface required by the guard. Hook interception is an integration boundary, not a substitute for the brokered reference-monitor boundary: runtime hook coverage and timeout behavior remain properties of Codex itself. Claim Plane therefore keeps broker capabilities, repository identity, admission, and verification as the authoritative core primitives.
+
+The session-bound proposal protocol is documented by [`schemas/codex-intent-proposal.schema.json`](schemas/codex-intent-proposal.schema.json). The lifecycle bridge does not depend on MCP; MCP remains an optional interaction surface for status, explanation, and future controlled amendments.
 
 To remove the integration without disturbing other Codex hooks:
 

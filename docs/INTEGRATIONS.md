@@ -16,7 +16,11 @@ The proposal uses `claim-plane.codex-intent-proposal.v1`. Claim Plane binds iden
 
 The connector keeps the raw user prompt out of local session state. The persisted bootstrap contains only a prompt digest and length until an explicit goal is admitted as part of the execution contract.
 
-MCP remains available for agent interaction, but Codex enrollment and session binding do not require an MCP call. Mutation enforcement belongs to the Claim Plane authority path rather than to a voluntary model tool invocation.
+After admission, `PreToolUse` becomes the connector's pre-mutation authorization point for supported Codex tool surfaces. Read-only calls are unaffected. Committed mutations are authorized without overriding Codex's own sandbox or approval decision. A single matching contingent mutation is promoted through normal atomic re-admission before continuing. Undeclared, stale-base, unclassified shell, and unknown mutating surfaces are denied before the intercepted tool call executes. The connector records only decision metadata and affected repository paths, not raw commands or edit payloads.
+
+`claim-plane doctor codex` checks the installed runtime for the minimum hook coverage expected by this integration. Hook interception remains runtime-dependent, so the brokered execution path is still the hard reference-monitor boundary for deployments that require non-bypassable repository mutation control.
+
+MCP remains available for agent interaction, but Codex enrollment, session binding, and mutation authorization do not require a voluntary MCP call from the model.
 
 ## Planner and workers
 

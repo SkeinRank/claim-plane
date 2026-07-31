@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind
+from claim_plane.connectors.codex_guard import (
+    CODEX_GUARD_PROTOCOL,
+    GuardEvaluation,
+    denied_hook_output,
+    evaluate_pre_tool_use,
+    promotion_modes,
+)
 
 PROJECT_PROTOCOL = "claim-plane.project.v1"
 CODEX_ENROLLMENT_PROTOCOL = "claim-plane.codex-enrollment.v1"
@@ -23,6 +30,7 @@ CODEX_SESSION_PROTOCOL = "claim-plane.codex-session.v1"
 CODEX_INTENT_PROPOSAL_PROTOCOL = "claim-plane.codex-intent-proposal.v1"
 CODEX_INTENT_ADMISSION_PROTOCOL = "claim-plane.codex-intent-admission.v1"
 CODEX_HOOK_COMMAND = "claim-plane codex-hook"
+CODEX_MIN_GUARD_VERSION = (0, 123, 0)
 CODEX_HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -420,6 +428,15 @@ def disconnect_codex(root_or_child: str | Path = ".") -> dict[str, Any]:
     }
 
 
+def _parse_codex_version(value: str | None) -> tuple[int, int, int] | None:
+    if not value:
+        return None
+    match = re.search(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)", value)
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+
+
 def _codex_version() -> tuple[str | None, str | None]:
     executable = shutil.which("codex")
     if executable is None:
@@ -532,6 +549,31 @@ def doctor_codex(root_or_child: str | Path = ".") -> CodexDoctorReport:
             "name": "codex_cli",
             "status": "ok" if executable else "error",
             "detail": executable or "codex executable not found on PATH",
+        }
+    )
+
+    parsed_version = _parse_codex_version(version)
+    minimum = ".".join(str(item) for item in CODEX_MIN_GUARD_VERSION)
+    if executable is None:
+        guard_status = "error"
+        guard_detail = "Codex executable is required for pre-mutation guard checks"
+    elif parsed_version is None:
+        guard_status = "warning"
+        guard_detail = f"could not parse Codex version; guard requires {minimum}+"
+    elif parsed_version < CODEX_MIN_GUARD_VERSION:
+        guard_status = "error"
+        guard_detail = (
+            f"Codex {'.'.join(str(item) for item in parsed_version)} is too old; "
+            f"pre-mutation guard requires {minimum}+"
+        )
+    else:
+        guard_status = "ok"
+        guard_detail = f"Codex version supports the required apply_patch hook surface ({minimum}+)"
+    checks.append(
+        {
+            "name": "pre_mutation_guard_compatibility",
+            "status": guard_status,
+            "detail": guard_detail,
         }
     )
 
@@ -890,6 +932,17 @@ def codex_intent_status(
         "preserves": list(session.get("preserves") or ()),
         "acceptance": list(session.get("acceptance") or ()),
         "worktree_dirty_at_bootstrap": bool(session.get("task_worktree_dirty")),
+        "guard": {
+            "protocol": session.get("guard_protocol") or CODEX_GUARD_PROTOCOL,
+            "pretool_calls": int(session.get("guard_pretool_calls") or 0),
+            "authorized_calls": int(session.get("guard_authorized_calls") or 0),
+            "denied_calls": int(session.get("guard_denied_calls") or 0),
+            "promotions": int(session.get("guard_promotions") or 0),
+            "last_decision": session.get("guard_last_decision"),
+            "last_reason_code": session.get("guard_last_reason_code"),
+            "last_tool": session.get("guard_last_tool"),
+            "last_paths": list(session.get("guard_last_paths") or ()),
+        },
     }
 
 
@@ -1010,16 +1063,143 @@ def _record_session_lifecycle_event(root: Path, payload: dict[str, Any]) -> None
     _write_session(root, session)
 
 
-def _heartbeat_session_intent(root: Path, session: dict[str, Any]) -> None:
+def _heartbeat_session_intent(root: Path, session: dict[str, Any]) -> bool:
     intent_id = session.get("active_intent_id")
     if not isinstance(intent_id, str) or not intent_id:
-        return
+        return False
     plane = Plane.open(root / _PLANE_DB)
     try:
+        active_ids = {
+            str(item.get("intent_id")) for item in plane.intents(active_only=True)
+        }
+        if intent_id not in active_ids:
+            return False
         plane.heartbeat(intent_id)
+        return True
+    except (KeyError, ValueError):
+        return False
     finally:
         plane.close()
 
+
+def _record_guard_evaluation(
+    root: Path,
+    session: dict[str, Any],
+    evaluation: GuardEvaluation,
+    *,
+    promoted: bool = False,
+) -> None:
+    session["guard_protocol"] = CODEX_GUARD_PROTOCOL
+    session["guard_pretool_calls"] = int(session.get("guard_pretool_calls") or 0) + 1
+    if evaluation.allowed:
+        session["guard_authorized_calls"] = (
+            int(session.get("guard_authorized_calls") or 0) + 1
+        )
+    else:
+        session["guard_denied_calls"] = int(session.get("guard_denied_calls") or 0) + 1
+    if promoted:
+        session["guard_promotions"] = int(session.get("guard_promotions") or 0) + 1
+    session["guard_last_decision"] = "allow" if evaluation.allowed else "deny"
+    session["guard_last_reason_code"] = evaluation.reason_code
+    session["guard_last_classification"] = evaluation.classification
+    session["guard_last_tool"] = evaluation.tool_name
+    session["guard_last_paths"] = list(evaluation.paths)
+    session["guard_last_at"] = _utc_now()
+    _write_session(root, session)
+
+
+def _guard_error(tool_name: str, reason: str) -> GuardEvaluation:
+    return GuardEvaluation(
+        allowed=False,
+        mutating=True,
+        tool_name=tool_name or "unknown",
+        classification="guard_error",
+        reason_code="guard_error",
+        reason=(
+            "Claim Plane could not establish mutation authority for this tool call: "
+            f"{reason}. The call is denied before execution."
+        ),
+    )
+
+
+def _pre_tool_use_guard(
+    root: Path, payload: dict[str, Any], session: dict[str, Any]
+) -> GuardEvaluation:
+    intent_id = session.get("active_intent_id")
+    intent: ChangeIntent | None = None
+    intent_is_active = False
+    plane = Plane.open(root / _PLANE_DB)
+    try:
+        if isinstance(intent_id, str) and intent_id:
+            intent = plane.intent(intent_id)
+            active_ids = {
+                str(item.get("intent_id")) for item in plane.intents(active_only=True)
+            }
+            intent_is_active = intent_id in active_ids
+
+        expected_base = session.get("task_base_commit")
+        base_commit_matches = bool(
+            isinstance(expected_base, str)
+            and expected_base
+            and _head_commit(root) == expected_base
+        )
+        evaluation = evaluate_pre_tool_use(
+            root=root,
+            payload=payload,
+            intent=intent,
+            intent_is_active=intent_is_active,
+            base_commit_matches=base_commit_matches,
+        )
+        if not evaluation.allowed or evaluation.promotion is None:
+            return evaluation
+
+        if intent is None or not isinstance(intent_id, str):
+            return _guard_error(evaluation.tool_name, "active intent disappeared")
+        mutation = evaluation.promotion
+        decision = plane.promote_contingent_scope(
+            intent_id,
+            path=mutation.path,
+            modes=promotion_modes(mutation),
+        )
+        if not decision.allowed:
+            blockers = "; ".join(
+                str(item.get("message") or item.get("reason") or item)
+                for item in decision.to_dict().get("findings", ())
+                if isinstance(item, dict)
+            )
+            suffix = f" ({blockers})" if blockers else ""
+            return GuardEvaluation(
+                allowed=False,
+                mutating=True,
+                tool_name=evaluation.tool_name,
+                classification=evaluation.classification,
+                reason_code="scope_promotion_denied",
+                reason=(
+                    f"Contingent scope promotion for {mutation.path} was not admitted"
+                    f"{suffix}. Re-plan or amend the ChangeIntent before retrying."
+                ),
+                mutations=evaluation.mutations,
+            )
+
+        promoted_intent = plane.intent(intent_id)
+        if promoted_intent is None:
+            return _guard_error(evaluation.tool_name, "promoted intent could not be reloaded")
+        session["intent_fingerprint"] = promoted_intent.fingerprint()
+        session["committed_scope"] = [
+            _operation_summary(item) for item in promoted_intent.committed_operations
+        ]
+        session["contingent_scope"] = [
+            _operation_summary(item) for item in promoted_intent.contingent_operations
+        ]
+        session["last_scope_promotion"] = {
+            "path": mutation.path,
+            "access": mutation.access.value,
+            "target_path": mutation.target_path,
+            "admitted_at": _utc_now(),
+        }
+        return evaluation
+    finally:
+        plane.close()
 
 def handle_codex_hook(
     payload: dict[str, Any], *, output: TextIO | None = None
@@ -1065,7 +1245,34 @@ def handle_codex_hook(
         )
         return 0
 
-    if event in {"PreToolUse", "PostToolUse", "Stop"}:
+    if event == "PreToolUse":
+        session = _ensure_session(root, payload)
+        if session is None:
+            evaluation = _guard_error(
+                str(payload.get("tool_name") or payload.get("toolName") or "unknown"),
+                "Codex session state is unavailable",
+            )
+            _write_hook_output(output, denied_hook_output(evaluation))
+            return 0
+        _heartbeat_session_intent(root, session)
+        try:
+            evaluation = _pre_tool_use_guard(root, payload, session)
+        except Exception as exc:  # fail closed at the runtime integration boundary
+            evaluation = _guard_error(
+                str(payload.get("tool_name") or payload.get("toolName") or "unknown"),
+                str(exc) or exc.__class__.__name__,
+            )
+        _record_guard_evaluation(
+            root,
+            session,
+            evaluation,
+            promoted=bool(evaluation.allowed and evaluation.promotion is not None),
+        )
+        if not evaluation.allowed:
+            _write_hook_output(output, denied_hook_output(evaluation))
+        return 0
+
+    if event in {"PostToolUse", "Stop"}:
         session = _ensure_session(root, payload)
         if session is not None:
             _heartbeat_session_intent(root, session)

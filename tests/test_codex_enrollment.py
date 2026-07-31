@@ -488,3 +488,286 @@ def test_codex_intent_proposal_cannot_override_authority_fields(
 
     with pytest.raises(ValueError, match="unsupported Codex intent proposal field"):
         codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
+
+
+def _pretool(
+    repo: Path,
+    session_id: str,
+    *,
+    tool_name: str,
+    tool_input: dict[str, object],
+) -> str:
+    output = __import__("io").StringIO()
+    assert (
+        codex.handle_codex_hook(
+            {
+                "hook_event_name": "PreToolUse",
+                "session_id": session_id,
+                "cwd": str(repo),
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+            },
+            output=output,
+        )
+        == 0
+    )
+    return output.getvalue()
+
+
+def _patch(*lines: str) -> str:
+    return "\n".join(("*** Begin Patch", *lines, "*** End Patch"))
+
+
+def test_pretool_read_only_is_allowed_before_intent_admission(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_read"
+    _bootstrap_task(repo, session_id)
+
+    assert _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={"command": "rg SessionCache src"},
+    ) == ""
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["guard"]["authorized_calls"] == 1
+    assert status["guard"]["denied_calls"] == 0
+
+
+def test_pretool_mutation_is_denied_before_intent_admission(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_no_intent"
+    _bootstrap_task(repo, session_id)
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+    )
+
+    payload = json.loads(raw)
+    decision = payload["hookSpecificOutput"]
+    assert decision["hookEventName"] == "PreToolUse"
+    assert decision["permissionDecision"] == "deny"
+    assert "No active ChangeIntent" in decision["permissionDecisionReason"]
+
+
+def test_pretool_committed_apply_patch_is_authorized(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_committed"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+    )
+
+    assert raw == ""
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["guard"]["authorized_calls"] == 1
+    assert status["guard"]["last_paths"] == ["src/cache.py"]
+
+
+def test_pretool_undeclared_apply_patch_is_denied(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_outside"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: auth/token.py", "@@", "-a", "+b")},
+    )
+
+    decision = json.loads(raw)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "auth/token.py" in decision["permissionDecisionReason"]
+    assert "outside the admitted ChangeIntent" in decision["permissionDecisionReason"]
+
+
+def test_pretool_contingent_path_is_atomically_promoted_before_allow(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_promote"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: src/locking.py", "@@", "-a", "+b")},
+    )
+
+    assert raw == ""
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["guard"]["promotions"] == 1
+    assert "src/locking.py" in {
+        item["identifier"] for item in status["committed_scope"]
+    }
+    assert "src/locking.py" not in {
+        item["identifier"] for item in status["contingent_scope"]
+    }
+
+
+def test_pretool_multiple_contingent_promotions_are_denied_without_partial_change(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_multi_promote"
+    _bootstrap_task(repo, session_id)
+    proposal = _proposal()
+    proposal["operations"].append(
+        {
+            "access": "write",
+            "kind": "file",
+            "identifier": "src/fallback.py",
+            "commitment": "contingent",
+            "required": False,
+        }
+    )
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: src/locking.py",
+                "@@",
+                "-a",
+                "+b",
+                "*** Update File: src/fallback.py",
+                "@@",
+                "-c",
+                "+d",
+            )
+        },
+    )
+
+    decision = json.loads(raw)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "more than one contingent scope promotion" in decision["permissionDecisionReason"]
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["guard"]["promotions"] == 0
+    assert {item["identifier"] for item in status["contingent_scope"]} >= {
+        "src/locking.py",
+        "src/fallback.py",
+    }
+
+
+def test_pretool_shell_mutation_requires_matching_capability(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_shell"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    allowed = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={"command": "touch src/cache.py"},
+    )
+    denied = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={"command": "rm src/cache.py"},
+    )
+
+    assert allowed == ""
+    assert json.loads(denied)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_pretool_opaque_shell_and_unknown_tools_fail_closed(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_opaque"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    opaque = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={"command": "python -c 'open(\"src/cache.py\", \"w\").write(\"x\")'"},
+    )
+    unknown = _pretool(
+        repo,
+        session_id,
+        tool_name="future_mutator",
+        tool_input={"path": "src/cache.py"},
+    )
+
+    assert json.loads(opaque)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert json.loads(unknown)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_pretool_changed_head_denies_mutation(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_stale_base"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+    (repo / "HEAD_CHANGE.txt").write_text("change\n", encoding="utf-8")
+    subprocess.run(["git", "add", "HEAD_CHANGE.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "advance head"], cwd=repo, check=True)
+
+    raw = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={"command": _patch("*** Update File: src/cache.py", "@@", "-a", "+b")},
+    )
+
+    decision = json.loads(raw)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    assert "HEAD no longer matches" in decision["permissionDecisionReason"]
+
+
+def test_guard_state_does_not_persist_raw_tool_input(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_private"
+    _bootstrap_task(repo, session_id)
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+    secret = "VERY_PRIVATE_TOOL_ARGUMENT_123"
+
+    _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={"command": f"python -c '{secret}'"},
+    )
+
+    session_files = list((repo / ".claim-plane/codex/sessions").glob("*.json"))
+    assert len(session_files) == 1
+    text = session_files[0].read_text(encoding="utf-8")
+    assert secret not in text
+    state = json.loads(text)
+    assert state["guard_last_reason_code"] == "opaque_shell"
+
+
+def test_doctor_rejects_codex_without_apply_patch_hook_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    codex.init_project(repo)
+    codex.connect_codex(repo)
+    monkeypatch.setattr(
+        codex, "_codex_version", lambda: ("/usr/bin/codex", "codex-cli 0.122.0")
+    )
+
+    report = codex.doctor_codex(repo)
+
+    assert report.ready is False
+    check = next(
+        item
+        for item in report.checks
+        if item["name"] == "pre_mutation_guard_compatibility"
+    )
+    assert check["status"] == "error"

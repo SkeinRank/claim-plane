@@ -177,6 +177,13 @@ def cmd_codex_intent_status(args: argparse.Namespace) -> int:
             print(f"Base commit: {result['base_commit']}")
         if result.get("goal"):
             print(f"Goal: {result['goal']}")
+        guard = result.get("guard") or {}
+        print(
+            "Guard: "
+            f"{guard.get('authorized_calls', 0)} authorized, "
+            f"{guard.get('denied_calls', 0)} denied, "
+            f"{guard.get('promotions', 0)} promotions"
+        )
     return 0
 
 
