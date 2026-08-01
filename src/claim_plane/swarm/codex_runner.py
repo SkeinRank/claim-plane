@@ -24,7 +24,7 @@ from claim_plane.connectors.codex import (
     init_project,
 )
 from claim_plane.core import IntentOperation
-from claim_plane.swarm.concurrency import ConcurrencyPlan
+from claim_plane.swarm.admission import SharedAdmissionStatus
 from claim_plane.swarm.models import SwarmSessionState, WorkItem
 from claim_plane.swarm.runs import (
     CodexRunBudget,
@@ -38,9 +38,11 @@ from claim_plane.swarm.service import (
     _resolve_commit,
     _store,
     _validate_session_id,
+    ensure_swarm_admission,
     inspect_swarm_worktrees,
     resolve_repository_root,
 )
+from claim_plane.swarm.scheduler import compute_scheduler_snapshot
 from claim_plane.swarm.worktrees import WorktreeHealth
 
 _ACTIVE_STATES = {
@@ -223,21 +225,6 @@ def _latest_states(records: list[CodexRunRecord]) -> dict[str, CodexRunRecord]:
     return latest
 
 
-def _current_wave(
-    plan: ConcurrencyPlan, records: list[CodexRunRecord]
-) -> tuple[int, tuple[str, ...]]:
-    latest = _latest_states(records)
-    for wave in plan.waves:
-        incomplete = tuple(
-            work_id
-            for work_id in wave.work_ids
-            if latest.get(work_id) is None
-            or latest[work_id].state is not CodexRunState.SUCCEEDED
-        )
-        if incomplete:
-            return wave.index, incomplete
-    raise ValueError("all work items already have successful Codex executions")
-
 
 def _fair_share(
     remaining: int | None, unfinished: int, requested: int | None
@@ -292,9 +279,11 @@ def _reserve_run(
 ) -> tuple[CodexRunRecord, WorkItem]:
     identity = _repository_identity(root)
     now = _utc_now()
+    ensure_swarm_admission(root, session_id)
     with _store(root) as store:
         session = store.require(session_id)
         plan_data = store.get_concurrency_plan(session_id)
+        shared_data = store.get_shared_admission(session_id)
         worktrees = store.list_worktrees(session_id)
         existing_runs = store.list_codex_runs(session_id)
     if session.repository_identity != identity:
@@ -313,6 +302,19 @@ def _reserve_run(
         or plan.budget_fingerprint != session.budget_fingerprint
     ):
         raise ValueError("stored concurrency plan is stale")
+    if shared_data is None:
+        raise ValueError("swarm session has no shared admission")
+    shared_admission, _ = shared_data
+    if shared_admission.status is not SharedAdmissionStatus.READY:
+        raise ValueError("shared admission requires replanning")
+    if (
+        shared_admission.graph_version != session.graph_version
+        or shared_admission.graph_fingerprint != session.graph_fingerprint
+        or shared_admission.budget_version != session.budget_version
+        or shared_admission.budget_fingerprint != session.budget_fingerprint
+        or shared_admission.concurrency_plan_fingerprint != plan.fingerprint()
+    ):
+        raise ValueError("stored shared admission is stale")
     item = session.work_graph.item_map.get(work_id)
     if item is None:
         raise KeyError(f"unknown work item {work_id!r}")
@@ -336,24 +338,32 @@ def _reserve_run(
         raise ValueError(
             f"managed worktree {work_id!r} is not runnable: {inspection['health']}"
         )
-    current_wave_index, runnable_ids = _current_wave(plan, existing_runs)
-    if work_id not in runnable_ids:
-        raise ValueError(
-            f"work item {work_id!r} is not runnable in current wave "
-            f"{current_wave_index}; runnable: {', '.join(runnable_ids)}"
-        )
     latest = _latest_states(existing_runs)
-    missing_dependencies = [
-        dependency
-        for dependency in item.depends_on
-        if latest.get(dependency) is None
-        or latest[dependency].state is not CodexRunState.SUCCEEDED
-    ]
-    if missing_dependencies:
+    current = latest.get(work_id)
+    if current is not None and current.state in _ACTIVE_STATES:
         raise ValueError(
-            "work-item dependencies have not succeeded: "
-            + ", ".join(missing_dependencies)
+            "workers.max_active_per_work_item is exhausted for "
+            f"{work_id!r}"
         )
+    attempts_for_work = sum(1 for record in existing_runs if record.work_id == work_id)
+    if (
+        current is not None
+        and current.state.terminal
+        and current.state is not CodexRunState.SUCCEEDED
+        and attempts_for_work >= 1 + session.budget_policy.retries.max_agent_restarts
+    ):
+        raise ValueError(f"restart budget is exhausted for work item {work_id!r}")
+    scheduler = compute_scheduler_snapshot(session, shared_admission, existing_runs)
+    if work_id not in scheduler.dispatchable_work_ids:
+        work_state = next(
+            value.state.value for value in scheduler.work if value.work_id == work_id
+        )
+        runnable = ", ".join(scheduler.dispatchable_work_ids) or "none"
+        raise ValueError(
+            f"work item {work_id!r} is not runnable in current wave; "
+            f"scheduler state={work_state}; dispatchable: {runnable}"
+        )
+    admission_record = shared_admission.admission_map[work_id]
 
     policy = session.budget_policy
     completed_tokens = sum(
@@ -436,7 +446,11 @@ def _reserve_run(
         created_at=now,
         updated_at=now,
         metadata={
-            "wave_index": current_wave_index,
+            "shared_admission_fingerprint": shared_admission.fingerprint(),
+            "effective_dependencies": list(
+                admission_record.effective_dependencies
+            ),
+            "scheduler_snapshot_fingerprint": scheduler.fingerprint(),
             "codex_version": _codex_version(executable),
             "cost_metering": "unavailable_from_codex_jsonl",
         },
@@ -456,6 +470,7 @@ def _reserve_run(
                 max_total_launches=policy.workers.max_total_launches,
                 max_attempts_per_work_item=1 + policy.retries.max_agent_restarts,
                 max_total_tokens=policy.resources.max_total_tokens,
+                expected_admission_fingerprint=shared_admission.fingerprint(),
             )
     except Exception:
         shutil.rmtree(run_dir, ignore_errors=True)

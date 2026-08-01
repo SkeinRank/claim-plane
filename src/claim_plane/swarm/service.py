@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from claim_plane.swarm.admission import (
+    SharedAdmissionStatus,
+    compute_shared_admission,
+)
 from claim_plane.swarm.budget import SwarmBudgetPolicy
 from claim_plane.swarm.concurrency import (
     ConcurrencyPlanStatus,
@@ -24,6 +28,7 @@ from claim_plane.swarm.models import (
     SwarmSessionState,
     WorkGraph,
 )
+from claim_plane.swarm.scheduler import compute_scheduler_snapshot
 from claim_plane.swarm.store import SwarmSessionStore
 from claim_plane.swarm.worktrees import (
     ManagedWorktree,
@@ -369,6 +374,119 @@ def validate_concurrency_plan(
         "concurrency_plan": plan.to_dict(),
         "summary": plan.summary(),
     }
+
+
+def admit_swarm_session(repo: str | Path, session_id: str) -> dict[str, Any]:
+    """Compute and persist shared admission for every concurrent candidate."""
+
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    identity = _repository_identity(root)
+    with _store(root) as store:
+        session = store.require(session_id)
+        stored_plan = store.get_concurrency_plan(session_id)
+        if session.repository_identity != identity:
+            raise ValueError(
+                "swarm session is bound to a different repository identity"
+            )
+        if stored_plan is None:
+            raise ValueError(
+                "swarm session has no concurrency plan; run "
+                "'claim-plane swarm plan' first"
+            )
+        concurrency, _ = stored_plan
+        admission = compute_shared_admission(session, concurrency)
+        stored, admission_version, changed = store.save_shared_admission(
+            session_id,
+            admission,
+            expected_graph_version=session.graph_version,
+            expected_budget_version=session.budget_version,
+            expected_concurrency_plan_fingerprint=concurrency.fingerprint(),
+            created_at=_utc_now(),
+        )
+    return {
+        "session_id": session_id,
+        "created": changed,
+        "admission_version": admission_version,
+        "admission_fingerprint": stored.fingerprint(),
+        "shared_admission": stored.to_dict(),
+        "summary": stored.summary(),
+    }
+
+
+def get_swarm_admission(repo: str | Path, session_id: str) -> dict[str, Any]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    with _store(root) as store:
+        session = store.require(session_id)
+        stored = store.get_shared_admission(session_id)
+        concurrency = store.get_concurrency_plan(session_id)
+    if session.repository_identity != _repository_identity(root):
+        raise ValueError("swarm session is bound to a different repository identity")
+    if stored is None:
+        raise KeyError(
+            f"swarm session {session_id!r} has no shared admission; "
+            "run 'claim-plane swarm admit' first"
+        )
+    if concurrency is None:
+        raise ValueError("shared admission exists without a concurrency plan")
+    admission, version = stored
+    plan, _ = concurrency
+    if (
+        admission.graph_version != session.graph_version
+        or admission.graph_fingerprint != session.graph_fingerprint
+        or admission.budget_version != session.budget_version
+        or admission.budget_fingerprint != session.budget_fingerprint
+        or admission.concurrency_plan_fingerprint != plan.fingerprint()
+    ):
+        raise ValueError("stored shared admission is stale")
+    return {
+        "session_id": session_id,
+        "admission_version": version,
+        "admission_fingerprint": admission.fingerprint(),
+        "shared_admission": admission.to_dict(),
+        "summary": admission.summary(),
+    }
+
+
+def get_swarm_scheduler(repo: str | Path, session_id: str) -> dict[str, Any]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    with _store(root) as store:
+        session = store.require(session_id)
+        stored = store.get_shared_admission(session_id)
+        records = store.list_codex_runs(session_id)
+    if session.repository_identity != _repository_identity(root):
+        raise ValueError("swarm session is bound to a different repository identity")
+    if stored is None:
+        raise KeyError(
+            f"swarm session {session_id!r} has no shared admission; "
+            "run 'claim-plane swarm admit' first"
+        )
+    admission, admission_version = stored
+    snapshot = compute_scheduler_snapshot(session, admission, records)
+    return {
+        "session_id": session_id,
+        "admission_version": admission_version,
+        "admission_fingerprint": admission.fingerprint(),
+        "scheduler": snapshot.to_dict(),
+        "summary": snapshot.summary(),
+    }
+
+
+def ensure_swarm_admission(repo: str | Path, session_id: str) -> dict[str, Any]:
+    """Return a fresh admission, creating one for older execution workflows."""
+
+    try:
+        return get_swarm_admission(repo, session_id)
+    except KeyError:
+        result = admit_swarm_session(repo, session_id)
+        if result["summary"]["status"] != SharedAdmissionStatus.READY.value:
+            raise ValueError("shared admission requires replanning")
+        return result
 
 
 def _git_result(

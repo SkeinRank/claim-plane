@@ -47,11 +47,14 @@ from claim_plane.runtime import (
     build_broker_boundary_command,
 )
 from claim_plane.swarm import (
+    admit_swarm_session,
     cancel_codex_run,
     cleanup_swarm_worktrees,
     create_swarm_session,
     get_codex_run,
+    get_swarm_admission,
     get_swarm_concurrency_plan,
+    get_swarm_scheduler,
     get_swarm_session,
     inspect_swarm_worktrees,
     list_codex_runs,
@@ -440,6 +443,72 @@ def cmd_swarm_validate_concurrency(args: argparse.Namespace) -> int:
     result = validate_concurrency_plan(graph, policy)
     _write_json(result)
     return 0 if result["summary"]["status"] == "ready" else 2
+
+
+def cmd_swarm_admit(args: argparse.Namespace) -> int:
+    result = admit_swarm_session(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        action = "Stored" if result["created"] else "Reused"
+        print(
+            f"{action} shared admission v{result['admission_version']} for "
+            f"{result['session_id']}."
+        )
+        print(
+            f"Status: {summary['status']}; admitted={summary['admitted']}; "
+            f"blocked={summary['blocked']}"
+        )
+        for item in result["shared_admission"]["admissions"]:
+            label = "ADMITTED" if item["allowed"] else "BLOCKED"
+            deps = ", ".join(item["effective_dependencies"]) or "none"
+            print(
+                f"  {item['work_id']}: {label} ({item['kind']}); "
+                f"depends_on={deps}"
+            )
+    return 0 if result["summary"]["status"] == "ready" else 2
+
+
+def cmd_swarm_admission(args: argparse.Namespace) -> int:
+    result = get_swarm_admission(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        print(
+            f"Shared admission v{result['admission_version']} for "
+            f"{result['session_id']}: {summary['status']}"
+        )
+        print(
+            f"Admitted: {summary['admitted']}; blocked: {summary['blocked']}; "
+            f"fingerprint={result['admission_fingerprint'][:20]}"
+        )
+        for item in result["shared_admission"]["admissions"]:
+            print(
+                f"  {item['work_id']}: {item['kind']} "
+                f"allowed={str(item['allowed']).lower()}"
+            )
+    return 0 if result["summary"]["status"] == "ready" else 2
+
+
+def cmd_swarm_scheduler(args: argparse.Namespace) -> int:
+    result = get_swarm_scheduler(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        print(f"Scheduler for {result['session_id']}: {summary['status']}")
+        print(
+            f"Workers: {summary['active_workers']}/"
+            f"{summary['max_active_workers']} active; "
+            f"slots={summary['available_slots']}"
+        )
+        runnable = ", ".join(summary["dispatchable_work_ids"]) or "none"
+        print(f"Dispatchable: {runnable}")
+        for item in result["scheduler"]["work"]:
+            print(f"  {item['work_id']}: {item['state']} — {item['detail']}")
+    return 0 if result["summary"]["status"] != "replan_required" else 2
 
 
 def cmd_swarm_budget(args: argparse.Namespace) -> int:
@@ -1367,6 +1436,36 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_validate_concurrency.add_argument("--graph", required=True)
     swarm_validate_concurrency.add_argument("--policy")
     swarm_validate_concurrency.set_defaults(func=cmd_swarm_validate_concurrency)
+
+    swarm_admit = swarm_sub.add_parser(
+        "admit",
+        help="Compute and persist shared admission for all swarm work items.",
+    )
+    swarm_admit.add_argument("session_id")
+    swarm_admit.add_argument("--repo", default=".")
+    swarm_admit.add_argument("--json", action="store_true")
+    swarm_admit.add_argument("--out")
+    swarm_admit.set_defaults(func=cmd_swarm_admit)
+
+    swarm_admission = swarm_sub.add_parser(
+        "admission",
+        help="Inspect the persisted shared swarm admission plan.",
+    )
+    swarm_admission.add_argument("session_id")
+    swarm_admission.add_argument("--repo", default=".")
+    swarm_admission.add_argument("--json", action="store_true")
+    swarm_admission.add_argument("--out")
+    swarm_admission.set_defaults(func=cmd_swarm_admission)
+
+    swarm_scheduler = swarm_sub.add_parser(
+        "scheduler",
+        help="Show dynamically runnable, blocked, active, and completed work.",
+    )
+    swarm_scheduler.add_argument("session_id")
+    swarm_scheduler.add_argument("--repo", default=".")
+    swarm_scheduler.add_argument("--json", action="store_true")
+    swarm_scheduler.add_argument("--out")
+    swarm_scheduler.set_defaults(func=cmd_swarm_scheduler)
 
     swarm_budget = swarm_sub.add_parser(
         "budget", help="Export the versioned budget policy for one swarm session."

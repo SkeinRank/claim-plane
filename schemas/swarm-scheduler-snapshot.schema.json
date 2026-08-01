@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-scheduler-snapshot.schema.json",
+  "title": "Claim Plane Swarm Scheduler Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "session_id",
+    "admission_fingerprint",
+    "status",
+    "active_workers",
+    "max_active_workers",
+    "available_slots",
+    "dispatchable_work_ids",
+    "work",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-scheduler-snapshot.v1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "admission_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"enum": ["ready", "blocked", "completed", "replan_required"]},
+    "active_workers": {"type": "integer", "minimum": 0},
+    "max_active_workers": {"type": "integer", "minimum": 1},
+    "available_slots": {"type": "integer", "minimum": 0},
+    "dispatchable_work_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "work": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "work_id",
+          "state",
+          "effective_dependencies",
+          "attempt_count",
+          "latest_run_id",
+          "detail"
+        ],
+        "properties": {
+          "work_id": {"type": "string", "minLength": 1},
+          "state": {
+            "enum": [
+              "pending",
+              "blocked",
+              "runnable",
+              "queued_capacity",
+              "active",
+              "succeeded",
+              "retryable",
+              "failed",
+              "replan_required"
+            ]
+          },
+          "effective_dependencies": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "attempt_count": {"type": "integer", "minimum": 0},
+          "latest_run_id": {"type": ["string", "null"]},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "metadata": {"type": "object"}
+  }
+}

@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-08-01
+
+### Added
+
+- Add `claim-plane.swarm-shared-admission.v1`, deriving one deterministic, repository- and base-bound `ChangeIntent` per work item and admitting the set against the whole swarm authority topology.
+- Add effective dependency construction that preserves explicit work-graph dependencies and promotes adaptive-concurrency serialization constraints into durable scheduler prerequisites.
+- Add `claim-plane.swarm-scheduler-snapshot.v1`, with dynamic states for runnable, capacity-queued, active, retryable, succeeded, failed, dependency-blocked, and replan-required work.
+- Add `swarm admit`, `swarm admission`, and `swarm scheduler` commands with human-readable and JSON output.
+- Add schema-v6 migration, JSON Schemas, and regression coverage for shared admission, dynamic dependency release, retry exhaustion, source invalidation, upgraded 0.20 sessions, and runner compatibility.
+
+### Changed
+
+- Replace static execution-wave gating in the Codex runner with an atomic scheduler decision based on the current shared admission, durable run records, dependency outcomes, retry ceilings, and remaining active-worker capacity.
+- Bind each worker reservation to the exact shared-admission fingerprint inside the same SQLite transaction that reserves the worker slot, preventing concurrent launches from acting on stale scheduler state.
+- Invalidate stored shared admission whenever the work graph, budget policy, or concurrency plan changes, while keeping repeated admission of identical sources idempotent.
+- Keep process success separate from verification: `succeeded` releases execution dependencies, but merge integration, cross-intent verification, and final `SWARM VERIFIED` remain later stages.
+
 ## [0.20.0] — 2026-08-01
 
 ### Added

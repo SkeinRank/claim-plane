@@ -186,11 +186,11 @@ Graph and budget versions are independent. Changing one does not silently overwr
 
 ## Database migration
 
-Opening an older swarm database upgrades it in place to schema version 5. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans; schema version 4 retains managed-worktree ownership. The schema-5 migration adds durable Codex-run records only. Existing work graphs, budgets, plans, worktrees, repository bindings, base commits, timestamps, and session identities remain unchanged.
+Opening an older swarm database upgrades it in place to schema version 6. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans; schema version 4 retains managed-worktree ownership; schema version 5 retains durable Codex-run records. The schema-6 migration adds source-bound shared-admission records only. Existing work graphs, budgets, plans, worktrees, runs, repository bindings, base commits, timestamps, and session identities remain unchanged.
 
 ## Current boundary
 
-Version 0.20.0 adds a bounded headless Codex runner on top of durable planning, budgets, adaptive concurrency, and managed Git worktrees. Process success remains distinct from Claim Plane verification and integration.
+Version 0.21.0 adds shared authority admission and a dynamic dependency scheduler on top of durable planning, budgets, adaptive concurrency, managed Git worktrees, and bounded Codex execution. Process success can release execution prerequisites, but it remains distinct from Claim Plane verification and final integration.
 
 ## Adaptive concurrency planning
 
@@ -216,8 +216,35 @@ A `serialize` decision adds a deterministic ordering edge while preserving the o
 
 Replacing either the work graph or budget policy invalidates the stored plan atomically. The next scheduler step must run `claim-plane swarm plan` again before workers can be launched.
 
-Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. Version 0.20.0 launches one Codex process only after the current wave, dependencies, worktree ownership, graph binding, budget binding, launch ceilings, restart ceilings, token reservation, and wall-time allocation all pass.
+Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. Version 0.20.0 added bounded Codex process execution. Version 0.21.0 converts serialization constraints into effective dependencies and releases work dynamically instead of requiring a complete static wave barrier.
 
+## Shared admission and dependency scheduling
+
+Before launching workers, Claim Plane can materialize the authority topology proposed by the work graph:
+
+```bash
+claim-plane swarm admit <session-id>
+claim-plane swarm admission <session-id>
+claim-plane swarm scheduler <session-id>
+```
+
+Shared admission derives one deterministic `ChangeIntent` per work item. Each intent is bound to the swarm session repository, pinned base commit, declared committed operations, preserves, acceptance criteria, and effective dependencies. Explicit DAG dependencies are retained, while `serialize` decisions from the adaptive concurrency plan become additional prerequisites. Work that is ordered by dependency is not treated as concurrent authority; work that may coexist is admitted against the other concurrently admissible intents.
+
+The persisted admission record is bound to the exact graph, budget, and concurrency-plan versions and fingerprints. Repeating admission with unchanged sources is idempotent. Replacing the graph or budget, or changing the concurrency plan, invalidates the record atomically. A blocked intent produces `replan_required` rather than granting partial execution authority.
+
+The dependency scheduler is operational rather than static. It combines the admitted effective dependencies with durable Codex run state, retry ceilings, and available `max_active` capacity. Its snapshot distinguishes:
+
+- `runnable`: all effective prerequisites succeeded and a worker slot is available;
+- `queued_capacity`: prerequisites succeeded but current capacity is exhausted;
+- `active`: a reserved or running worker exists;
+- `retryable`: the latest execution failed but restart budget remains;
+- `succeeded`: the bounded process completed successfully;
+- `blocked`: an unfinished or terminally failed prerequisite prevents dispatch;
+- `failed` or `replan_required`: no valid execution path remains under the current policy.
+
+The Codex runner re-evaluates this snapshot inside the same SQLite transaction that reserves a worker slot and binds that reservation to the shared-admission fingerprint. Two concurrent launch attempts therefore cannot both rely on an obsolete capacity view. For compatibility with upgraded 0.20 sessions, the runner can create a missing admission record automatically, but explicit `swarm admit` is the preferred operator flow.
+
+A `succeeded` process releases execution dependencies only. It is not evidence that the work item is semantically verified, mergeable, or accepted.
 
 ## Managed worktree provisioning
 
@@ -260,8 +287,8 @@ The runner invokes `codex exec --json --sandbox workspace-write --ask-for-approv
 
 The reservation transaction enforces:
 
-- the exact graph and budget versions and fingerprints used by the concurrency plan;
-- the current execution wave and successful upstream dependencies;
+- the exact graph, budget, concurrency-plan, and shared-admission fingerprints;
+- current dynamic scheduler eligibility and successful effective dependencies;
 - `max_active`, `max_active_per_work_item`, `max_total_launches`, and restart ceilings;
 - a fair token reservation from the remaining session budget;
 - a bounded timeout inside the remaining elapsed session execution budget.
@@ -270,6 +297,6 @@ The first reservation atomically changes the swarm session from `planned` to `ru
 
 Codex JSONL events, stderr, the final agent message, prompt digest, command, PIDs, thread identifier, observed intent identifier, token usage, duration, exit code, and termination classification are persisted under `.claim-plane/swarm/runs/` and in `swarm.db`. The local evidence namespace is created as private directories and rejects every symlink component before persistence. Token overruns, timeouts, cancellation, spawn failures, and non-zero exits are distinct terminal states.
 
-A `succeeded` run means only that the bounded Codex process exited successfully. It does not mean the work item or swarm is `VERIFIED`. Shared admission, verified dependency release, merge ordering, cross-intent verification, and final integration remain later lifecycle stages.
+A `succeeded` run means only that the bounded Codex process exited successfully. It may release execution dependencies in the scheduler, but it does not mean the work item or swarm is `VERIFIED`. Merge ordering, cross-intent verification, and final integration remain later lifecycle stages.
 
 Codex JSONL currently exposes token usage but not authoritative provider cost. The run record therefore preserves the session cost ceiling and explicitly marks cost metering as unavailable instead of fabricating a dollar estimate.

@@ -72,9 +72,16 @@ from claim_plane.swarm import (
     RetryBudget,
     RootTask,
     SameFilePolicy,
+    ScheduledWork,
+    ScheduledWorkState,
+    SchedulerSnapshot,
+    SchedulerStatus,
+    SharedAdmissionPlan,
+    SharedAdmissionStatus,
     SwarmBudgetPolicy,
     SwarmSession,
     SwarmSessionState,
+    WorkAdmission,
     WorkGraph,
     WorkItem,
 )
@@ -94,7 +101,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.20.0"
+__version__ = "0.21.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -130,6 +137,12 @@ __all__ = [
     "ResourceBudget",
     "RetryBudget",
     "SameFilePolicy",
+    "ScheduledWork",
+    "ScheduledWorkState",
+    "SchedulerSnapshot",
+    "SchedulerStatus",
+    "SharedAdmissionPlan",
+    "SharedAdmissionStatus",
     "SwarmBudgetPolicy",
     "IntegrationAttempt",
     "IntegrationReport",
@@ -180,6 +193,7 @@ __all__ = [
     "RootTask",
     "SwarmSession",
     "SwarmSessionState",
+    "WorkAdmission",
     "WorkGraph",
     "WorkItem",
     "__version__",

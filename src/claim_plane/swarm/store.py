@@ -8,13 +8,15 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from claim_plane.swarm.admission import SharedAdmissionPlan, SharedAdmissionStatus
 from claim_plane.swarm.budget import SwarmBudgetPolicy
 from claim_plane.swarm.concurrency import ConcurrencyPlan
 from claim_plane.swarm.models import SwarmSession, SwarmSessionState, WorkGraph
 from claim_plane.swarm.runs import CodexRunRecord, CodexRunState
+from claim_plane.swarm.scheduler import compute_scheduler_snapshot
 from claim_plane.swarm.worktrees import ManagedWorktree
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 
 
 class SwarmSessionStore:
@@ -140,6 +142,26 @@ class SwarmSessionStore:
         self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_swarm_codex_runs_state "
             "ON swarm_codex_runs(session_id, state, work_id)"
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS swarm_shared_admissions (
+                session_id TEXT PRIMARY KEY,
+                admission_version INTEGER NOT NULL,
+                graph_version INTEGER NOT NULL,
+                graph_fingerprint TEXT NOT NULL,
+                budget_version INTEGER NOT NULL,
+                budget_fingerprint TEXT NOT NULL,
+                concurrency_plan_fingerprint TEXT NOT NULL,
+                admission_fingerprint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES swarm_sessions(session_id)
+                    ON DELETE CASCADE
+            )
+            """
         )
         if schema_version < _SCHEMA_VERSION:
             self._migrate_payloads()
@@ -320,6 +342,10 @@ class SwarmSessionStore:
                 "DELETE FROM swarm_concurrency_plans WHERE session_id = ?",
                 (session_id,),
             )
+            self._connection.execute(
+                "DELETE FROM swarm_shared_admissions WHERE session_id = ?",
+                (session_id,),
+            )
             self._connection.commit()
             return updated
         except Exception:
@@ -377,6 +403,10 @@ class SwarmSessionStore:
                 )
             self._connection.execute(
                 "DELETE FROM swarm_concurrency_plans WHERE session_id = ?",
+                (session_id,),
+            )
+            self._connection.execute(
+                "DELETE FROM swarm_shared_admissions WHERE session_id = ?",
                 (session_id,),
             )
             self._connection.commit()
@@ -502,6 +532,10 @@ class SwarmSessionStore:
                     first_created_at,
                     created_at,
                 ),
+            )
+            self._connection.execute(
+                "DELETE FROM swarm_shared_admissions WHERE session_id = ?",
+                (session_id,),
             )
             self._connection.commit()
             return plan, plan_version, True
@@ -654,6 +688,102 @@ class SwarmSessionStore:
         return int(cursor.rowcount)
 
     @staticmethod
+    def _shared_admission_payload(plan: SharedAdmissionPlan) -> str:
+        return json.dumps(
+            plan.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def get_shared_admission(
+        self, session_id: str
+    ) -> tuple[SharedAdmissionPlan, int] | None:
+        row = self._connection.execute(
+            "SELECT admission_version, payload_json "
+            "FROM swarm_shared_admissions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        payload: Any = json.loads(str(row["payload_json"]))
+        if not isinstance(payload, dict):
+            raise ValueError(f"stored shared admission for {session_id!r} is invalid")
+        return SharedAdmissionPlan.from_dict(payload), int(row["admission_version"])
+
+    def save_shared_admission(
+        self,
+        session_id: str,
+        plan: SharedAdmissionPlan,
+        *,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        expected_concurrency_plan_fingerprint: str,
+        created_at: str,
+    ) -> tuple[SharedAdmissionPlan, int, bool]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session = self.require(session_id)
+            if (
+                session.graph_version != expected_graph_version
+                or session.budget_version != expected_budget_version
+                or session.graph_fingerprint != plan.graph_fingerprint
+                or session.budget_fingerprint != plan.budget_fingerprint
+            ):
+                raise ValueError("swarm session changed during shared admission")
+            stored_plan = self.get_concurrency_plan(session_id)
+            if stored_plan is None:
+                raise ValueError("swarm session has no concurrency plan")
+            concurrency, _ = stored_plan
+            if concurrency.fingerprint() != expected_concurrency_plan_fingerprint:
+                raise ValueError("concurrency plan changed during shared admission")
+            current = self.get_shared_admission(session_id)
+            if current is not None and current[0].fingerprint() == plan.fingerprint():
+                self._connection.commit()
+                return current[0], current[1], False
+            version = 1 if current is None else current[1] + 1
+            self._connection.execute(
+                """
+                INSERT INTO swarm_shared_admissions (
+                    session_id, admission_version, graph_version, graph_fingerprint,
+                    budget_version, budget_fingerprint,
+                    concurrency_plan_fingerprint, admission_fingerprint, status,
+                    payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    admission_version=excluded.admission_version,
+                    graph_version=excluded.graph_version,
+                    graph_fingerprint=excluded.graph_fingerprint,
+                    budget_version=excluded.budget_version,
+                    budget_fingerprint=excluded.budget_fingerprint,
+                    concurrency_plan_fingerprint=excluded.concurrency_plan_fingerprint,
+                    admission_fingerprint=excluded.admission_fingerprint,
+                    status=excluded.status,
+                    payload_json=excluded.payload_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    session_id,
+                    version,
+                    plan.graph_version,
+                    plan.graph_fingerprint,
+                    plan.budget_version,
+                    plan.budget_fingerprint,
+                    plan.concurrency_plan_fingerprint,
+                    plan.fingerprint(),
+                    plan.status.value,
+                    self._shared_admission_payload(plan),
+                    created_at,
+                    created_at,
+                ),
+            )
+            self._connection.commit()
+            return plan, version, True
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    @staticmethod
     def _codex_run_payload(record: CodexRunRecord) -> str:
         return json.dumps(
             record.to_dict(),
@@ -707,6 +837,7 @@ class SwarmSessionStore:
         max_total_launches: int,
         max_attempts_per_work_item: int,
         max_total_tokens: int | None,
+        expected_admission_fingerprint: str,
     ) -> CodexRunRecord:
         active_values = tuple(
             state.value
@@ -735,6 +866,30 @@ class SwarmSessionStore:
             }:
                 raise ValueError(
                     f"cannot reserve Codex run while session is {session.state.value}"
+                )
+            shared = self.get_shared_admission(record.session_id)
+            if shared is None:
+                raise ValueError(
+                    "swarm session has no shared admission; run "
+                    "'claim-plane swarm admit' first"
+                )
+            admission, _ = shared
+            if admission.fingerprint() != expected_admission_fingerprint:
+                raise ValueError("shared admission changed while reserving worker")
+            if admission.status is not SharedAdmissionStatus.READY:
+                raise ValueError("shared admission requires replanning")
+            existing_records = self.list_codex_runs(record.session_id)
+            snapshot = compute_scheduler_snapshot(session, admission, existing_records)
+            if record.work_id not in snapshot.dispatchable_work_ids:
+                state = next(
+                    item.state.value
+                    for item in snapshot.work
+                    if item.work_id == record.work_id
+                )
+                runnable = ", ".join(snapshot.dispatchable_work_ids) or "none"
+                raise ValueError(
+                    f"work item {record.work_id!r} is not dispatchable "
+                    f"(state={state}); dispatchable: {runnable}"
                 )
             total_launches = int(
                 self._connection.execute(

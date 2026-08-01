@@ -1,5 +1,13 @@
-"""Swarm planning protocols and repository-bound session services."""
+"""Swarm planning, admission, scheduling, and execution protocols."""
 
+from claim_plane.swarm.admission import (
+    SWARM_SHARED_ADMISSION_PROTOCOL,
+    SharedAdmissionPlan,
+    SharedAdmissionStatus,
+    WorkAdmission,
+    compute_shared_admission,
+    effective_dependencies,
+)
 from claim_plane.swarm.budget import (
     SWARM_BUDGET_POLICY_PROTOCOL,
     ConcurrencyBudget,
@@ -10,6 +18,13 @@ from claim_plane.swarm.budget import (
     SwarmBudgetPolicy,
     WorkerBudget,
 )
+from claim_plane.swarm.codex_runner import (
+    build_codex_worker_prompt,
+    cancel_codex_run,
+    get_codex_run,
+    list_codex_runs,
+    run_codex_work_item,
+)
 from claim_plane.swarm.concurrency import (
     SWARM_CONCURRENCY_PLAN_PROTOCOL,
     ConcurrencyConstraint,
@@ -19,13 +34,6 @@ from claim_plane.swarm.concurrency import (
     ConcurrencyPlanStatus,
     ExecutionWave,
     compute_concurrency_plan,
-)
-from claim_plane.swarm.codex_runner import (
-    build_codex_worker_prompt,
-    cancel_codex_run,
-    get_codex_run,
-    list_codex_runs,
-    run_codex_work_item,
 )
 from claim_plane.swarm.models import (
     SWARM_SESSION_PROTOCOL,
@@ -45,10 +53,21 @@ from claim_plane.swarm.runs import (
     CodexRunState,
     CodexUsage,
 )
+from claim_plane.swarm.scheduler import (
+    SWARM_SCHEDULER_SNAPSHOT_PROTOCOL,
+    ScheduledWork,
+    ScheduledWorkState,
+    SchedulerSnapshot,
+    SchedulerStatus,
+    compute_scheduler_snapshot,
+)
 from claim_plane.swarm.service import (
+    admit_swarm_session,
     cleanup_swarm_worktrees,
     create_swarm_session,
+    get_swarm_admission,
     get_swarm_concurrency_plan,
+    get_swarm_scheduler,
     get_swarm_session,
     inspect_swarm_worktrees,
     list_swarm_sessions,
@@ -74,11 +93,13 @@ from claim_plane.swarm.worktrees import (
 
 __all__ = [
     "SWARM_BUDGET_POLICY_PROTOCOL",
-    "SWARM_CONCURRENCY_PLAN_PROTOCOL",
     "SWARM_CODEX_RUN_PROTOCOL",
+    "SWARM_CONCURRENCY_PLAN_PROTOCOL",
     "SWARM_MANAGED_WORKTREE_PROTOCOL",
+    "SWARM_SCHEDULER_SNAPSHOT_PROTOCOL",
     "SWARM_SESSION_PROTOCOL",
     "SWARM_SESSION_SPEC_PROTOCOL",
+    "SWARM_SHARED_ADMISSION_PROTOCOL",
     "SWARM_WORK_GRAPH_PROTOCOL",
     "CodexRunBudget",
     "CodexRunRecord",
@@ -99,21 +120,34 @@ __all__ = [
     "RetryBudget",
     "RootTask",
     "SameFilePolicy",
+    "ScheduledWork",
+    "ScheduledWorkState",
+    "SchedulerSnapshot",
+    "SchedulerStatus",
+    "SharedAdmissionPlan",
+    "SharedAdmissionStatus",
     "SwarmBudgetPolicy",
     "SwarmSession",
     "SwarmSessionState",
+    "WorkAdmission",
     "WorkGraph",
-    "WorktreeHealth",
-    "WorktreeInspection",
     "WorkItem",
     "WorkerBudget",
+    "WorktreeHealth",
+    "WorktreeInspection",
+    "admit_swarm_session",
     "build_codex_worker_prompt",
     "cancel_codex_run",
     "cleanup_swarm_worktrees",
     "compute_concurrency_plan",
+    "compute_scheduler_snapshot",
+    "compute_shared_admission",
     "create_swarm_session",
+    "effective_dependencies",
     "get_codex_run",
+    "get_swarm_admission",
     "get_swarm_concurrency_plan",
+    "get_swarm_scheduler",
     "get_swarm_session",
     "inspect_swarm_worktrees",
     "list_codex_runs",
@@ -125,8 +159,8 @@ __all__ = [
     "plan_swarm_concurrency",
     "provision_swarm_worktrees",
     "replace_swarm_budget_policy",
-    "run_codex_work_item",
     "replace_swarm_work_graph",
+    "run_codex_work_item",
     "validate_budget_policy",
     "validate_concurrency_plan",
     "validate_work_graph",
