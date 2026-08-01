@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from claim_plane.swarm.budget import SwarmBudgetPolicy
-from claim_plane.swarm.concurrency import compute_concurrency_plan
+from claim_plane.swarm.concurrency import (
+    ConcurrencyPlanStatus,
+    compute_concurrency_plan,
+)
 from claim_plane.swarm.models import (
     SWARM_SESSION_SPEC_PROTOCOL,
     IntegrationTarget,
@@ -22,6 +25,14 @@ from claim_plane.swarm.models import (
     WorkGraph,
 )
 from claim_plane.swarm.store import SwarmSessionStore
+from claim_plane.swarm.worktrees import (
+    ManagedWorktree,
+    WorktreeHealth,
+    WorktreeInspection,
+    managed_branch_name,
+    managed_session_component,
+    managed_worktree_path,
+)
 
 _SWARM_DB = Path(".claim-plane/swarm.db")
 _PROJECT_STATE = Path(".claim-plane/project.json")
@@ -358,3 +369,462 @@ def validate_concurrency_plan(
         "concurrency_plan": plan.to_dict(),
         "summary": plan.summary(),
     }
+
+
+def _git_result(
+    root_or_child: str | Path, *args: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=Path(root_or_child).resolve(),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _branch_exists(root: Path, branch: str) -> bool:
+    return (
+        _git_result(
+            root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+        ).returncode
+        == 0
+    )
+
+
+def _registered_worktrees(root: Path) -> dict[Path, dict[str, str]]:
+    output = _git(root, "worktree", "list", "--porcelain")
+    records: dict[Path, dict[str, str]] = {}
+    current: dict[str, str] = {}
+    for line in [*output.splitlines(), ""]:
+        if not line:
+            path_raw = current.get("worktree")
+            if path_raw:
+                records[Path(path_raw).resolve()] = dict(current)
+            current = {}
+            continue
+        key, _, value = line.partition(" ")
+        current[key] = value
+    return records
+
+
+def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    return _git_result(
+        root, "merge-base", "--is-ancestor", ancestor, descendant
+    ).returncode == 0
+
+
+def _worktree_dirty(path: Path) -> bool:
+    result = _git_result(path, "status", "--porcelain=v1", "--untracked-files=all")
+    if result.returncode != 0:
+        raise ValueError(
+            result.stderr.strip() or result.stdout.strip() or "cannot inspect worktree"
+        )
+    return bool(result.stdout.strip())
+
+
+def _session_worktree_root(root: Path, session_id: str) -> Path:
+    return (
+        root
+        / ".claim-plane"
+        / "worktrees"
+        / managed_session_component(session_id)
+    ).resolve()
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _expected_worktree_record(
+    root: Path, session: SwarmSession, work_id: str, *, now: str
+) -> ManagedWorktree:
+    return ManagedWorktree(
+        session_id=session.session_id,
+        work_id=work_id,
+        repository_identity=session.repository_identity,
+        graph_version=session.graph_version,
+        graph_fingerprint=session.graph_fingerprint,
+        base_commit=session.base_commit,
+        branch=managed_branch_name(session.session_id, work_id),
+        worktree_path=str(managed_worktree_path(root, session.session_id, work_id)),
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _inspect_record(
+    root: Path,
+    session: SwarmSession,
+    record: ManagedWorktree,
+    registered: Mapping[Path, Mapping[str, str]],
+) -> WorktreeInspection:
+    path = Path(record.worktree_path).resolve()
+    exists = path.exists()
+    git_record = registered.get(path)
+    if (
+        record.graph_version != session.graph_version
+        or record.graph_fingerprint != session.graph_fingerprint
+    ):
+        return WorktreeInspection(
+            record=record,
+            health=WorktreeHealth.STALE_GRAPH,
+            exists=exists,
+            registered=git_record is not None,
+            dirty=False,
+            head_commit=(None if git_record is None else git_record.get("HEAD")),
+            actual_branch=(
+                None
+                if git_record is None
+                else git_record.get("branch", "").removeprefix("refs/heads/") or None
+            ),
+            detail="worktree was provisioned for an older work-graph version",
+        )
+    if git_record is None:
+        return WorktreeInspection(
+            record=record,
+            health=(WorktreeHealth.UNREGISTERED if exists else WorktreeHealth.MISSING),
+            exists=exists,
+            registered=False,
+            dirty=False,
+            head_commit=None,
+            actual_branch=None,
+            detail=(
+                "directory exists but Git does not register it as a linked worktree"
+                if exists
+                else "managed worktree directory is missing"
+            ),
+        )
+    actual_branch = git_record.get("branch", "").removeprefix("refs/heads/") or None
+    head = git_record.get("HEAD") or None
+    if actual_branch != record.branch:
+        return WorktreeInspection(
+            record=record,
+            health=WorktreeHealth.BRANCH_MISMATCH,
+            exists=exists,
+            registered=True,
+            dirty=False,
+            head_commit=head,
+            actual_branch=actual_branch,
+            detail="registered worktree branch differs from the owned branch",
+        )
+    if head is None or not _is_ancestor(root, record.base_commit, head):
+        return WorktreeInspection(
+            record=record,
+            health=WorktreeHealth.BASE_MISMATCH,
+            exists=exists,
+            registered=True,
+            dirty=False,
+            head_commit=head,
+            actual_branch=actual_branch,
+            detail="worktree HEAD no longer descends from the pinned session base",
+        )
+    dirty = _worktree_dirty(path)
+    return WorktreeInspection(
+        record=record,
+        health=WorktreeHealth.DIRTY if dirty else WorktreeHealth.READY,
+        exists=exists,
+        registered=True,
+        dirty=dirty,
+        head_commit=head,
+        actual_branch=actual_branch,
+        detail="worktree has uncommitted changes" if dirty else "worktree is ready",
+    )
+
+
+def inspect_swarm_worktrees(repo: str | Path, session_id: str) -> dict[str, Any]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    with _store(root) as store:
+        session = store.require(session_id)
+        records = store.list_worktrees(session_id)
+    if session.repository_identity != _repository_identity(root):
+        raise ValueError("swarm session is bound to a different repository identity")
+    registered = _registered_worktrees(root)
+    for record in records:
+        if record.repository_identity != session.repository_identity:
+            raise ValueError(
+                f"managed worktree {record.work_id!r} is bound to a different "
+                "repository identity"
+            )
+    inspections = [
+        _inspect_record(root, session, record, registered) for record in records
+    ]
+    owned_paths = {Path(record.worktree_path).resolve() for record in records}
+    session_root = _session_worktree_root(root, session_id)
+    orphans = []
+    for path, item in sorted(registered.items(), key=lambda pair: str(pair[0])):
+        if path in owned_paths or not _is_within(path, session_root):
+            continue
+        orphans.append(
+            {
+                "worktree_path": str(path),
+                "head_commit": item.get("HEAD"),
+                "branch": item.get("branch", "").removeprefix("refs/heads/") or None,
+                "detail": (
+                    "Git worktree is inside the managed session directory but has "
+                    "no durable ownership record"
+                ),
+            }
+        )
+    counts: dict[str, int] = {}
+    for inspection in inspections:
+        counts[inspection.health.value] = counts.get(inspection.health.value, 0) + 1
+    return {
+        "session_id": session_id,
+        "graph_version": session.graph_version,
+        "graph_fingerprint": session.graph_fingerprint,
+        "worktrees": [item.to_dict() for item in inspections],
+        "orphans": orphans,
+        "summary": {
+            "managed": len(inspections),
+            "orphans": len(orphans),
+            "health": counts,
+        },
+    }
+
+
+def provision_swarm_worktrees(repo: str | Path, session_id: str) -> dict[str, Any]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    identity = _repository_identity(root)
+    now = _utc_now()
+    with _store(root) as store:
+        session = store.require(session_id)
+        existing = store.list_worktrees(session_id)
+        stored_plan = store.get_concurrency_plan(session_id)
+    if session.repository_identity != identity:
+        raise ValueError("swarm session is bound to a different repository identity")
+    if _resolve_commit(root, session.base_commit) != session.base_commit:
+        raise ValueError("swarm session base commit is no longer resolvable")
+    if session.state is not SwarmSessionState.PLANNED:
+        raise ValueError(
+            f"cannot provision worktrees while session is {session.state.value}"
+        )
+    if stored_plan is None:
+        raise ValueError(
+            "swarm session has no concurrency plan; run 'claim-plane swarm plan' first"
+        )
+    plan, _ = stored_plan
+    if plan.status is not ConcurrencyPlanStatus.READY:
+        raise ValueError("cannot provision worktrees for a replan-required plan")
+    if (
+        plan.graph_version != session.graph_version
+        or plan.graph_fingerprint != session.graph_fingerprint
+        or plan.budget_version != session.budget_version
+        or plan.budget_fingerprint != session.budget_fingerprint
+    ):
+        raise ValueError(
+            "stored concurrency plan is stale; re-plan before provisioning"
+        )
+
+    expected = {
+        work_id: _expected_worktree_record(root, session, work_id, now=now)
+        for work_id in session.work_graph.topological_order()
+    }
+    existing_by_id = {record.work_id: record for record in existing}
+    extra = sorted(set(existing_by_id) - set(expected))
+    if extra:
+        raise ValueError(
+            "stale managed worktrees exist for removed work items: "
+            + ", ".join(extra)
+            + "; clean them before provisioning the new graph"
+        )
+    registered = _registered_worktrees(root)
+    for work_id, current in existing_by_id.items():
+        target = expected[work_id]
+        if (
+            current.repository_identity != target.repository_identity
+            or current.graph_version != target.graph_version
+            or current.graph_fingerprint != target.graph_fingerprint
+            or current.base_commit != target.base_commit
+            or current.branch != target.branch
+            or Path(current.worktree_path).resolve()
+            != Path(target.worktree_path).resolve()
+        ):
+            raise ValueError(
+                f"managed worktree {work_id!r} is stale or has different "
+                "ownership metadata; clean it first"
+            )
+        inspection = _inspect_record(root, session, current, registered)
+        if inspection.health not in {WorktreeHealth.READY, WorktreeHealth.DIRTY}:
+            raise ValueError(
+                f"managed worktree {work_id!r} is {inspection.health.value}: "
+                f"{inspection.detail}"
+            )
+
+    created_git: list[ManagedWorktree] = []
+    try:
+        for work_id in session.work_graph.topological_order():
+            if work_id in existing_by_id:
+                continue
+            record = expected[work_id]
+            path = Path(record.worktree_path)
+            if path.exists():
+                raise ValueError(
+                    f"refusing to overwrite existing path for work item "
+                    f"{work_id!r}: {path}"
+                )
+            if path.resolve() in registered:
+                raise ValueError(
+                    f"worktree path is already registered for work item "
+                    f"{work_id!r}: {path}"
+                )
+            if _branch_exists(root, record.branch):
+                raise ValueError(
+                    f"refusing to reuse unowned branch for work item "
+                    f"{work_id!r}: {record.branch}"
+                )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            result = _git_result(
+                root,
+                "worktree",
+                "add",
+                "-b",
+                record.branch,
+                str(path),
+                session.base_commit,
+            )
+            if result.returncode != 0:
+                raise ValueError(
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or f"failed to provision worktree for {work_id!r}"
+                )
+            created_git.append(record)
+        all_records = [
+            existing_by_id.get(work_id, expected[work_id])
+            for work_id in session.work_graph.topological_order()
+        ]
+        with _store(root) as store:
+            stored, created_count = store.save_worktrees(
+                session_id,
+                all_records,
+                expected_graph_version=session.graph_version,
+                expected_graph_fingerprint=session.graph_fingerprint,
+            )
+    except Exception:
+        for record in reversed(created_git):
+            path = Path(record.worktree_path)
+            _git_result(root, "worktree", "remove", "--force", str(path))
+            if _branch_exists(root, record.branch):
+                _git_result(root, "branch", "-D", record.branch)
+        _git_result(root, "worktree", "prune")
+        raise
+
+    status = inspect_swarm_worktrees(root, session_id)
+    return {
+        "session_id": session_id,
+        "created": created_count,
+        "reused": len(stored) - created_count,
+        "records": [record.to_dict() for record in stored],
+        "summary": status["summary"],
+    }
+
+
+def cleanup_swarm_worktrees(
+    repo: str | Path,
+    session_id: str,
+    *,
+    work_ids: tuple[str, ...] = (),
+    force: bool = False,
+) -> dict[str, Any]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    identity = _repository_identity(root)
+    with _store(root) as store:
+        session = store.require(session_id)
+        records = store.list_worktrees(session_id)
+    if session.repository_identity != identity:
+        raise ValueError("swarm session is bound to a different repository identity")
+    by_id = {record.work_id: record for record in records}
+    selected_ids = tuple(sorted(set(work_ids))) if work_ids else tuple(sorted(by_id))
+    missing_ids = sorted(set(selected_ids) - set(by_id))
+    if missing_ids:
+        raise KeyError("unknown managed work items: " + ", ".join(missing_ids))
+    registered = _registered_worktrees(root)
+    session_root = _session_worktree_root(root, session_id)
+
+    inspections = [
+        _inspect_record(root, session, by_id[work_id], registered)
+        for work_id in selected_ids
+    ]
+    dirty: list[str] = []
+    for inspection in inspections:
+        record = inspection.record
+        path = Path(record.worktree_path).resolve()
+        expected_path = managed_worktree_path(root, session_id, record.work_id)
+        expected_branch = managed_branch_name(session_id, record.work_id)
+        if record.repository_identity != session.repository_identity:
+            raise ValueError(
+                f"refusing cleanup of worktree {record.work_id!r} bound to "
+                "another repository"
+            )
+        if path != expected_path or not _is_within(path, session_root):
+            raise ValueError(
+                f"refusing cleanup outside the owned managed-worktree path: {path}"
+            )
+        if record.branch != expected_branch:
+            raise ValueError(
+                f"refusing cleanup of unrecognized branch {record.branch!r}"
+            )
+        if inspection.registered and path.exists() and _worktree_dirty(path):
+            dirty.append(record.work_id)
+        if not inspection.registered and path.exists():
+            raise ValueError(
+                f"refusing to delete unregistered directory automatically: {path}"
+            )
+    if dirty and not force:
+        raise ValueError(
+            "refusing to remove dirty managed worktrees without --force: "
+            + ", ".join(dirty)
+        )
+    for inspection in inspections:
+        record = inspection.record
+        path = Path(record.worktree_path).resolve()
+        if inspection.registered:
+            args = ["worktree", "remove"]
+            if force:
+                args.append("--force")
+            args.append(str(path))
+            result = _git_result(root, *args)
+            if result.returncode != 0:
+                raise ValueError(
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or f"failed to remove managed worktree {record.work_id!r}"
+                )
+        if _branch_exists(root, record.branch):
+            result = _git_result(root, "branch", "-D", record.branch)
+            if result.returncode != 0:
+                raise ValueError(
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or f"failed to delete managed branch {record.branch!r}"
+                )
+    with _store(root) as store:
+        deleted = store.delete_worktrees(session_id, list(selected_ids))
+    _git_result(root, "worktree", "prune")
+    current = session_root
+    while current != root / ".claim-plane" and _is_within(
+        current, root / ".claim-plane"
+    ):
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+    return {
+        "session_id": session_id,
+        "removed": deleted,
+        "work_ids": list(selected_ids),
+        "forced": force,
+    }
+

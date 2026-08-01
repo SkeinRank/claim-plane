@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-08-01
+
+### Added
+
+- Add `claim-plane.swarm-managed-worktree.v1`, a durable ownership record bound to one swarm session, work item, repository identity, graph version, and pinned Git base.
+- Add deterministic Claim Plane-owned branch and path allocation under `.claim-plane/worktrees/`, with one isolated linked worktree per planned work item.
+- Add `swarm provision-worktrees`, `swarm worktrees`, and `swarm cleanup-worktrees` commands for idempotent provisioning, health inspection, selective cleanup, and machine-readable output.
+- Add worktree health detection for dirty, stale-graph, missing, unregistered, branch-mismatch, and base-mismatch states, plus detection of unowned Git worktrees inside the managed session directory.
+- Add JSON Schema, schema-v4 migration, and regression coverage for collision refusal, cleanup ownership boundaries, dirty-worktree protection, orphan preservation, and repeatable provisioning.
+
+### Changed
+
+- Require a current `ready` adaptive concurrency plan before worktrees can be provisioned.
+- Refuse to overwrite pre-existing paths or branches, and remove only worktrees and branches backed by durable Claim Plane ownership records.
+- Roll back newly created Git worktrees and branches when durable persistence fails, preventing partially provisioned sessions from being treated as executable.
+- Keep 0.19.0 at the isolation boundary: worktrees are prepared and owned, but Codex worker processes, intent binding, and provider usage accounting are introduced by later swarm stages.
+
 ## [0.18.0] — 2026-08-01
 
 ### Added

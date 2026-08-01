@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-managed-worktree.schema.json",
+  "title": "Claim Plane Managed Swarm Worktree v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "session_id",
+    "work_id",
+    "repository_identity",
+    "graph_version",
+    "graph_fingerprint",
+    "base_commit",
+    "branch",
+    "worktree_path",
+    "state",
+    "worker_id",
+    "intent_id",
+    "created_at",
+    "updated_at",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-managed-worktree.v1"},
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"
+    },
+    "work_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "repository_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "graph_version": {"type": "integer", "minimum": 1},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "branch": {
+      "type": "string",
+      "pattern": "^claim-plane/swarm/[^\\s]+$"
+    },
+    "worktree_path": {"type": "string", "minLength": 1},
+    "state": {"enum": ["provisioned", "released"]},
+    "worker_id": {"type": ["string", "null"], "minLength": 1},
+    "intent_id": {"type": ["string", "null"], "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1},
+    "metadata": {"type": "object"}
+  }
+}

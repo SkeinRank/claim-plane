@@ -1,4 +1,4 @@
-# Swarm sessions, work graphs, and budget policy
+# Swarm sessions, adaptive concurrency, and managed worktrees
 
 Claim Plane represents a planned multi-agent change as a repository-bound `SwarmSession` with two independently versioned inputs:
 
@@ -22,7 +22,7 @@ A swarm session contains:
 - deterministic graph and budget fingerprints;
 - lifecycle state reserved for the complete swarm runtime.
 
-The planner does not choose worker process identifiers, worktrees, leases, or mutation capabilities. Those belong to later execution stages.
+The planner does not choose worker process identifiers, branch names, worktree paths, leases, or mutation capabilities. Claim Plane now owns deterministic worktree allocation; worker and intent binding remain later execution stages.
 
 ## Work graph
 
@@ -186,11 +186,11 @@ Graph and budget versions are independent. Changing one does not silently overwr
 
 ## Database migration
 
-Opening a 0.16 swarm database upgrades it from schema version 1 to schema version 2. Existing sessions receive the conservative default budget, a budget version of `1`, and a deterministic budget fingerprint. The work graph, repository binding, base commit, timestamps, and session identity remain unchanged.
+Opening an older swarm database upgrades it in place to schema version 4. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans. The schema-4 migration adds only the managed-worktree ownership table. Existing work graphs, budgets, plans, repository bindings, base commits, timestamps, and session identities remain unchanged.
 
 ## Current boundary
 
-Version 0.18.0 creates durable planning, budget, and adaptive concurrency state. It does not launch workers, account provider usage, or create worktrees. Managed worktree provisioning and the Codex runner consume the persisted execution waves in the following swarm stages.
+Version 0.19.0 creates durable planning, budget, adaptive concurrency, and managed Git worktree state. It does not launch Codex workers or account provider usage. The next swarm stage binds a runner and admitted ChangeIntent to each owned worktree.
 
 ## Adaptive concurrency planning
 
@@ -216,4 +216,30 @@ A `serialize` decision adds a deterministic ordering edge while preserving the o
 
 Replacing either the work graph or budget policy invalidates the stored plan atomically. The next scheduler step must run `claim-plane swarm plan` again before workers can be launched.
 
-Version 0.18.0 still does not create worktrees or launch Codex processes. It provides the deterministic execution contract consumed by managed worktree provisioning and the agent runner.
+Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. It still does not launch Codex processes or grant mutation authority.
+
+
+## Managed worktree provisioning
+
+A current `ready` concurrency plan can be materialized into one isolated linked Git worktree per work item:
+
+```bash
+claim-plane swarm provision-worktrees <session-id>
+claim-plane swarm worktrees <session-id>
+```
+
+Claim Plane derives collision-resistant paths and branches from the immutable session and work identifiers. Worktrees are created from the pinned session base, not from the caller's current uncommitted state. The durable ownership record stores the repository identity, graph version and fingerprint, base commit, branch, and absolute path. Repeating provisioning is idempotent when the physical Git state still matches that record.
+
+Provisioning fails closed when the concurrency plan is missing or stale, the graph requires replanning, a user-owned path or branch collides with the deterministic allocation, or an existing managed record belongs to another graph version. Newly created Git state is rolled back if persistence fails.
+
+Health inspection distinguishes ready, dirty, stale-graph, missing, unregistered, branch-mismatch, and base-mismatch states. It also reports Git worktrees located under the managed session directory that have no durable ownership record; these are reported as orphans and are never silently adopted or removed.
+
+Cleanup is ownership-scoped:
+
+```bash
+claim-plane swarm cleanup-worktrees <session-id>
+claim-plane swarm cleanup-worktrees <session-id> --work-id implementation
+claim-plane swarm cleanup-worktrees <session-id> --force
+```
+
+Without `--force`, dirty managed worktrees are preserved. Cleanup only removes the exact Claim Plane path and branch recorded for the selected work item. Unregistered directories and unowned worktrees are left untouched.

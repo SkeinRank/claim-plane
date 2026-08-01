@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.18.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.19.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -28,6 +28,14 @@ Clean integration or targeted repair
 ```
 
 Claim Plane does not replace Git, an IDE, a planner, or a coding agent. It is a model-agnostic integration layer that can sit between a planner and Cursor, Codex, Claude Code, Copilot, OpenHands, or internal agents.
+
+Swarm planning can now be materialized into Claim Plane-owned isolated worktrees:
+
+```bash
+claim-plane swarm plan <session-id>
+claim-plane swarm provision-worktrees <session-id>
+claim-plane swarm worktrees <session-id>
+```
 
 ## Research paper
 

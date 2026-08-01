@@ -47,11 +47,14 @@ from claim_plane.runtime import (
     build_broker_boundary_command,
 )
 from claim_plane.swarm import (
+    cleanup_swarm_worktrees,
     create_swarm_session,
     get_swarm_concurrency_plan,
     get_swarm_session,
+    inspect_swarm_worktrees,
     list_swarm_sessions,
     plan_swarm_concurrency,
+    provision_swarm_worktrees,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
     validate_budget_policy,
@@ -472,6 +475,70 @@ def cmd_swarm_validate_budget(args: argparse.Namespace) -> int:
         _read_json(args.policy), work_items=args.work_items
     )
     _write_json({"valid": True, **result})
+    return 0
+
+
+def cmd_swarm_provision_worktrees(args: argparse.Namespace) -> int:
+    result = provision_swarm_worktrees(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(
+            f"Provisioned worktrees for {result['session_id']}: "
+            f"created={result['created']}, reused={result['reused']}."
+        )
+        for record in result["records"]:
+            print(
+                f"  {record['work_id']}: {record['branch']} -> "
+                f"{record['worktree_path']}"
+            )
+    return 0
+
+
+def cmd_swarm_worktrees(args: argparse.Namespace) -> int:
+    result = inspect_swarm_worktrees(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(f"Managed worktrees for {result['session_id']}:")
+        if not result["worktrees"]:
+            print("  none")
+        for item in result["worktrees"]:
+            record = item["record"]
+            print(
+                f"  {record['work_id']}: {item['health']}  "
+                f"{record['worktree_path']}"
+            )
+            if item["detail"]:
+                print(f"    {item['detail']}")
+        if result["orphans"]:
+            print("Unowned worktrees detected inside the managed session directory:")
+            for item in result["orphans"]:
+                print(f"  {item['worktree_path']}")
+    unhealthy = sum(
+        count
+        for health, count in result["summary"]["health"].items()
+        if health not in {"ready", "dirty"}
+    )
+    return 0 if unhealthy == 0 and not result["orphans"] else 2
+
+
+def cmd_swarm_cleanup_worktrees(args: argparse.Namespace) -> int:
+    result = cleanup_swarm_worktrees(
+        args.repo,
+        args.session_id,
+        work_ids=tuple(args.work_id or ()),
+        force=args.force,
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(
+            f"Removed {result['removed']} managed worktree(s) from "
+            f"{result['session_id']}."
+        )
+        if result["work_ids"]:
+            print("Work items: " + ", ".join(result["work_ids"]))
     return 0
 
 
@@ -1243,6 +1310,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optionally verify that a proposed graph size fits the policy.",
     )
     swarm_validate_budget.set_defaults(func=cmd_swarm_validate_budget)
+
+    swarm_provision_worktrees = swarm_sub.add_parser(
+        "provision-worktrees",
+        help="Provision one Claim Plane-owned Git worktree per work item.",
+    )
+    swarm_provision_worktrees.add_argument("session_id")
+    swarm_provision_worktrees.add_argument("--repo", default=".")
+    swarm_provision_worktrees.add_argument("--json", action="store_true")
+    swarm_provision_worktrees.add_argument("--out")
+    swarm_provision_worktrees.set_defaults(func=cmd_swarm_provision_worktrees)
+
+    swarm_worktrees = swarm_sub.add_parser(
+        "worktrees",
+        help="Inspect managed worktree ownership, health, and orphan state.",
+    )
+    swarm_worktrees.add_argument("session_id")
+    swarm_worktrees.add_argument("--repo", default=".")
+    swarm_worktrees.add_argument("--json", action="store_true")
+    swarm_worktrees.add_argument("--out")
+    swarm_worktrees.set_defaults(func=cmd_swarm_worktrees)
+
+    swarm_cleanup_worktrees = swarm_sub.add_parser(
+        "cleanup-worktrees",
+        help="Remove only Claim Plane-owned worktrees and branches.",
+    )
+    swarm_cleanup_worktrees.add_argument("session_id")
+    swarm_cleanup_worktrees.add_argument(
+        "--work-id",
+        action="append",
+        help="Remove a specific work item; repeat for multiple items.",
+    )
+    swarm_cleanup_worktrees.add_argument("--force", action="store_true")
+    swarm_cleanup_worktrees.add_argument("--repo", default=".")
+    swarm_cleanup_worktrees.add_argument("--json", action="store_true")
+    swarm_cleanup_worktrees.add_argument("--out")
+    swarm_cleanup_worktrees.set_defaults(func=cmd_swarm_cleanup_worktrees)
 
     claim = sub.add_parser(
         "claim", help="Request a legacy fine-grained artifact claim."

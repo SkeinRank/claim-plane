@@ -10,8 +10,9 @@ from typing import Any
 from claim_plane.swarm.budget import SwarmBudgetPolicy
 from claim_plane.swarm.concurrency import ConcurrencyPlan
 from claim_plane.swarm.models import SwarmSession, WorkGraph
+from claim_plane.swarm.worktrees import ManagedWorktree
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 class SwarmSessionStore:
@@ -86,6 +87,30 @@ class SwarmSessionStore:
                     ON DELETE CASCADE
             )
             """
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS swarm_worktrees (
+                session_id TEXT NOT NULL,
+                work_id TEXT NOT NULL,
+                repository_identity TEXT NOT NULL,
+                graph_version INTEGER NOT NULL,
+                graph_fingerprint TEXT NOT NULL,
+                base_commit TEXT NOT NULL,
+                branch TEXT NOT NULL UNIQUE,
+                worktree_path TEXT NOT NULL UNIQUE,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(session_id, work_id),
+                FOREIGN KEY(session_id) REFERENCES swarm_sessions(session_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_swarm_worktrees_session "
+            "ON swarm_worktrees(session_id, work_id)"
         )
         if schema_version < _SCHEMA_VERSION:
             self._migrate_payloads()
@@ -454,6 +479,150 @@ class SwarmSessionStore:
         except Exception:
             self._connection.rollback()
             raise
+
+    @staticmethod
+    def _worktree_payload(record: ManagedWorktree) -> str:
+        return json.dumps(
+            record.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def list_worktrees(self, session_id: str) -> list[ManagedWorktree]:
+        rows = self._connection.execute(
+            "SELECT payload_json FROM swarm_worktrees "
+            "WHERE session_id = ? ORDER BY work_id ASC",
+            (session_id,),
+        ).fetchall()
+        records: list[ManagedWorktree] = []
+        for row in rows:
+            payload: Any = json.loads(str(row["payload_json"]))
+            if not isinstance(payload, dict):
+                raise ValueError(
+                    f"stored managed worktree for {session_id!r} is invalid"
+                )
+            records.append(ManagedWorktree.from_dict(payload))
+        return records
+
+    def save_worktrees(
+        self,
+        session_id: str,
+        records: list[ManagedWorktree],
+        *,
+        expected_graph_version: int,
+        expected_graph_fingerprint: str,
+    ) -> tuple[list[ManagedWorktree], int]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._connection.execute(
+                "SELECT graph_version, graph_fingerprint FROM swarm_sessions "
+                "WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown swarm session {session_id!r}")
+            if int(row["graph_version"]) != expected_graph_version:
+                raise ValueError(
+                    "work graph changed while worktrees were being provisioned; retry"
+                )
+            if str(row["graph_fingerprint"]) != expected_graph_fingerprint:
+                raise ValueError(
+                    "work graph fingerprint changed while worktrees were being "
+                    "provisioned; retry"
+                )
+            plan = self._connection.execute(
+                "SELECT graph_version, graph_fingerprint, payload_json "
+                "FROM swarm_concurrency_plans WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if plan is None:
+                raise ValueError(
+                    "swarm session has no concurrency plan; run "
+                    "'claim-plane swarm plan' first"
+                )
+            plan_payload: Any = json.loads(str(plan["payload_json"]))
+            if not isinstance(plan_payload, dict):
+                raise ValueError("stored concurrency plan is invalid")
+            parsed_plan = ConcurrencyPlan.from_dict(plan_payload)
+            if parsed_plan.status.value != "ready":
+                raise ValueError(
+                    "cannot provision worktrees for a replan-required plan"
+                )
+            if (
+                int(plan["graph_version"]) != expected_graph_version
+                or str(plan["graph_fingerprint"]) != expected_graph_fingerprint
+            ):
+                raise ValueError(
+                    "concurrency plan is stale for the current work graph; re-plan"
+                )
+            created = 0
+            for record in records:
+                if (
+                    record.session_id != session_id
+                    or record.graph_version != expected_graph_version
+                    or record.graph_fingerprint != expected_graph_fingerprint
+                ):
+                    raise ValueError(
+                        "managed worktree record is not bound to the current "
+                        "session graph"
+                    )
+                existing = self._connection.execute(
+                    "SELECT payload_json FROM swarm_worktrees "
+                    "WHERE session_id = ? AND work_id = ?",
+                    (session_id, record.work_id),
+                ).fetchone()
+                if existing is not None:
+                    payload: Any = json.loads(str(existing["payload_json"]))
+                    if not isinstance(payload, dict):
+                        raise ValueError("stored managed worktree is invalid")
+                    current = ManagedWorktree.from_dict(payload)
+                    if current != record:
+                        raise ValueError(
+                            f"managed worktree {record.work_id!r} already exists "
+                            "with different ownership metadata"
+                        )
+                    continue
+                self._connection.execute(
+                    """
+                    INSERT INTO swarm_worktrees (
+                        session_id, work_id, repository_identity, graph_version,
+                        graph_fingerprint, base_commit, branch, worktree_path,
+                        payload_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record.session_id,
+                        record.work_id,
+                        record.repository_identity,
+                        record.graph_version,
+                        record.graph_fingerprint,
+                        record.base_commit,
+                        record.branch,
+                        record.worktree_path,
+                        self._worktree_payload(record),
+                        record.created_at,
+                        record.updated_at,
+                    ),
+                )
+                created += 1
+            self._connection.commit()
+            return self.list_worktrees(session_id), created
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def delete_worktrees(self, session_id: str, work_ids: list[str]) -> int:
+        if not work_ids:
+            return 0
+        placeholders = ",".join("?" for _ in work_ids)
+        with self._connection:
+            cursor = self._connection.execute(
+                f"DELETE FROM swarm_worktrees WHERE session_id = ? "
+                f"AND work_id IN ({placeholders})",
+                (session_id, *work_ids),
+            )
+        return int(cursor.rowcount)
 
     @staticmethod
     def _session_from_row(row: sqlite3.Row, session_id: str) -> SwarmSession:
