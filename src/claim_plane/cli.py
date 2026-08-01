@@ -46,6 +46,13 @@ from claim_plane.runtime import (
     BrokerServer,
     build_broker_boundary_command,
 )
+from claim_plane.swarm import (
+    create_swarm_session,
+    get_swarm_session,
+    list_swarm_sessions,
+    replace_swarm_work_graph,
+    validate_work_graph,
+)
 
 DEFAULT_DB = ".claim-plane/plane.db"
 
@@ -246,6 +253,109 @@ def cmd_codex_intent_status(args: argparse.Namespace) -> int:
             print(f"Pending amendment ticket: {pending['ticket_id']} ({joined})")
     return 0
 
+
+
+def cmd_swarm_create(args: argparse.Namespace) -> int:
+    result = create_swarm_session(
+        args.repo,
+        spec=_read_json(args.spec),
+        session_id=args.session_id,
+        base_revision=args.base,
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        session = result["session"]
+        graph = result["graph"]
+        action = "Created" if result["created"] else "Found existing"
+        print(f"{action} swarm session {session['session_id']}.")
+        print(f"Base: {session['base_commit']} ({session['base_branch']})")
+        print(
+            f"Work graph v{session['graph_version']}: "
+            f"{graph['work_items']} items, {graph['dependency_edges']} dependencies"
+        )
+        print("Dependency layers:")
+        for index, layer in enumerate(graph["dependency_layers"], start=1):
+            print(f"  {index}: {', '.join(layer)}")
+    return 0
+
+
+def cmd_swarm_list(args: argparse.Namespace) -> int:
+    sessions = list_swarm_sessions(args.repo)
+    payload = [session.to_dict() for session in sessions]
+    if args.json:
+        _write_json(payload)
+    elif not sessions:
+        print("No swarm sessions.")
+    else:
+        for session in sessions:
+            print(
+                f"{session.session_id}  {session.state.value:10}  "
+                f"graph=v{session.graph_version}  "
+                f"items={len(session.work_graph.work_items)}  "
+                f"base={session.base_commit[:12]}"
+            )
+    return 0
+
+
+def cmd_swarm_status(args: argparse.Namespace) -> int:
+    session = get_swarm_session(args.repo, args.session_id)
+    payload = session.to_dict()
+    payload["graph_summary"] = session.work_graph.summary()
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Swarm session: {session.session_id}")
+        print(f"State: {session.state.value}")
+        print(f"Root task: {session.root_task.title}")
+        print(f"Goal: {session.root_task.goal}")
+        print(f"Base: {session.base_commit} ({session.base_branch})")
+        print(f"Integration target: {session.integration_target.branch}")
+        print(
+            f"Work graph: v{session.graph_version}; "
+            f"{len(session.work_graph.work_items)} items; "
+            f"fingerprint={session.graph_fingerprint[:20]}"
+        )
+        print(
+            "Topological order: "
+            + " -> ".join(session.work_graph.topological_order())
+        )
+    return 0
+
+
+def cmd_swarm_graph(args: argparse.Namespace) -> int:
+    session = get_swarm_session(args.repo, args.session_id)
+    payload = {
+        "session_id": session.session_id,
+        "graph_version": session.graph_version,
+        "graph_fingerprint": session.graph_fingerprint,
+        "work_graph": session.work_graph.to_dict(),
+        "summary": session.work_graph.summary(),
+    }
+    _write_json(payload, args.out)
+    return 0
+
+
+def cmd_swarm_replace_graph(args: argparse.Namespace) -> int:
+    session = replace_swarm_work_graph(
+        args.repo,
+        args.session_id,
+        graph_data=_read_json(args.graph),
+        expected_version=args.expected_version,
+    )
+    payload = {
+        "session": session.to_dict(),
+        "graph": session.work_graph.summary(),
+    }
+    _write_json(payload, args.out)
+    return 0
+
+
+def cmd_swarm_validate(args: argparse.Namespace) -> int:
+    payload = _read_json(args.graph)
+    result = {"valid": True, **validate_work_graph(payload)}
+    _write_json(result)
+    return 0
 
 def cmd_claim(args: argparse.Namespace) -> int:
     plane = _plane(args)
@@ -897,6 +1007,63 @@ def build_parser() -> argparse.ArgumentParser:
     codex_intent_status_parser.add_argument("--repo", default=".")
     codex_intent_status_parser.add_argument("--json", action="store_true")
     codex_intent_status_parser.set_defaults(func=cmd_codex_intent_status)
+
+
+    swarm = sub.add_parser(
+        "swarm", help="Create and inspect repository-bound swarm planning sessions."
+    )
+    swarm_sub = swarm.add_subparsers(dest="swarm_command", required=True)
+
+    swarm_create = swarm_sub.add_parser(
+        "create", help="Create a planned swarm session from a validated work graph."
+    )
+    swarm_create.add_argument(
+        "--spec", required=True, help="Swarm session spec JSON file."
+    )
+    swarm_create.add_argument("--repo", default=".")
+    swarm_create.add_argument("--session-id")
+    swarm_create.add_argument("--base", default="HEAD")
+    swarm_create.add_argument("--json", action="store_true")
+    swarm_create.add_argument("--out")
+    swarm_create.set_defaults(func=cmd_swarm_create)
+
+    swarm_list = swarm_sub.add_parser("list", help="List local swarm sessions.")
+    swarm_list.add_argument("--repo", default=".")
+    swarm_list.add_argument("--json", action="store_true")
+    swarm_list.set_defaults(func=cmd_swarm_list)
+
+    swarm_status = swarm_sub.add_parser(
+        "status", help="Show one swarm session and its pinned work graph."
+    )
+    swarm_status.add_argument("session_id")
+    swarm_status.add_argument("--repo", default=".")
+    swarm_status.add_argument("--json", action="store_true")
+    swarm_status.set_defaults(func=cmd_swarm_status)
+
+    swarm_graph = swarm_sub.add_parser(
+        "graph", help="Export one versioned swarm work graph and graph summary."
+    )
+    swarm_graph.add_argument("session_id")
+    swarm_graph.add_argument("--repo", default=".")
+    swarm_graph.add_argument("--out")
+    swarm_graph.set_defaults(func=cmd_swarm_graph)
+
+    swarm_replace = swarm_sub.add_parser(
+        "replace-graph",
+        help="Replace a planned work graph with optimistic version checking.",
+    )
+    swarm_replace.add_argument("session_id")
+    swarm_replace.add_argument("--graph", required=True)
+    swarm_replace.add_argument("--expected-version", type=int, required=True)
+    swarm_replace.add_argument("--repo", default=".")
+    swarm_replace.add_argument("--out")
+    swarm_replace.set_defaults(func=cmd_swarm_replace_graph)
+
+    swarm_validate = swarm_sub.add_parser(
+        "validate", help="Validate a work graph and print its deterministic topology."
+    )
+    swarm_validate.add_argument("--graph", required=True)
+    swarm_validate.set_defaults(func=cmd_swarm_validate)
 
     claim = sub.add_parser(
         "claim", help="Request a legacy fine-grained artifact claim."

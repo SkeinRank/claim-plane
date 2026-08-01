@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-work-graph.schema.json",
+  "title": "Claim Plane Swarm Work Graph v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "work_items"],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.swarm-work-graph.v1"
+    },
+    "work_items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/workItem"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "workItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_id", "title", "goal", "operations"],
+      "properties": {
+        "work_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "change-intent.schema.json#/$defs/operation"
+          }
+        },
+        "preserves": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "acceptance": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

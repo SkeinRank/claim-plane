@@ -54,6 +54,14 @@ from claim_plane.runtime import (
     build_broker_boundary_command,
     serve_broker,
 )
+from claim_plane.swarm import (
+    IntegrationTarget,
+    RootTask,
+    SwarmSession,
+    SwarmSessionState,
+    WorkGraph,
+    WorkItem,
+)
 from claim_plane.integration import (
     CommandExecution,
     IntegrationAttempt,
@@ -70,7 +78,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -90,6 +98,7 @@ __all__ = [
     "FindingSeverity",
     "GovernancePolicy",
     "IntegrationFinding",
+    "IntegrationTarget",
     "IntegrationAttempt",
     "IntegrationReport",
     "IntegrationRunResult",
@@ -136,5 +145,10 @@ __all__ = [
     "serve_broker",
     "artifacts_to_claims",
     "extract_artifacts",
+    "RootTask",
+    "SwarmSession",
+    "SwarmSessionState",
+    "WorkGraph",
+    "WorkItem",
     "__version__",
 ]

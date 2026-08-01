@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.15.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.16.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -88,6 +88,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - SHA-256 evidence binding worker patches, manifests, result trees, result commits, and reproducible result patches;
 - transparent economy/standard/frontier worker-tier recommendations;
 - project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, session-bound task bootstrap, pinned Git bases, atomic ChangeIntent admission, pre-mutation authorization, ticketed scope amendment, and verified completion for autonomous Codex work;
+- repository-bound swarm sessions with exact Git bases, planner-proposed work items, deterministic DAG validation, graph fingerprints, dependency layers, and optimistic graph-version replacement;
 - CLI, stdio MCP, JSON Schemas, examples, and a deterministic protocol benchmark.
 
 The base package has no runtime dependencies. Agent Lexicon remains an optional semantic layer.
@@ -122,6 +123,23 @@ Run the complete checks and example:
 ./scripts/check.sh
 ./scripts/demo.sh
 ```
+
+## Swarm planning foundation
+
+Claim Plane can persist a planner-proposed swarm decomposition before any worker is launched:
+
+```bash
+claim-plane init
+claim-plane swarm create --spec examples/swarm/session-spec.json
+claim-plane swarm status <session-id>
+claim-plane swarm graph <session-id>
+```
+
+The session is bound to one repository identity and exact Git commit. Work items carry proposed operations, preserve requirements, acceptance commands, and explicit dependencies. Claim Plane rejects duplicate identifiers, missing dependencies, cycles, repository-escaping paths, and attempts to include control-plane or Git state.
+
+Work graph replacements require an expected graph version, preventing concurrent planner updates from silently overwriting one another. Dependency layers describe graph structure only; budget policy and adaptive concurrency determine actual worker execution in later swarm stages.
+
+See [Swarm sessions and work graphs](docs/swarm-sessions.md) for the complete format and CLI.
 
 ## Codex project enrollment
 

@@ -8,6 +8,21 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-08-01
+
+### Added
+
+- Add repository-bound `SwarmSession` planning state with Claim Plane-owned session identity, exact Git base pinning, repository identity binding, integration target, and durable SQLite persistence.
+- Add planner-proposed work graphs with typed intent operations, preserves, acceptance criteria, explicit dependencies, deterministic topological order, roots, leaves, dependency layers, and SHA-256 graph fingerprints.
+- Add `claim-plane swarm create`, `list`, `status`, `graph`, `replace-graph`, and `validate` commands.
+- Add JSON Schemas and an executable example for the swarm session and work-graph protocols.
+
+### Changed
+
+- Reserve swarm lifecycle states for future budget, scheduling, worktree, execution, and integration stages without allowing 0.16.0 to launch workers prematurely.
+- Reject invalid work graphs before persistence, including cycles, unknown dependencies, duplicate identifiers, repository escapes, and Claim Plane, Codex, or Git control-state scope.
+- Require optimistic graph-version checks for planner refinements while keeping the session identity, repository binding, pinned base, root task, and integration target immutable.
+
 ## [0.15.0] — 2026-07-31
 
 ### Added

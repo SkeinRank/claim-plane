@@ -1,0 +1,72 @@
+{
+  "protocol": "claim-plane.swarm-session-spec.v1",
+  "root_task": {
+    "title": "Harden session cache behavior",
+    "goal": "Fix the cache race condition, extend coverage, and preserve the public API.",
+    "acceptance": [
+      "pytest -q tests/test_session_cache.py"
+    ]
+  },
+  "integration_target": {
+    "branch": "main"
+  },
+  "work_graph": {
+    "protocol": "claim-plane.swarm-work-graph.v1",
+    "work_items": [
+      {
+        "work_id": "cache-implementation",
+        "title": "Fix cache synchronization",
+        "goal": "Correct the race condition in SessionCache without changing its public API.",
+        "operations": [
+          {
+            "access": "write",
+            "resource": {
+              "kind": "symbol",
+              "identifier": "SessionCache",
+              "metadata": {
+                "path": "src/session/cache.py"
+              }
+            }
+          },
+          {
+            "access": "write",
+            "commitment": "contingent",
+            "resource": {
+              "kind": "symbol",
+              "identifier": "LockOwner",
+              "metadata": {
+                "path": "src/session/locking.py"
+              }
+            }
+          }
+        ],
+        "preserves": [
+          "path-unchanged:src/session/public.py"
+        ],
+        "acceptance": [
+          "pytest -q tests/test_session_cache.py"
+        ]
+      },
+      {
+        "work_id": "cache-tests",
+        "title": "Extend cache concurrency tests",
+        "goal": "Add deterministic coverage for the corrected cache behavior.",
+        "depends_on": [
+          "cache-implementation"
+        ],
+        "operations": [
+          {
+            "access": "write",
+            "resource": {
+              "kind": "file",
+              "identifier": "tests/test_session_cache.py"
+            }
+          }
+        ],
+        "acceptance": [
+          "pytest -q tests/test_session_cache.py"
+        ]
+      }
+    ]
+  }
+}
