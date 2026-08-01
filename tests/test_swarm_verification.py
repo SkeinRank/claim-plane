@@ -108,9 +108,7 @@ def _session(
     plan_swarm_merge_queue(repo, session_id)
 
 
-def _fake_codex(
-    tmp_path: Path, *, rogue: bool = False, noop: bool = False
-) -> Path:
+def _fake_codex(tmp_path: Path, *, rogue: bool = False, noop: bool = False) -> Path:
     script = tmp_path / ("fake-codex-rogue" if rogue else "fake-codex")
     change_a = (
         "pass"
@@ -123,12 +121,10 @@ def _fake_codex(
         else '(root / "src" / "b.py").write_text("b = 2\\n", encoding="utf-8")'
     )
     rogue_line = (
-        "(root / 'rogue.txt').write_text('rogue\\n', encoding='utf-8')"
-        if rogue
-        else ""
+        "(root / 'rogue.txt').write_text('rogue\\n', encoding='utf-8')" if rogue else ""
     )
     script.write_text(
-        f'''#!/usr/bin/env python3
+        f"""#!/usr/bin/env python3
 import json
 import pathlib
 import sys
@@ -156,7 +152,7 @@ print(
 )
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text("done\\n", encoding="utf-8")
-''',
+""",
         encoding="utf-8",
     )
     script.chmod(0o755)
@@ -201,9 +197,10 @@ def test_swarm_verification_produces_durable_two_level_evidence(tmp_path: Path) 
     assert result["summary"]["status"] == "verified"
     assert result["summary"]["work_verified"] == 2
     assert result["verification_fingerprint"] == stored["verification_fingerprint"]
-    assert {
-        item["work_id"] for item in result["verification"]["work_evidence"]
-    } == {"a", "b"}
+    assert {item["work_id"] for item in result["verification"]["work_evidence"]} == {
+        "a",
+        "b",
+    }
     assert get_swarm_session(repo, "swm-verify").state.value == "completed"
 
 
@@ -277,9 +274,7 @@ def test_successful_noop_does_not_reuse_a_prior_integration_commit(
     work = result["verification"]["work_evidence"][0]
 
     assert work["changed_paths"] == []
-    assert any(
-        item["code"] == "missing_declared_change" for item in work["findings"]
-    )
+    assert any(item["code"] == "missing_declared_change" for item in work["findings"])
     assert result["summary"]["status"] == "failed"
 
 

@@ -158,9 +158,7 @@ def test_status_detects_dirty_and_graph_stale_worktrees(tmp_path: Path) -> None:
     (path / "src" / "a.py").write_text("value = 2\n", encoding="utf-8")
 
     dirty = inspect_swarm_worktrees(repo, "swm-worktrees")
-    health = {
-        item["record"]["work_id"]: item["health"] for item in dirty["worktrees"]
-    }
+    health = {item["record"]["work_id"]: item["health"] for item in dirty["worktrees"]}
     assert health == {"a": "dirty", "b": "ready"}
 
     replacement = {
@@ -189,14 +187,10 @@ def test_cleanup_refuses_dirty_worktree_without_force(tmp_path: Path) -> None:
     (path / "src" / "a.py").write_text("value = 2\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="without --force"):
-        cleanup_swarm_worktrees(
-            repo, "swm-worktrees", work_ids=("a",), force=False
-        )
+        cleanup_swarm_worktrees(repo, "swm-worktrees", work_ids=("a",), force=False)
     assert path.exists()
 
-    result = cleanup_swarm_worktrees(
-        repo, "swm-worktrees", work_ids=("a",), force=True
-    )
+    result = cleanup_swarm_worktrees(repo, "swm-worktrees", work_ids=("a",), force=True)
     assert result["removed"] == 1
     assert not path.exists()
     assert (
@@ -222,10 +216,7 @@ def test_cleanup_never_removes_unowned_worktree(tmp_path: Path) -> None:
     _session(repo)
     provision_swarm_worktrees(repo, "swm-worktrees")
     session_root = (
-        repo
-        / ".claim-plane"
-        / "worktrees"
-        / managed_session_component("swm-worktrees")
+        repo / ".claim-plane" / "worktrees" / managed_session_component("swm-worktrees")
     )
     foreign = session_root / "foreign"
     _git(repo, "worktree", "add", "-b", "user/foreign", str(foreign), "HEAD")

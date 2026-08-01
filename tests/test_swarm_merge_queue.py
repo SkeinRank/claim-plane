@@ -156,9 +156,7 @@ def test_dependency_is_released_only_after_integration_and_worker_sees_baseline(
     ] == ["a"]
 
     assert (
-        run_codex_work_item(
-            repo, "swm-merge", "a", codex_binary=str(codex)
-        ).state.value
+        run_codex_work_item(repo, "swm-merge", "a", codex_binary=str(codex)).state.value
         == "succeeded"
     )
     blocked = get_swarm_scheduler(repo, "swm-merge")

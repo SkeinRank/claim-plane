@@ -132,8 +132,10 @@ def _expired_reservation(repo: Path, executable: Path):
         timeout_seconds=30,
         token_limit=100,
     )
-    old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace(
-        "+00:00", "Z"
+    old = (
+        (datetime.now(timezone.utc) - timedelta(minutes=5))
+        .isoformat()
+        .replace("+00:00", "Z")
     )
     expired = replace(
         record,
@@ -278,7 +280,6 @@ def test_recovery_reopens_interrupted_verification(tmp_path: Path) -> None:
     )
 
 
-
 def test_cancelled_active_reservation_recovers_as_cancelled(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     _session(repo)
@@ -321,7 +322,6 @@ def test_live_process_with_expired_lease_requires_explicit_reclaim(
     assert recovered["stale_requires_termination"] == [source.run_id]
 
 
-
 def test_explicit_reclaim_terminates_stale_process_before_releasing_slot(
     tmp_path: Path,
 ) -> None:
@@ -351,9 +351,9 @@ def test_explicit_reclaim_terminates_stale_process_before_releasing_slot(
     assert recovered["stale_requires_termination"] == []
     assert recovered["recovered_count"] == 1
     assert recovered["recovered_runs"][0]["state"] == CodexRunState.LOST.value
-    assert recovered["recovered_runs"][0]["metadata"][
-        "stale_process_terminated"
-    ] is True
+    assert (
+        recovered["recovered_runs"][0]["metadata"]["stale_process_terminated"] is True
+    )
 
 
 def test_database_migrates_to_recovery_schema(tmp_path: Path) -> None:

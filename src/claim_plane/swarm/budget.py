@@ -36,9 +36,7 @@ def _reject_unknown(
 ) -> None:
     unknown = sorted(set(data) - allowed)
     if unknown:
-        raise ValueError(
-            f"{field_name} contains unknown fields: " + ", ".join(unknown)
-        )
+        raise ValueError(f"{field_name} contains unknown fields: " + ", ".join(unknown))
 
 
 def _bounded_int(
@@ -54,9 +52,7 @@ def _bounded_int(
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field_name} must be an integer")
     if value < minimum or value > maximum:
-        raise ValueError(
-            f"{field_name} must be between {minimum} and {maximum}"
-        )
+        raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
     return value
 
 
@@ -389,9 +385,7 @@ class SwarmBudgetPolicy:
         if self.protocol != SWARM_BUDGET_POLICY_PROTOCOL:
             raise ValueError(f"unsupported swarm-budget protocol {self.protocol!r}")
         if not isinstance(self.workers, WorkerBudget):
-            object.__setattr__(
-                self, "workers", WorkerBudget.from_dict(self.workers)
-            )
+            object.__setattr__(self, "workers", WorkerBudget.from_dict(self.workers))
         if not isinstance(self.resources, ResourceBudget):
             object.__setattr__(
                 self, "resources", ResourceBudget.from_dict(self.resources)
@@ -437,9 +431,7 @@ class SwarmBudgetPolicy:
         if work_items is not None:
             self.validate_work_item_count(work_items)
         remaining_launches = (
-            None
-            if work_items is None
-            else self.workers.max_total_launches - work_items
+            None if work_items is None else self.workers.max_total_launches - work_items
         )
         return {
             "fingerprint": self.fingerprint(),

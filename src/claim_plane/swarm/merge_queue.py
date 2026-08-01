@@ -328,8 +328,7 @@ class DeterministicMergeQueue:
             ),
             status=MergeQueueStatus(data.get("status") or "waiting"),
             entries=tuple(
-                MergeQueueEntry.from_dict(item)
-                for item in data.get("entries") or ()
+                MergeQueueEntry.from_dict(item) for item in data.get("entries") or ()
             ),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),

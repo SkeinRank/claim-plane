@@ -48,9 +48,7 @@ def effective_dependencies(
 ) -> dict[str, tuple[str, ...]]:
     """Return explicit DAG edges plus deterministic serialization edges."""
 
-    dependencies = {
-        item.work_id: set(item.depends_on) for item in graph.work_items
-    }
+    dependencies = {item.work_id: set(item.depends_on) for item in graph.work_items}
     for constraint in plan.constraints:
         if constraint.action is ConcurrencyConstraintAction.SERIALIZE:
             dependencies[constraint.after].add(constraint.before)
@@ -172,13 +170,12 @@ class WorkAdmission:
                 str(item) for item in data.get("effective_dependencies") or ()
             ),
             conflicts=tuple(
-                dict(item) for item in data.get("conflicts") or ()
+                dict(item)
+                for item in data.get("conflicts") or ()
                 if isinstance(item, Mapping)
             ),
             constraints=tuple(str(item) for item in data.get("constraints") or ()),
-            notifications=tuple(
-                str(item) for item in data.get("notifications") or ()
-            ),
+            notifications=tuple(str(item) for item in data.get("notifications") or ()),
             guidance=str(data.get("guidance") or ""),
         )
 

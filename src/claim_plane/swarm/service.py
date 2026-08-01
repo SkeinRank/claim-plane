@@ -293,9 +293,7 @@ def validate_budget_policy(
     }
 
 
-def plan_swarm_concurrency(
-    repo: str | Path, session_id: str
-) -> dict[str, Any]:
+def plan_swarm_concurrency(repo: str | Path, session_id: str) -> dict[str, Any]:
     root = resolve_repository_root(repo)
     _require_initialized(root)
     with _store(root) as store:
@@ -329,9 +327,7 @@ def plan_swarm_concurrency(
     }
 
 
-def get_swarm_concurrency_plan(
-    repo: str | Path, session_id: str
-) -> dict[str, Any]:
+def get_swarm_concurrency_plan(repo: str | Path, session_id: str) -> dict[str, Any]:
     root = resolve_repository_root(repo)
     _require_initialized(root)
     with _store(root) as store:
@@ -540,9 +536,12 @@ def _registered_worktrees(root: Path) -> dict[Path, dict[str, str]]:
 
 
 def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
-    return _git_result(
-        root, "merge-base", "--is-ancestor", ancestor, descendant
-    ).returncode == 0
+    return (
+        _git_result(
+            root, "merge-base", "--is-ancestor", ancestor, descendant
+        ).returncode
+        == 0
+    )
 
 
 def _worktree_dirty(path: Path) -> bool:
@@ -563,10 +562,7 @@ def _worktree_dirty(path: Path) -> bool:
 
 def _session_worktree_root(root: Path, session_id: str) -> Path:
     return (
-        root
-        / ".claim-plane"
-        / "worktrees"
-        / managed_session_component(session_id)
+        root / ".claim-plane" / "worktrees" / managed_session_component(session_id)
     ).resolve()
 
 
@@ -980,4 +976,3 @@ def cleanup_swarm_worktrees(
         "work_ids": list(selected_ids),
         "forced": force,
     }
-

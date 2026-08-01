@@ -370,6 +370,7 @@ def _covers(operation: IntentOperation, path: str) -> bool:
         return resource.covers_path(path)
     if any(ch in candidate for ch in "*?["):
         import fnmatch
+
         return fnmatch.fnmatchcase(path, candidate)
     return path == candidate
 
@@ -696,11 +697,7 @@ def verify_swarm_session(
                     str(raw.get("code") or "root_verification_failed"),
                     str(raw.get("message") or "Root verification failed."),
                     str(raw.get("severity") or "error"),
-                    path=(
-                        None
-                        if raw.get("path") is None
-                        else str(raw.get("path"))
-                    ),
+                    path=(None if raw.get("path") is None else str(raw.get("path"))),
                 )
             )
     if not integrity:

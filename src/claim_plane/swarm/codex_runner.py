@@ -16,7 +16,7 @@ import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Mapping, TextIO
+from typing import Any, Mapping, TextIO
 
 from claim_plane.connectors.codex import (
     codex_intent_status,
@@ -160,7 +160,9 @@ def _create_private_run_directory(root: Path, run_dir: Path) -> None:
     try:
         relative = run_dir.relative_to(trusted_root)
     except ValueError as exc:
-        raise ValueError(f"Codex run directory escapes repository root: {run_dir}") from exc
+        raise ValueError(
+            f"Codex run directory escapes repository root: {run_dir}"
+        ) from exc
     current = trusted_root
     for part in relative.parts:
         current = current / part
@@ -239,7 +241,6 @@ def _latest_states(records: list[CodexRunRecord]) -> dict[str, CodexRunRecord]:
     for record in sorted(records, key=lambda item: (item.attempt, item.created_at)):
         latest[record.work_id] = record
     return latest
-
 
 
 def _fair_share(
@@ -425,8 +426,7 @@ def _reserve_run(
     current = latest.get(work_id)
     if current is not None and current.state in _ACTIVE_STATES:
         raise ValueError(
-            "workers.max_active_per_work_item is exhausted for "
-            f"{work_id!r}"
+            f"workers.max_active_per_work_item is exhausted for {work_id!r}"
         )
     attempts_for_work = sum(1 for record in existing_runs if record.work_id == work_id)
     if (
@@ -541,9 +541,7 @@ def _reserve_run(
         ),
         metadata={
             "shared_admission_fingerprint": shared_admission.fingerprint(),
-            "effective_dependencies": list(
-                admission_record.effective_dependencies
-            ),
+            "effective_dependencies": list(admission_record.effective_dependencies),
             "scheduler_snapshot_fingerprint": scheduler.fingerprint(),
             "codex_version": _codex_version(executable),
             "cost_metering": "unavailable_from_codex_jsonl",
@@ -637,9 +635,10 @@ def run_codex_work_item(
     error: str | None = None
     exit_code: int | None = None
     try:
-        with stderr_path.open("w", encoding="utf-8") as stderr_handle, events_path.open(
-            "w", encoding="utf-8"
-        ) as events_handle:
+        with (
+            stderr_path.open("w", encoding="utf-8") as stderr_handle,
+            events_path.open("w", encoding="utf-8") as events_handle,
+        ):
             process = subprocess.Popen(
                 list(record.command),
                 cwd=worktree,

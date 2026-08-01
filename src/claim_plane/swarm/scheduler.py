@@ -274,7 +274,7 @@ def compute_scheduler_snapshot(
     dispatchable_set = set(dispatchable)
     final: list[ScheduledWork] = []
     for work_id in order:
-        item = preliminary[work_id]
+        scheduled_item = preliminary[work_id]
         if work_id in candidates:
             state = (
                 ScheduledWorkState.RUNNABLE
@@ -286,15 +286,15 @@ def compute_scheduler_snapshot(
                 if state is ScheduledWorkState.RUNNABLE
                 else "admitted and dependency-ready; waiting for worker capacity"
             )
-            item = ScheduledWork(
+            scheduled_item = ScheduledWork(
                 work_id,
                 state,
-                item.effective_dependencies,
-                item.attempt_count,
-                item.latest_run_id,
+                scheduled_item.effective_dependencies,
+                scheduled_item.attempt_count,
+                scheduled_item.latest_run_id,
                 detail,
             )
-        final.append(item)
+        final.append(scheduled_item)
 
     if admission.status is SharedAdmissionStatus.REPLAN_REQUIRED:
         status = SchedulerStatus.REPLAN_REQUIRED

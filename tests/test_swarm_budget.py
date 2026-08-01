@@ -159,14 +159,10 @@ def test_budget_policy_is_strict_and_cross_field_validated() -> None:
         )
 
     with pytest.raises(ValueError, match="at most 6 decimal places"):
-        SwarmBudgetPolicy.from_dict(
-            {"resources": {"max_cost_usd": "1.0000001"}}
-        )
+        SwarmBudgetPolicy.from_dict({"resources": {"max_cost_usd": "1.0000001"}})
 
     with pytest.raises(ValueError, match="invalid concurrency policy"):
-        SwarmBudgetPolicy.from_dict(
-            {"concurrency": {"unknown_overlap": "allow"}}
-        )
+        SwarmBudgetPolicy.from_dict({"concurrency": {"unknown_overlap": "allow"}})
 
 
 def test_session_binds_explicit_policy_and_reports_capacity(tmp_path: Path) -> None:

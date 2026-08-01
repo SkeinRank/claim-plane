@@ -143,9 +143,7 @@ def _spec() -> dict[str, object]:
 
 
 def test_independent_work_is_packed_by_worker_budget() -> None:
-    graph = _graph(
-        [_item("a", "a.py"), _item("b", "b.py"), _item("c", "c.py")]
-    )
+    graph = _graph([_item("a", "a.py"), _item("b", "b.py"), _item("c", "c.py")])
     plan = compute_concurrency_plan(graph, _policy(max_active=2))
 
     assert plan.status is ConcurrencyPlanStatus.READY

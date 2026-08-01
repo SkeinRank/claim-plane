@@ -124,8 +124,6 @@ raise SystemExit({exit_code})
     return script
 
 
-
-
 def _sleeping_fake_codex(tmp_path: Path) -> Path:
     script = tmp_path / "fake-codex-sleeping"
     script.write_text(
@@ -149,6 +147,7 @@ output.write_text("done\n", encoding="utf-8")
     )
     script.chmod(0o755)
     return script
+
 
 def test_shared_admission_turns_serialization_into_effective_dependency(
     tmp_path: Path,
@@ -266,6 +265,7 @@ def test_database_migrates_to_shared_admission_schema(tmp_path: Path) -> None:
     assert version == 9
     assert "swarm_shared_admissions" in tables
 
+
 def test_atomic_scheduler_reservation_prevents_stale_double_dispatch(
     tmp_path: Path,
 ) -> None:
@@ -303,4 +303,3 @@ def test_atomic_scheduler_reservation_prevents_stale_double_dispatch(
     assert len(outcomes) == 1
     assert len(errors) == 1
     assert "dispatchable" in str(errors[0]) or "max_active" in str(errors[0])
-

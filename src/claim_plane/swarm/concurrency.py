@@ -88,8 +88,7 @@ class ConcurrencyConstraint:
             after=str(data.get("after") or ""),
             action=ConcurrencyConstraintAction(data.get("action") or "serialize"),
             reasons=tuple(
-                ConcurrencyConstraintReason(item)
-                for item in data.get("reasons") or ()
+                ConcurrencyConstraintReason(item) for item in data.get("reasons") or ()
             ),
             resources=tuple(str(item) for item in data.get("resources") or ()),
             detail=str(data.get("detail") or ""),
@@ -279,9 +278,7 @@ def _committed_operations(item: WorkItem) -> tuple[IntentOperation, ...]:
 
 def _mutating_operations(item: WorkItem) -> tuple[IntentOperation, ...]:
     return tuple(
-        operation
-        for operation in _committed_operations(item)
-        if operation.mutating
+        operation for operation in _committed_operations(item) if operation.mutating
     )
 
 
@@ -317,15 +314,11 @@ def _path_relation(left: IntentOperation, right: IntentOperation) -> str:
         return "same_file_overlapping_region"
     if left_pattern and not right_pattern:
         return (
-            "unknown_overlap"
-            if fnmatch.fnmatchcase(right_path, left_path)
-            else "none"
+            "unknown_overlap" if fnmatch.fnmatchcase(right_path, left_path) else "none"
         )
     if right_pattern and not left_pattern:
         return (
-            "unknown_overlap"
-            if fnmatch.fnmatchcase(left_path, right_path)
-            else "none"
+            "unknown_overlap" if fnmatch.fnmatchcase(left_path, right_path) else "none"
         )
     left_prefix = _glob_prefix(left_path)
     right_prefix = _glob_prefix(right_path)
@@ -333,8 +326,7 @@ def _path_relation(left: IntentOperation, right: IntentOperation) -> str:
         left_prefix
         and right_prefix
         and not (
-            left_prefix.startswith(right_prefix)
-            or right_prefix.startswith(left_prefix)
+            left_prefix.startswith(right_prefix) or right_prefix.startswith(left_prefix)
         )
     ):
         return "none"
@@ -567,9 +559,7 @@ def _execution_waves(
 ) -> tuple[ExecutionWave, ...]:
     order = graph.topological_order()
     rank = {work_id: index for index, work_id in enumerate(order)}
-    dependencies = {
-        item.work_id: set(item.depends_on) for item in graph.work_items
-    }
+    dependencies = {item.work_id: set(item.depends_on) for item in graph.work_items}
     for constraint in constraints:
         if constraint.action is ConcurrencyConstraintAction.SERIALIZE:
             dependencies[constraint.after].add(constraint.before)
@@ -621,9 +611,7 @@ def compute_concurrency_plan(
         item.action is ConcurrencyConstraintAction.DENY for item in constraints
     )
     status = (
-        ConcurrencyPlanStatus.REPLAN_REQUIRED
-        if denied
-        else ConcurrencyPlanStatus.READY
+        ConcurrencyPlanStatus.REPLAN_REQUIRED if denied else ConcurrencyPlanStatus.READY
     )
     waves = (
         ()

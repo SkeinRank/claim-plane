@@ -43,22 +43,27 @@ def _parse_timestamp(value: str) -> datetime:
 
 
 def _process_alive(pid: int | None) -> bool:
-    if pid is None or pid <= 0:
+    if pid is None:
         return False
-    proc_stat = Path(f"/proc/{pid}/stat")
-    if proc_stat.is_file():
+
+    if os.name == "posix":
         try:
-            fields = proc_stat.read_text(encoding="utf-8").split()
-        except OSError:
-            fields = []
-        if len(fields) >= 3 and fields[2] == "Z":
+            waited_pid, _ = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
+        except ProcessLookupError:
             return False
+        else:
+            if waited_pid == pid:
+                return False
+
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
+
     return True
 
 
@@ -75,24 +80,39 @@ def _terminate_pid(pid: int | None) -> bool:
     return True
 
 
-def _terminate_and_confirm(pid: int | None, *, timeout_seconds: float = 5.0) -> bool:
+def _terminate_and_confirm(
+    pid: int | None,
+    *,
+    timeout_seconds: float = 5.0,
+) -> bool:
     if not _terminate_pid(pid):
         return not _process_alive(pid)
+
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         if not _process_alive(pid):
             return True
         time.sleep(0.05)
+
     if pid is not None and os.name == "posix":
         try:
             os.killpg(pid, signal.SIGKILL)
         except ProcessLookupError:
             return True
+        except PermissionError:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                return True
+            except PermissionError:
+                return False
+
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
             if not _process_alive(pid):
                 return True
             time.sleep(0.05)
+
     return not _process_alive(pid)
 
 
@@ -448,9 +468,9 @@ def resume_swarm_session(repo: str | Path, session_id: str) -> dict[str, Any]:
             events = store.list_recovery_events(session_id)
             previous_state = next(
                 (
-                    str(event.get("metadata", {}).get("previous_state"))
-                    for event in reversed(events)
-                    if event.get("action") == "session_paused"
+                    str(recovery_event.get("metadata", {}).get("previous_state"))
+                    for recovery_event in reversed(events)
+                    if recovery_event.get("action") == "session_paused"
                 ),
                 SwarmSessionState.RUNNING.value,
             )
@@ -564,9 +584,7 @@ def replace_codex_worker(
         )
     worktrees = inspect_swarm_worktrees(root, session_id)
     selected = next(
-        item
-        for item in worktrees["worktrees"]
-        if item["record"]["work_id"] == work_id
+        item for item in worktrees["worktrees"] if item["record"]["work_id"] == work_id
     )
     health = WorktreeHealth(selected["health"])
     path = Path(selected["record"]["worktree_path"])

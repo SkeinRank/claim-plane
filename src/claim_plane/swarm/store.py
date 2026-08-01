@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import sqlite3
 from dataclasses import replace
@@ -342,12 +343,12 @@ class SwarmSessionStore:
             raise KeyError(f"unknown swarm session {session_id!r}")
         return session
 
-    def list(self) -> list[SwarmSession]:
+    def list(self) -> builtins.list[SwarmSession]:
         rows = self._connection.execute(
             "SELECT payload_json FROM swarm_sessions "
             "ORDER BY updated_at DESC, session_id ASC"
         ).fetchall()
-        sessions: list[SwarmSession] = []
+        sessions: builtins.list[SwarmSession] = []
         for row in rows:
             payload: Any = json.loads(str(row["payload_json"]))
             if not isinstance(payload, dict):
@@ -510,9 +511,7 @@ class SwarmSessionStore:
             return None
         payload = json.loads(str(row["payload_json"]))
         if not isinstance(payload, dict):
-            raise ValueError(
-                f"stored concurrency plan for {session_id!r} is invalid"
-            )
+            raise ValueError(f"stored concurrency plan for {session_id!r} is invalid")
         return ConcurrencyPlan.from_dict(payload), int(row["plan_version"])
 
     def save_concurrency_plan(
@@ -626,13 +625,13 @@ class SwarmSessionStore:
             separators=(",", ":"),
         )
 
-    def list_worktrees(self, session_id: str) -> list[ManagedWorktree]:
+    def list_worktrees(self, session_id: str) -> builtins.list[ManagedWorktree]:
         rows = self._connection.execute(
             "SELECT payload_json FROM swarm_worktrees "
             "WHERE session_id = ? ORDER BY work_id ASC",
             (session_id,),
         ).fetchall()
-        records: list[ManagedWorktree] = []
+        records: builtins.list[ManagedWorktree] = []
         for row in rows:
             payload: Any = json.loads(str(row["payload_json"]))
             if not isinstance(payload, dict):
@@ -645,11 +644,11 @@ class SwarmSessionStore:
     def save_worktrees(
         self,
         session_id: str,
-        records: list[ManagedWorktree],
+        records: builtins.list[ManagedWorktree],
         *,
         expected_graph_version: int,
         expected_graph_fingerprint: str,
-    ) -> tuple[list[ManagedWorktree], int]:
+    ) -> tuple[builtins.list[ManagedWorktree], int]:
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             row = self._connection.execute(
@@ -749,7 +748,7 @@ class SwarmSessionStore:
             self._connection.rollback()
             raise
 
-    def delete_worktrees(self, session_id: str, work_ids: list[str]) -> int:
+    def delete_worktrees(self, session_id: str, work_ids: builtins.list[str]) -> int:
         if not work_ids:
             return 0
         placeholders = ",".join("?" for _ in work_ids)
@@ -923,9 +922,7 @@ class SwarmSessionStore:
                 return queue, int(existing["queue_version"]), False
             version = 1 if existing is None else int(existing["queue_version"]) + 1
             created_at = (
-                queue.created_at
-                if existing is None
-                else str(existing["created_at"])
+                queue.created_at if existing is None else str(existing["created_at"])
             )
             self._connection.execute(
                 """
@@ -1073,7 +1070,7 @@ class SwarmSessionStore:
 
     def list_codex_runs(
         self, session_id: str, *, work_id: str | None = None
-    ) -> list[CodexRunRecord]:
+    ) -> builtins.list[CodexRunRecord]:
         query = "SELECT payload_json FROM swarm_codex_runs WHERE session_id = ?"
         values: tuple[Any, ...] = (session_id,)
         if work_id is not None:
@@ -1081,7 +1078,7 @@ class SwarmSessionStore:
             values = (session_id, work_id)
         query += " ORDER BY created_at ASC, attempt ASC"
         rows = self._connection.execute(query, values).fetchall()
-        records: list[CodexRunRecord] = []
+        records: builtins.list[CodexRunRecord] = []
         for row in rows:
             payload: Any = json.loads(str(row["payload_json"]))
             if not isinstance(payload, dict):
@@ -1242,14 +1239,10 @@ class SwarmSessionStore:
                 self._connection.commit()
                 return report, int(existing["verification_version"]), False
             version = (
-                1
-                if existing is None
-                else int(existing["verification_version"]) + 1
+                1 if existing is None else int(existing["verification_version"]) + 1
             )
             created_at = (
-                report.created_at
-                if existing is None
-                else str(existing["created_at"])
+                report.created_at if existing is None else str(existing["created_at"])
             )
             self._connection.execute(
                 """
@@ -1647,13 +1640,13 @@ class SwarmSessionStore:
             )
         return cursor.rowcount == 1
 
-    def list_recovery_events(self, session_id: str) -> list[dict[str, Any]]:
+    def list_recovery_events(self, session_id: str) -> builtins.list[dict[str, Any]]:
         rows = self._connection.execute(
             "SELECT payload_json FROM swarm_recovery_events "
             "WHERE session_id = ? ORDER BY created_at, event_id",
             (session_id,),
         ).fetchall()
-        events: list[dict[str, Any]] = []
+        events: builtins.list[dict[str, Any]] = []
         for row in rows:
             payload: Any = json.loads(str(row["payload_json"]))
             if not isinstance(payload, dict):
@@ -1663,7 +1656,7 @@ class SwarmSessionStore:
 
     def request_session_cancellation(
         self, session_id: str, *, updated_at: str
-    ) -> tuple[SwarmSession, list[CodexRunRecord]]:
+    ) -> tuple[SwarmSession, builtins.list[CodexRunRecord]]:
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             session = self.require(session_id)
@@ -1687,7 +1680,7 @@ class SwarmSessionStore:
                 "AND state IN ('reserved', 'running', 'cancelling')",
                 (session_id,),
             ).fetchall()
-            updated_records: list[CodexRunRecord] = []
+            updated_records: builtins.list[CodexRunRecord] = []
             for row in rows:
                 payload: Any = json.loads(str(row["payload_json"]))
                 if not isinstance(payload, dict):

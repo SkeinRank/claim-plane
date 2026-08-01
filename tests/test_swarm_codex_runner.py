@@ -289,7 +289,6 @@ def test_runner_timeout_is_durable(
     assert list_codex_runs(repo, "swm-runner")[0].state is CodexRunState.TIMED_OUT
 
 
-
 def test_runner_rejects_symlinked_evidence_namespace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -308,6 +307,7 @@ def test_runner_rejects_symlinked_evidence_namespace(
 
     assert list_codex_runs(repo, "swm-runner") == []
     assert list(outside.iterdir()) == []
+
 
 def test_database_migrates_to_codex_run_schema(tmp_path: Path) -> None:
     repo = _repo(tmp_path)

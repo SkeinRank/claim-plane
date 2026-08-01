@@ -287,7 +287,6 @@ def cmd_codex_intent_status(args: argparse.Namespace) -> int:
     return 0
 
 
-
 def cmd_swarm_create(args: argparse.Namespace) -> int:
     result = create_swarm_session(
         args.repo,
@@ -351,9 +350,7 @@ def _print_operator_snapshot(payload: Mapping[str, Any]) -> None:
     )
     scheduler = payload.get("scheduler") or {}
     if scheduler:
-        dispatchable = (
-            ", ".join(scheduler.get("dispatchable_work_ids") or ()) or "none"
-        )
+        dispatchable = ", ".join(scheduler.get("dispatchable_work_ids") or ()) or "none"
         print(f"Dispatchable: {dispatchable}")
     merge = payload.get("merge_queue") or {}
     if merge:
@@ -470,10 +467,7 @@ def cmd_swarm_logs(args: argparse.Namespace) -> int:
             for event in fresh:
                 target = event.get("work_id") or "-"
                 detail = f"  {event['detail']}" if event.get("detail") else ""
-                print(
-                    f"{event['timestamp']}  {target:20}  "
-                    f"{event['event']}{detail}"
-                )
+                print(f"{event['timestamp']}  {target:20}  {event['event']}{detail}")
         if not args.follow:
             return 0
         snapshot = get_swarm_operator_snapshot(args.repo, args.session_id)
@@ -490,9 +484,7 @@ def cmd_swarm_demo(args: argparse.Namespace) -> int:
         print(f"Demo repository: {result['repository']}")
         _print_operator_snapshot(result["result"]["snapshot"])
         print("Inspect evidence with:")
-        print(
-            f"  claim-plane swarm evidence swm-demo --repo {result['repository']}"
-        )
+        print(f"  claim-plane swarm evidence swm-demo --repo {result['repository']}")
     return 0 if result["result"]["verified"] else 2
 
 
@@ -531,8 +523,6 @@ def cmd_swarm_validate(args: argparse.Namespace) -> int:
     return 0
 
 
-
-
 def cmd_swarm_plan(args: argparse.Namespace) -> int:
     result = plan_swarm_concurrency(args.repo, args.session_id)
     if args.json or args.out:
@@ -564,10 +554,7 @@ def cmd_swarm_concurrency(args: argparse.Namespace) -> int:
         _write_json(result, args.out)
     else:
         summary = result["summary"]
-        print(
-            f"Concurrency plan v{result['plan_version']}: "
-            f"{summary['status']}"
-        )
+        print(f"Concurrency plan v{result['plan_version']}: {summary['status']}")
         print(
             f"Waves: {summary['wave_count']}; "
             f"peak={summary['peak_concurrency']}/"
@@ -604,10 +591,7 @@ def cmd_swarm_admit(args: argparse.Namespace) -> int:
         for item in result["shared_admission"]["admissions"]:
             label = "ADMITTED" if item["allowed"] else "BLOCKED"
             deps = ", ".join(item["effective_dependencies"]) or "none"
-            print(
-                f"  {item['work_id']}: {label} ({item['kind']}); "
-                f"depends_on={deps}"
-            )
+            print(f"  {item['work_id']}: {label} ({item['kind']}); depends_on={deps}")
     return 0 if result["summary"]["status"] == "ready" else 2
 
 
@@ -808,9 +792,7 @@ def cmd_swarm_replace_budget(args: argparse.Namespace) -> int:
 
 
 def cmd_swarm_validate_budget(args: argparse.Namespace) -> int:
-    result = validate_budget_policy(
-        _read_json(args.policy), work_items=args.work_items
-    )
+    result = validate_budget_policy(_read_json(args.policy), work_items=args.work_items)
     _write_json({"valid": True, **result})
     return 0
 
@@ -842,10 +824,7 @@ def cmd_swarm_worktrees(args: argparse.Namespace) -> int:
             print("  none")
         for item in result["worktrees"]:
             record = item["record"]
-            print(
-                f"  {record['work_id']}: {item['health']}  "
-                f"{record['worktree_path']}"
-            )
+            print(f"  {record['work_id']}: {item['health']}  {record['worktree_path']}")
             if item["detail"]:
                 print(f"    {item['detail']}")
         if result["orphans"]:
@@ -950,9 +929,7 @@ def cmd_swarm_run_status(args: argparse.Namespace) -> int:
         print(f"Tokens: {record.usage.total_tokens}")
         print(f"Duration: {record.duration_seconds or 0:.2f}s")
     return (
-        0
-        if record.state.value == "succeeded"
-        else (2 if record.state.terminal else 0)
+        0 if record.state.value == "succeeded" else (2 if record.state.terminal else 0)
     )
 
 
@@ -1024,10 +1001,7 @@ def cmd_swarm_resume(args: argparse.Namespace) -> int:
     if args.json or args.out:
         _write_json(result, args.out)
     else:
-        print(
-            f"Swarm session {args.session_id}: "
-            f"{result['session']['state']}."
-        )
+        print(f"Swarm session {args.session_id}: {result['session']['state']}.")
     return 0
 
 
@@ -1839,7 +1813,6 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_validate.add_argument("--graph", required=True)
     swarm_validate.set_defaults(func=cmd_swarm_validate)
 
-
     swarm_plan = swarm_sub.add_parser(
         "plan",
         help="Compute and persist deterministic adaptive execution waves.",
@@ -1975,9 +1948,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     swarm_replace_budget.add_argument("session_id")
     swarm_replace_budget.add_argument("--policy", required=True)
-    swarm_replace_budget.add_argument(
-        "--expected-version", type=int, required=True
-    )
+    swarm_replace_budget.add_argument("--expected-version", type=int, required=True)
     swarm_replace_budget.add_argument("--repo", default=".")
     swarm_replace_budget.add_argument("--out")
     swarm_replace_budget.set_defaults(func=cmd_swarm_replace_budget)

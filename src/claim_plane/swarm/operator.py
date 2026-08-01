@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -275,9 +274,7 @@ def get_swarm_operator_snapshot(repo: str | Path, session_id: str) -> dict[str, 
         },
         "scheduler": None if scheduler is None else scheduler["summary"],
         "merge_queue": None if merge_queue is None else merge_queue["summary"],
-        "verification": (
-            None if verification is None else verification["summary"]
-        ),
+        "verification": (None if verification is None else verification["summary"]),
         "recovery": recovery["summary"],
         "worktree_summary": worktrees["summary"],
         "work": work,
@@ -502,9 +499,7 @@ def _dispatch_one(
             if item["record"]["work_id"] == work_id
         )
         if selected["health"] == "dirty":
-            raise ValueError(
-                "refusing first dispatch into a dirty managed worktree"
-            )
+            raise ValueError("refusing first dispatch into a dirty managed worktree")
     if (
         latest is not None
         and latest.state.terminal
@@ -772,12 +767,12 @@ def create_and_run_swarm_demo(
             "goal": "Implement two independent modules and integrate a summary.",
             "acceptance": [
                 (
-                    "python -c \"from src.greeting import greet; "
+                    'python -c "from src.greeting import greet; '
                     "assert greet('Ada') == 'Hello, Ada!'\""
                 ),
-                "python -c \"from src.arithmetic import add; assert add(2, 3) == 5\"",
+                'python -c "from src.arithmetic import add; assert add(2, 3) == 5"',
                 (
-                    "python -c \"from pathlib import Path; "
+                    'python -c "from pathlib import Path; '
                     "assert Path('SWARM_RESULT.md').is_file()\""
                 ),
             ],
@@ -800,7 +795,7 @@ def create_and_run_swarm_demo(
                     ],
                     "acceptance": [
                         (
-                            "python -c \"from src.greeting import greet; "
+                            'python -c "from src.greeting import greet; '
                             "assert greet('Ada') == 'Hello, Ada!'\""
                         )
                     ],
@@ -820,8 +815,8 @@ def create_and_run_swarm_demo(
                     ],
                     "acceptance": [
                         (
-                            "python -c \"from src.arithmetic import add; "
-                            "assert add(2, 3) == 5\""
+                            'python -c "from src.arithmetic import add; '
+                            'assert add(2, 3) == 5"'
                         )
                     ],
                 },
@@ -841,7 +836,7 @@ def create_and_run_swarm_demo(
                     ],
                     "acceptance": [
                         (
-                            "python -c \"from pathlib import Path; "
+                            'python -c "from pathlib import Path; '
                             "assert Path('SWARM_RESULT.md').is_file()\""
                         )
                     ],

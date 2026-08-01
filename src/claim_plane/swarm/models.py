@@ -61,8 +61,7 @@ def _validate_repository_path(value: str) -> None:
         for prefix in _PROTECTED_PREFIXES
     ):
         raise ValueError(
-            "work-item scope cannot include Claim Plane or Git control state: "
-            f"{value}"
+            f"work-item scope cannot include Claim Plane or Git control state: {value}"
         )
 
 
@@ -283,9 +282,7 @@ class WorkGraph:
             dependency for item in self.work_items for dependency in item.depends_on
         }
         return tuple(
-            item.work_id
-            for item in self.work_items
-            if item.work_id not in depended_on
+            item.work_id for item in self.work_items if item.work_id not in depended_on
         )
 
     def topological_order(self) -> tuple[str, ...]:
@@ -336,9 +333,7 @@ class WorkGraph:
         return tuple(
             tuple(
                 sorted(
-                    work_id
-                    for work_id, layer in layer_by_id.items()
-                    if layer == index
+                    work_id for work_id, layer in layer_by_id.items() if layer == index
                 )
             )
             for index in range(max(layer_by_id.values()) + 1)
