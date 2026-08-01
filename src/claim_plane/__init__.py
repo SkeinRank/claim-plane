@@ -55,6 +55,10 @@ from claim_plane.runtime import (
     serve_broker,
 )
 from claim_plane.swarm import (
+    CodexRunBudget,
+    CodexRunRecord,
+    CodexRunState,
+    CodexUsage,
     ConcurrencyBudget,
     ConcurrencyConstraint,
     ConcurrencyConstraintAction,
@@ -90,7 +94,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.19.0"
+__version__ = "0.20.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -110,6 +114,10 @@ __all__ = [
     "FindingSeverity",
     "GovernancePolicy",
     "IntegrationFinding",
+    "CodexRunBudget",
+    "CodexRunRecord",
+    "CodexRunState",
+    "CodexUsage",
     "ConcurrencyBudget",
     "ConcurrencyConstraint",
     "ConcurrencyConstraintAction",

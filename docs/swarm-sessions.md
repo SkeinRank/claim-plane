@@ -1,4 +1,4 @@
-# Swarm sessions, adaptive concurrency, and managed worktrees
+# Swarm sessions, adaptive concurrency, managed worktrees, and Codex execution
 
 Claim Plane represents a planned multi-agent change as a repository-bound `SwarmSession` with two independently versioned inputs:
 
@@ -186,11 +186,11 @@ Graph and budget versions are independent. Changing one does not silently overwr
 
 ## Database migration
 
-Opening an older swarm database upgrades it in place to schema version 4. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans. The schema-4 migration adds only the managed-worktree ownership table. Existing work graphs, budgets, plans, repository bindings, base commits, timestamps, and session identities remain unchanged.
+Opening an older swarm database upgrades it in place to schema version 5. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans; schema version 4 retains managed-worktree ownership. The schema-5 migration adds durable Codex-run records only. Existing work graphs, budgets, plans, worktrees, repository bindings, base commits, timestamps, and session identities remain unchanged.
 
 ## Current boundary
 
-Version 0.19.0 creates durable planning, budget, adaptive concurrency, and managed Git worktree state. It does not launch Codex workers or account provider usage. The next swarm stage binds a runner and admitted ChangeIntent to each owned worktree.
+Version 0.20.0 adds a bounded headless Codex runner on top of durable planning, budgets, adaptive concurrency, and managed Git worktrees. Process success remains distinct from Claim Plane verification and integration.
 
 ## Adaptive concurrency planning
 
@@ -216,7 +216,7 @@ A `serialize` decision adds a deterministic ordering edge while preserving the o
 
 Replacing either the work graph or budget policy invalidates the stored plan atomically. The next scheduler step must run `claim-plane swarm plan` again before workers can be launched.
 
-Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. It still does not launch Codex processes or grant mutation authority.
+Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. Version 0.20.0 launches one Codex process only after the current wave, dependencies, worktree ownership, graph binding, budget binding, launch ceilings, restart ceilings, token reservation, and wall-time allocation all pass.
 
 
 ## Managed worktree provisioning
@@ -243,3 +243,33 @@ claim-plane swarm cleanup-worktrees <session-id> --force
 ```
 
 Without `--force`, dirty managed worktrees are preserved. Cleanup only removes the exact Claim Plane path and branch recorded for the selected work item. Unregistered directories and unowned worktrees are left untouched.
+
+
+## Headless Codex worker runner
+
+Version 0.20.0 binds a non-interactive Codex execution to exactly one managed worktree and one work item:
+
+```bash
+claim-plane swarm run-codex <session-id> --work-id implementation
+claim-plane swarm runs <session-id>
+claim-plane swarm run-status <run-id>
+claim-plane swarm cancel-codex <run-id>
+```
+
+The runner invokes `codex exec --json --sandbox workspace-write --ask-for-approval never` from the owned worktree. It initializes the worktree-local Claim Plane state and installs the Codex lifecycle connector before execution. The generated worker prompt carries the work-item goal, declared scope proposal, dependencies, preserves, and acceptance criteria, but the model still has to submit and admit a session-bound ChangeIntent before its first mutation.
+
+The reservation transaction enforces:
+
+- the exact graph and budget versions and fingerprints used by the concurrency plan;
+- the current execution wave and successful upstream dependencies;
+- `max_active`, `max_active_per_work_item`, `max_total_launches`, and restart ceilings;
+- a fair token reservation from the remaining session budget;
+- a bounded timeout inside the remaining elapsed session execution budget.
+
+The first reservation atomically changes the swarm session from `planned` to `running`. Graph and budget replacement therefore cannot race with execution.
+
+Codex JSONL events, stderr, the final agent message, prompt digest, command, PIDs, thread identifier, observed intent identifier, token usage, duration, exit code, and termination classification are persisted under `.claim-plane/swarm/runs/` and in `swarm.db`. The local evidence namespace is created as private directories and rejects every symlink component before persistence. Token overruns, timeouts, cancellation, spawn failures, and non-zero exits are distinct terminal states.
+
+A `succeeded` run means only that the bounded Codex process exited successfully. It does not mean the work item or swarm is `VERIFIED`. Shared admission, verified dependency release, merge ordering, cross-intent verification, and final integration remain later lifecycle stages.
+
+Codex JSONL currently exposes token usage but not authoritative provider cost. The run record therefore preserves the session cost ceiling and explicitly marks cost metering as unavailable instead of fabricating a dollar estimate.

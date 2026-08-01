@@ -262,5 +262,5 @@ def test_database_migrates_to_worktree_schema_without_losing_session(
         connection.execute("SELECT COUNT(*) FROM swarm_worktrees").fetchone()[0]
     )
     connection.close()
-    assert version == 4
+    assert version == 5
     assert count == 2

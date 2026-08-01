@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-codex-run.schema.json",
+  "title": "Claim Plane Swarm Codex Run v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "run_id",
+    "session_id",
+    "work_id",
+    "attempt",
+    "state",
+    "repository_identity",
+    "graph_version",
+    "graph_fingerprint",
+    "budget_version",
+    "budget_fingerprint",
+    "worktree_path",
+    "branch",
+    "base_commit",
+    "command",
+    "prompt_sha256",
+    "budget",
+    "run_directory",
+    "events_path",
+    "stderr_path",
+    "final_message_path",
+    "created_at",
+    "updated_at",
+    "started_at",
+    "finished_at",
+    "runner_pid",
+    "agent_pid",
+    "exit_code",
+    "duration_seconds",
+    "usage",
+    "event_count",
+    "last_event_type",
+    "codex_thread_id",
+    "intent_id",
+    "termination_reason",
+    "error",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-codex-run.v1"},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "session_id": {"type": "string", "minLength": 1},
+    "work_id": {"type": "string", "minLength": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "state": {
+      "enum": [
+        "reserved",
+        "running",
+        "cancelling",
+        "succeeded",
+        "failed",
+        "timed_out",
+        "cancelled",
+        "token_budget_exceeded",
+        "spawn_failed"
+      ]
+    },
+    "repository_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "graph_version": {"type": "integer", "minimum": 1},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "budget_version": {"type": "integer", "minimum": 1},
+    "budget_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "worktree_path": {"type": "string", "minLength": 1},
+    "branch": {"type": "string", "minLength": 1},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "token_limit",
+        "wall_time_limit_seconds",
+        "cost_limit_usd",
+        "cost_metering"
+      ],
+      "properties": {
+        "token_limit": {"type": ["integer", "null"], "minimum": 1},
+        "wall_time_limit_seconds": {"type": "integer", "minimum": 1},
+        "cost_limit_usd": {"type": ["string", "null"]},
+        "cost_metering": {"const": "unavailable_from_codex_jsonl"}
+      }
+    },
+    "run_directory": {"type": "string", "minLength": 1},
+    "events_path": {"type": "string", "minLength": 1},
+    "stderr_path": {"type": "string", "minLength": 1},
+    "final_message_path": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1},
+    "started_at": {"type": ["string", "null"]},
+    "finished_at": {"type": ["string", "null"]},
+    "runner_pid": {"type": ["integer", "null"], "minimum": 1},
+    "agent_pid": {"type": ["integer", "null"], "minimum": 1},
+    "exit_code": {"type": ["integer", "null"]},
+    "duration_seconds": {"type": ["number", "null"], "minimum": 0},
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens",
+        "reasoning_output_tokens",
+        "total_tokens"
+      ],
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "cached_input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "reasoning_output_tokens": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "event_count": {"type": "integer", "minimum": 0},
+    "last_event_type": {"type": ["string", "null"]},
+    "codex_thread_id": {"type": ["string", "null"]},
+    "intent_id": {"type": ["string", "null"]},
+    "termination_reason": {"type": ["string", "null"]},
+    "error": {"type": ["string", "null"]},
+    "metadata": {"type": "object"}
+  }
+}

@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from claim_plane.swarm.budget import SwarmBudgetPolicy
 from claim_plane.swarm.concurrency import ConcurrencyPlan
-from claim_plane.swarm.models import SwarmSession, WorkGraph
+from claim_plane.swarm.models import SwarmSession, SwarmSessionState, WorkGraph
+from claim_plane.swarm.runs import CodexRunRecord, CodexRunState
 from claim_plane.swarm.worktrees import ManagedWorktree
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 
 
 class SwarmSessionStore:
@@ -111,6 +113,33 @@ class SwarmSessionStore:
         self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_swarm_worktrees_session "
             "ON swarm_worktrees(session_id, work_id)"
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS swarm_codex_runs (
+                run_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                work_id TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                token_limit INTEGER,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                duration_seconds REAL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES swarm_sessions(session_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        self._connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_swarm_codex_runs_attempt "
+            "ON swarm_codex_runs(session_id, work_id, attempt)"
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_swarm_codex_runs_state "
+            "ON swarm_codex_runs(session_id, state, work_id)"
         )
         if schema_version < _SCHEMA_VERSION:
             self._migrate_payloads()
@@ -623,6 +652,256 @@ class SwarmSessionStore:
                 (session_id, *work_ids),
             )
         return int(cursor.rowcount)
+
+    @staticmethod
+    def _codex_run_payload(record: CodexRunRecord) -> str:
+        return json.dumps(
+            record.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def list_codex_runs(
+        self, session_id: str, *, work_id: str | None = None
+    ) -> list[CodexRunRecord]:
+        query = "SELECT payload_json FROM swarm_codex_runs WHERE session_id = ?"
+        values: tuple[Any, ...] = (session_id,)
+        if work_id is not None:
+            query += " AND work_id = ?"
+            values = (session_id, work_id)
+        query += " ORDER BY created_at ASC, attempt ASC"
+        rows = self._connection.execute(query, values).fetchall()
+        records: list[CodexRunRecord] = []
+        for row in rows:
+            payload: Any = json.loads(str(row["payload_json"]))
+            if not isinstance(payload, dict):
+                raise ValueError("stored Codex run is invalid")
+            records.append(CodexRunRecord.from_dict(payload))
+        return records
+
+    def get_codex_run(self, run_id: str) -> CodexRunRecord | None:
+        row = self._connection.execute(
+            "SELECT payload_json FROM swarm_codex_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        payload: Any = json.loads(str(row["payload_json"]))
+        if not isinstance(payload, dict):
+            raise ValueError(f"stored Codex run {run_id!r} is invalid")
+        return CodexRunRecord.from_dict(payload)
+
+    def require_codex_run(self, run_id: str) -> CodexRunRecord:
+        record = self.get_codex_run(run_id)
+        if record is None:
+            raise KeyError(f"unknown Codex run {run_id!r}")
+        return record
+
+    def reserve_codex_run(
+        self,
+        record: CodexRunRecord,
+        *,
+        max_active: int,
+        max_active_per_work_item: int,
+        max_total_launches: int,
+        max_attempts_per_work_item: int,
+        max_total_tokens: int | None,
+    ) -> CodexRunRecord:
+        active_values = tuple(
+            state.value
+            for state in (
+                CodexRunState.RESERVED,
+                CodexRunState.RUNNING,
+                CodexRunState.CANCELLING,
+            )
+        )
+        placeholders = ",".join("?" for _ in active_values)
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session = self.require(record.session_id)
+            if (
+                session.graph_version != record.graph_version
+                or session.graph_fingerprint != record.graph_fingerprint
+                or session.budget_version != record.budget_version
+                or session.budget_fingerprint != record.budget_fingerprint
+            ):
+                raise ValueError(
+                    "Codex run is not bound to the current graph and budget"
+                )
+            if session.state not in {
+                SwarmSessionState.PLANNED,
+                SwarmSessionState.RUNNING,
+            }:
+                raise ValueError(
+                    f"cannot reserve Codex run while session is {session.state.value}"
+                )
+            total_launches = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM swarm_codex_runs WHERE session_id = ?",
+                    (record.session_id,),
+                ).fetchone()[0]
+            )
+            if total_launches >= max_total_launches:
+                raise ValueError("workers.max_total_launches is exhausted")
+            work_attempts = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM swarm_codex_runs "
+                    "WHERE session_id = ? AND work_id = ?",
+                    (record.session_id, record.work_id),
+                ).fetchone()[0]
+            )
+            if work_attempts >= max_attempts_per_work_item:
+                raise ValueError(
+                    f"restart budget is exhausted for work item {record.work_id!r}"
+                )
+            active = int(
+                self._connection.execute(
+                    f"SELECT COUNT(*) FROM swarm_codex_runs "
+                    f"WHERE session_id = ? AND state IN ({placeholders})",
+                    (record.session_id, *active_values),
+                ).fetchone()[0]
+            )
+            if active >= max_active:
+                raise ValueError("workers.max_active is exhausted")
+            active_for_work = int(
+                self._connection.execute(
+                    f"SELECT COUNT(*) FROM swarm_codex_runs "
+                    f"WHERE session_id = ? AND work_id = ? "
+                    f"AND state IN ({placeholders})",
+                    (record.session_id, record.work_id, *active_values),
+                ).fetchone()[0]
+            )
+            if active_for_work >= max_active_per_work_item:
+                raise ValueError(
+                    "workers.max_active_per_work_item is exhausted for "
+                    f"{record.work_id!r}"
+                )
+            if max_total_tokens is not None:
+                row = self._connection.execute(
+                    f"SELECT COALESCE(SUM(total_tokens), 0), "
+                    f"COALESCE(SUM(CASE WHEN state IN ({placeholders}) "
+                    f"THEN token_limit ELSE 0 END), 0) "
+                    "FROM swarm_codex_runs WHERE session_id = ?",
+                    (*active_values, record.session_id),
+                ).fetchone()
+                consumed = int(row[0] or 0)
+                reserved = int(row[1] or 0)
+                requested = record.budget.token_limit or 0
+                if consumed + reserved + requested > max_total_tokens:
+                    raise ValueError("resources.max_total_tokens would be exceeded")
+            if session.state is SwarmSessionState.PLANNED:
+                running_session = replace(
+                    session,
+                    state=SwarmSessionState.RUNNING,
+                    updated_at=record.created_at,
+                )
+                cursor = self._connection.execute(
+                    "UPDATE swarm_sessions "
+                    "SET state = ?, payload_json = ?, updated_at = ? "
+                    "WHERE session_id = ? AND state = ?",
+                    (
+                        SwarmSessionState.RUNNING.value,
+                        self._payload(running_session),
+                        record.created_at,
+                        record.session_id,
+                        SwarmSessionState.PLANNED.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("swarm session state changed while reserving run")
+            self._connection.execute(
+                """
+                INSERT INTO swarm_codex_runs (
+                    run_id, session_id, work_id, attempt, state, token_limit,
+                    total_tokens, duration_seconds, payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.run_id,
+                    record.session_id,
+                    record.work_id,
+                    record.attempt,
+                    record.state.value,
+                    record.budget.token_limit,
+                    record.usage.total_tokens,
+                    record.duration_seconds,
+                    self._codex_run_payload(record),
+                    record.created_at,
+                    record.updated_at,
+                ),
+            )
+            self._connection.commit()
+            return record
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def update_codex_run(self, record: CodexRunRecord) -> None:
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                UPDATE swarm_codex_runs
+                   SET state = ?, token_limit = ?, total_tokens = ?,
+                       duration_seconds = ?, payload_json = ?, updated_at = ?
+                 WHERE run_id = ?
+                """,
+                (
+                    record.state.value,
+                    record.budget.token_limit,
+                    record.usage.total_tokens,
+                    record.duration_seconds,
+                    self._codex_run_payload(record),
+                    record.updated_at,
+                    record.run_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"unknown Codex run {record.run_id!r}")
+
+    def bind_worktree_runner(
+        self,
+        session_id: str,
+        work_id: str,
+        *,
+        worker_id: str,
+        intent_id: str | None,
+        updated_at: str,
+    ) -> ManagedWorktree:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._connection.execute(
+                "SELECT payload_json FROM swarm_worktrees "
+                "WHERE session_id = ? AND work_id = ?",
+                (session_id, work_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown managed worktree {work_id!r}")
+            payload: Any = json.loads(str(row["payload_json"]))
+            if not isinstance(payload, dict):
+                raise ValueError("stored managed worktree is invalid")
+            current = ManagedWorktree.from_dict(payload)
+            updated = replace(
+                current,
+                worker_id=worker_id,
+                intent_id=intent_id,
+                updated_at=updated_at,
+            )
+            self._connection.execute(
+                "UPDATE swarm_worktrees SET payload_json = ?, updated_at = ? "
+                "WHERE session_id = ? AND work_id = ?",
+                (
+                    self._worktree_payload(updated),
+                    updated_at,
+                    session_id,
+                    work_id,
+                ),
+            )
+            self._connection.commit()
+            return updated
+        except Exception:
+            self._connection.rollback()
+            raise
 
     @staticmethod
     def _session_from_row(row: sqlite3.Row, session_id: str) -> SwarmSession:

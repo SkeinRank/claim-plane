@@ -47,16 +47,20 @@ from claim_plane.runtime import (
     build_broker_boundary_command,
 )
 from claim_plane.swarm import (
+    cancel_codex_run,
     cleanup_swarm_worktrees,
     create_swarm_session,
+    get_codex_run,
     get_swarm_concurrency_plan,
     get_swarm_session,
     inspect_swarm_worktrees,
+    list_codex_runs,
     list_swarm_sessions,
     plan_swarm_concurrency,
     provision_swarm_worktrees,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
+    run_codex_work_item,
     validate_budget_policy,
     validate_concurrency_plan,
     validate_work_graph,
@@ -539,6 +543,92 @@ def cmd_swarm_cleanup_worktrees(args: argparse.Namespace) -> int:
         )
         if result["work_ids"]:
             print("Work items: " + ", ".join(result["work_ids"]))
+    return 0
+
+
+def cmd_swarm_run_codex(args: argparse.Namespace) -> int:
+    record = run_codex_work_item(
+        args.repo,
+        args.session_id,
+        args.work_id,
+        codex_binary=args.codex_bin,
+        model=args.model,
+        reasoning_effort=args.reasoning_effort,
+        timeout_seconds=args.timeout,
+        token_limit=args.max_tokens,
+    )
+    payload = record.to_dict()
+    if args.json or args.out:
+        _write_json(payload, args.out)
+    else:
+        print(
+            f"Codex run {record.run_id}: {record.state.value} "
+            f"for {record.session_id}/{record.work_id}."
+        )
+        print(f"Attempt: {record.attempt}; exit={record.exit_code}")
+        print(
+            f"Usage: {record.usage.total_tokens} tokens / "
+            f"{record.budget.token_limit or 'unbounded'}; "
+            f"duration={record.duration_seconds or 0:.2f}s / "
+            f"{record.budget.wall_time_limit_seconds}s"
+        )
+        print(f"Events: {record.events_path}")
+        print(f"Stderr: {record.stderr_path}")
+        print(f"Final message: {record.final_message_path}")
+        if record.termination_reason:
+            print(f"Termination: {record.termination_reason}")
+        print(
+            "Execution succeeded; verification is a separate swarm lifecycle stage."
+            if record.state.value == "succeeded"
+            else "Execution did not complete successfully."
+        )
+    return 0 if record.state.value == "succeeded" else 2
+
+
+def cmd_swarm_runs(args: argparse.Namespace) -> int:
+    records = list_codex_runs(args.repo, args.session_id, work_id=args.work_id)
+    payload = [record.to_dict() for record in records]
+    if args.json or args.out:
+        _write_json(payload, args.out)
+    elif not records:
+        print("No Codex runs.")
+    else:
+        for record in records:
+            print(
+                f"{record.run_id}  {record.work_id:20}  "
+                f"attempt={record.attempt}  {record.state.value:24}  "
+                f"tokens={record.usage.total_tokens}"
+            )
+    return 0
+
+
+def cmd_swarm_run_status(args: argparse.Namespace) -> int:
+    record = get_codex_run(args.repo, args.run_id)
+    if args.json or args.out:
+        _write_json(record.to_dict(), args.out)
+    else:
+        print(f"Codex run: {record.run_id}")
+        print(f"Session/work: {record.session_id}/{record.work_id}")
+        print(f"State: {record.state.value}")
+        print(f"Attempt: {record.attempt}")
+        print(f"PID: {record.agent_pid or 'not running'}")
+        print(f"Thread: {record.codex_thread_id or 'not observed'}")
+        print(f"Intent: {record.intent_id or 'not observed'}")
+        print(f"Tokens: {record.usage.total_tokens}")
+        print(f"Duration: {record.duration_seconds or 0:.2f}s")
+    return (
+        0
+        if record.state.value == "succeeded"
+        else (2 if record.state.terminal else 0)
+    )
+
+
+def cmd_swarm_cancel_codex(args: argparse.Namespace) -> int:
+    record = cancel_codex_run(args.repo, args.run_id)
+    if args.json or args.out:
+        _write_json(record.to_dict(), args.out)
+    else:
+        print(f"Codex run {record.run_id}: {record.state.value}.")
     return 0
 
 
@@ -1346,6 +1436,50 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_cleanup_worktrees.add_argument("--json", action="store_true")
     swarm_cleanup_worktrees.add_argument("--out")
     swarm_cleanup_worktrees.set_defaults(func=cmd_swarm_cleanup_worktrees)
+
+    swarm_run_codex = swarm_sub.add_parser(
+        "run-codex",
+        help="Run one bounded headless Codex worker in its managed worktree.",
+    )
+    swarm_run_codex.add_argument("session_id")
+    swarm_run_codex.add_argument("--work-id", required=True)
+    swarm_run_codex.add_argument("--codex-bin", default="codex")
+    swarm_run_codex.add_argument("--model")
+    swarm_run_codex.add_argument("--reasoning-effort")
+    swarm_run_codex.add_argument("--timeout", type=int)
+    swarm_run_codex.add_argument("--max-tokens", type=int)
+    swarm_run_codex.add_argument("--repo", default=".")
+    swarm_run_codex.add_argument("--json", action="store_true")
+    swarm_run_codex.add_argument("--out")
+    swarm_run_codex.set_defaults(func=cmd_swarm_run_codex)
+
+    swarm_runs = swarm_sub.add_parser(
+        "runs", help="List durable Codex worker-run records for a swarm session."
+    )
+    swarm_runs.add_argument("session_id")
+    swarm_runs.add_argument("--work-id")
+    swarm_runs.add_argument("--repo", default=".")
+    swarm_runs.add_argument("--json", action="store_true")
+    swarm_runs.add_argument("--out")
+    swarm_runs.set_defaults(func=cmd_swarm_runs)
+
+    swarm_run_status = swarm_sub.add_parser(
+        "run-status", help="Inspect one durable Codex worker-run record."
+    )
+    swarm_run_status.add_argument("run_id")
+    swarm_run_status.add_argument("--repo", default=".")
+    swarm_run_status.add_argument("--json", action="store_true")
+    swarm_run_status.add_argument("--out")
+    swarm_run_status.set_defaults(func=cmd_swarm_run_status)
+
+    swarm_cancel_codex = swarm_sub.add_parser(
+        "cancel-codex", help="Request cancellation of one active Codex worker."
+    )
+    swarm_cancel_codex.add_argument("run_id")
+    swarm_cancel_codex.add_argument("--repo", default=".")
+    swarm_cancel_codex.add_argument("--json", action="store_true")
+    swarm_cancel_codex.add_argument("--out")
+    swarm_cancel_codex.set_defaults(func=cmd_swarm_cancel_codex)
 
     claim = sub.add_parser(
         "claim", help="Request a legacy fine-grained artifact claim."

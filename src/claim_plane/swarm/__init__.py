@@ -20,6 +20,13 @@ from claim_plane.swarm.concurrency import (
     ExecutionWave,
     compute_concurrency_plan,
 )
+from claim_plane.swarm.codex_runner import (
+    build_codex_worker_prompt,
+    cancel_codex_run,
+    get_codex_run,
+    list_codex_runs,
+    run_codex_work_item,
+)
 from claim_plane.swarm.models import (
     SWARM_SESSION_PROTOCOL,
     SWARM_SESSION_SPEC_PROTOCOL,
@@ -30,6 +37,13 @@ from claim_plane.swarm.models import (
     SwarmSessionState,
     WorkGraph,
     WorkItem,
+)
+from claim_plane.swarm.runs import (
+    SWARM_CODEX_RUN_PROTOCOL,
+    CodexRunBudget,
+    CodexRunRecord,
+    CodexRunState,
+    CodexUsage,
 )
 from claim_plane.swarm.service import (
     cleanup_swarm_worktrees,
@@ -61,10 +75,15 @@ from claim_plane.swarm.worktrees import (
 __all__ = [
     "SWARM_BUDGET_POLICY_PROTOCOL",
     "SWARM_CONCURRENCY_PLAN_PROTOCOL",
+    "SWARM_CODEX_RUN_PROTOCOL",
     "SWARM_MANAGED_WORKTREE_PROTOCOL",
     "SWARM_SESSION_PROTOCOL",
     "SWARM_SESSION_SPEC_PROTOCOL",
     "SWARM_WORK_GRAPH_PROTOCOL",
+    "CodexRunBudget",
+    "CodexRunRecord",
+    "CodexRunState",
+    "CodexUsage",
     "ConcurrencyBudget",
     "ConcurrencyConstraint",
     "ConcurrencyConstraintAction",
@@ -88,12 +107,16 @@ __all__ = [
     "WorktreeInspection",
     "WorkItem",
     "WorkerBudget",
+    "build_codex_worker_prompt",
+    "cancel_codex_run",
     "cleanup_swarm_worktrees",
     "compute_concurrency_plan",
     "create_swarm_session",
+    "get_codex_run",
     "get_swarm_concurrency_plan",
     "get_swarm_session",
     "inspect_swarm_worktrees",
+    "list_codex_runs",
     "list_swarm_sessions",
     "managed_branch_name",
     "managed_session_component",
@@ -102,6 +125,7 @@ __all__ = [
     "plan_swarm_concurrency",
     "provision_swarm_worktrees",
     "replace_swarm_budget_policy",
+    "run_codex_work_item",
     "replace_swarm_work_graph",
     "validate_budget_policy",
     "validate_concurrency_plan",

@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.19.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.20.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -35,6 +35,8 @@ Swarm planning can now be materialized into Claim Plane-owned isolated worktrees
 claim-plane swarm plan <session-id>
 claim-plane swarm provision-worktrees <session-id>
 claim-plane swarm worktrees <session-id>
+claim-plane swarm run-codex <session-id> --work-id <work-id>
+claim-plane swarm runs <session-id>
 ```
 
 ## Research paper
@@ -72,6 +74,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - batch verification that permits proven disjoint same-file hunks and blocks actual overlap;
 - semantic checks for deprecated or non-canonical terminology in changed text;
 - deterministic targeted repair plans;
+- bounded headless Codex worker execution in Claim Plane-owned worktrees, with atomic launch/restart ceilings, execution-wave gating, token and wall-time slices, JSONL evidence capture, cancellation, and durable terminal classification;
 - a verified multi-worktree integration pipeline that freezes each worker into an immutable Git tree, verifies one exact patch, applies those same bytes in dependency order, and invokes bounded external repair adapters;
 - governed admission by default: mutable refs such as `main` are rejected before work begins unless the intent carries an exact `base_commit`; explicit `--exploratory` mode preserves unpinned local experiments;
 - trusted observation sessions stored inside the control-plane database, with hash-chained events, HMAC-authenticated records, explicit sealing, monitor identity, coverage declarations, and dynamic dependency checks;

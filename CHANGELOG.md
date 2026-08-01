@@ -8,6 +8,25 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-08-01
+
+### Added
+
+- Add `claim-plane.swarm-codex-run.v1`, a durable execution record bound to one swarm session, work item, managed worktree, exact graph and budget versions, command, prompt digest, budget slice, evidence paths, Codex thread, usage, and terminal classification.
+- Add a bounded headless Codex runner that launches only work items in the current executable wave after dependency, worktree-ownership, launch, restart, active-worker, token, and wall-time checks pass.
+- Add `swarm run-codex`, `swarm runs`, `swarm run-status`, and `swarm cancel-codex` commands, including JSON output and durable JSONL/stdout/stderr evidence.
+- Add timeout, cancellation, non-zero exit, token-overrun, spawn-failure, and connector-setup classifications without treating process success as verification.
+- Add a private no-symlink evidence namespace under `.claim-plane/swarm/runs/`, rejecting repository-controlled path redirection before a worker reservation is persisted.
+- Add schema-v5 migration, JSON Schema, installed-runner smoke coverage, and regression tests for wave gating, per-item concurrency, restart ceilings, accounting, cancellation, and worktree binding.
+
+### Changed
+
+- Transition a planned swarm session to `RUNNING` atomically with the first reserved worker run, freezing the execution graph and budget binding before an agent process starts.
+- Protect active runner worktrees from cleanup and track Claim Plane-owned Codex enrollment metadata separately from user-authored repository changes.
+- Keep 0.20.0 at the bounded execution boundary: a successful Codex exit is `succeeded`, not `VERIFIED`; shared admission, merge integration, and swarm-level verification remain later stages.
+- Record token usage available from Codex JSONL while marking monetary cost metering unavailable rather than estimating or fabricating provider cost.
+- Enforce `max_wall_time_seconds` as elapsed swarm execution time measured from the first reserved worker, so parallel workers share one real deadline instead of consuming an artificial sum of process durations.
+
 ## [0.19.0] — 2026-08-01
 
 ### Added

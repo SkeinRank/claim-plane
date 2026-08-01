@@ -420,7 +420,14 @@ def _worktree_dirty(path: Path) -> bool:
         raise ValueError(
             result.stderr.strip() or result.stdout.strip() or "cannot inspect worktree"
         )
-    return bool(result.stdout.strip())
+    runner_control_paths = {".codex/hooks.json"}
+    meaningful: list[str] = []
+    for line in result.stdout.splitlines():
+        candidate = line[3:].strip() if len(line) >= 4 else line.strip()
+        if candidate in runner_control_paths:
+            continue
+        meaningful.append(line)
+    return bool(meaningful)
 
 
 def _session_worktree_root(root: Path, session_id: str) -> Path:
@@ -742,6 +749,7 @@ def cleanup_swarm_worktrees(
     with _store(root) as store:
         session = store.require(session_id)
         records = store.list_worktrees(session_id)
+        codex_runs = store.list_codex_runs(session_id)
     if session.repository_identity != identity:
         raise ValueError("swarm session is bound to a different repository identity")
     by_id = {record.work_id: record for record in records}
@@ -749,6 +757,16 @@ def cleanup_swarm_worktrees(
     missing_ids = sorted(set(selected_ids) - set(by_id))
     if missing_ids:
         raise KeyError("unknown managed work items: " + ", ".join(missing_ids))
+    active_run_ids = [
+        run.run_id
+        for run in codex_runs
+        if run.work_id in selected_ids and run.state.active
+    ]
+    if active_run_ids:
+        raise ValueError(
+            "refusing to remove worktrees with active Codex runs: "
+            + ", ".join(active_run_ids)
+        )
     registered = _registered_worktrees(root)
     session_root = _session_worktree_root(root, session_id)
 

@@ -1,0 +1,713 @@
+"""Headless Codex execution bound to managed swarm worktrees and budgets."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import queue
+import secrets
+import shutil
+import signal
+import stat
+import subprocess
+import threading
+import time
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Mapping, TextIO
+
+from claim_plane.connectors.codex import (
+    codex_intent_status,
+    connect_codex,
+    init_project,
+)
+from claim_plane.core import IntentOperation
+from claim_plane.swarm.concurrency import ConcurrencyPlan
+from claim_plane.swarm.models import SwarmSessionState, WorkItem
+from claim_plane.swarm.runs import (
+    CodexRunBudget,
+    CodexRunRecord,
+    CodexRunState,
+    CodexUsage,
+)
+from claim_plane.swarm.service import (
+    _repository_identity,
+    _require_initialized,
+    _resolve_commit,
+    _store,
+    _validate_session_id,
+    inspect_swarm_worktrees,
+    resolve_repository_root,
+)
+from claim_plane.swarm.worktrees import WorktreeHealth
+
+_ACTIVE_STATES = {
+    CodexRunState.RESERVED,
+    CodexRunState.RUNNING,
+    CodexRunState.CANCELLING,
+}
+_TERMINATE_GRACE_SECONDS = 5.0
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _resolve_executable(value: str) -> str:
+    candidate = Path(value).expanduser()
+    if candidate.parent != Path(".") or os.sep in value:
+        path = candidate.resolve()
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise ValueError(f"Codex executable is not executable: {path}")
+        return str(path)
+    resolved = shutil.which(value)
+    if resolved is None:
+        raise ValueError(
+            f"Codex executable {value!r} was not found in PATH; "
+            "install Codex or use --codex-bin"
+        )
+    return str(Path(resolved).resolve())
+
+
+def _codex_version(executable: str) -> str | None:
+    try:
+        result = subprocess.run(
+            [executable, "--version"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = (result.stdout.strip() or result.stderr.strip()).splitlines()
+    return lines[0] if lines else None
+
+
+def _operation_line(operation: IntentOperation) -> str:
+    resource = operation.resource
+    commitment = operation.commitment.value
+    region = f" region={resource.region}" if resource.region else ""
+    return (
+        f"- {commitment} {operation.access.value} "
+        f"{resource.kind.value}:{resource.identifier}{region}"
+    )
+
+
+def build_codex_worker_prompt(session_id: str, item: WorkItem) -> str:
+    operations = "\n".join(_operation_line(operation) for operation in item.operations)
+    dependencies = "\n".join(f"- {value}" for value in item.depends_on) or "- none"
+    preserves = "\n".join(f"- {value}" for value in item.preserves) or "- none"
+    acceptance = "\n".join(f"- {value}" for value in item.acceptance) or "- none"
+    return "\n".join(
+        [
+            f"You are the bounded worker for Claim Plane swarm session {session_id}.",
+            f"Work item: {item.work_id} — {item.title}",
+            f"Goal: {item.goal}",
+            "",
+            "Declared scope proposal:",
+            operations,
+            "",
+            "Dependencies already required by the work graph:",
+            dependencies,
+            "",
+            "Preserve requirements:",
+            preserves,
+            "",
+            "Acceptance criteria:",
+            acceptance,
+            "",
+            "Work only in this managed Git worktree. Do not commit, merge, rebase, "
+            "switch branches, or modify .git, .codex, or .claim-plane control state.",
+            "Before the first repository mutation, follow the Claim Plane hook context "
+            "and admit one ChangeIntent. Its committed and contingent operations must "
+            "remain within the declared work-item scope above.",
+            "A denied mutation is not permission to broaden the task. Use only an "
+            "exact Claim Plane amendment ticket and provide the concrete dependency "
+            "reason.",
+            "Run the relevant acceptance checks. Finish with a concise summary of "
+            "changed files and tests. Process success is not verification; Claim Plane "
+            "verifies the result separately.",
+        ]
+    )
+
+
+def _run_directory(root: Path, session_id: str, run_id: str) -> Path:
+    safe_session = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+    return root / ".claim-plane" / "swarm" / "runs" / safe_session / run_id
+
+
+def _create_private_run_directory(root: Path, run_dir: Path) -> None:
+    trusted_root = root.resolve()
+    try:
+        relative = run_dir.relative_to(trusted_root)
+    except ValueError as exc:
+        raise ValueError(f"Codex run directory escapes repository root: {run_dir}") from exc
+    current = trusted_root
+    for part in relative.parts:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            current.mkdir(mode=0o700)
+            info = current.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError(
+                f"Codex run namespace must not contain a symlink: {current}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError(
+                f"Codex run namespace component is not a directory: {current}"
+            )
+    try:
+        run_dir.chmod(0o700)
+    except PermissionError as exc:
+        raise ValueError(f"cannot secure Codex run directory: {run_dir}") from exc
+
+
+def _usage_from_event(event: Mapping[str, Any]) -> CodexUsage:
+    if event.get("type") != "turn.completed":
+        return CodexUsage()
+    usage = event.get("usage")
+    if not isinstance(usage, Mapping):
+        return CodexUsage()
+    return CodexUsage(
+        input_tokens=int(usage.get("input_tokens") or 0),
+        cached_input_tokens=int(usage.get("cached_input_tokens") or 0),
+        output_tokens=int(usage.get("output_tokens") or 0),
+        reasoning_output_tokens=int(usage.get("reasoning_output_tokens") or 0),
+    )
+
+
+def _thread_reader(stream: TextIO, output: queue.Queue[str | None]) -> None:
+    try:
+        for line in stream:
+            output.put(line)
+    finally:
+        output.put(None)
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + _TERMINATE_GRACE_SECONDS
+    while process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if process.poll() is None:
+        try:
+            if os.name == "posix":
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except ProcessLookupError:
+            pass
+
+
+def _latest_states(records: list[CodexRunRecord]) -> dict[str, CodexRunRecord]:
+    latest: dict[str, CodexRunRecord] = {}
+    for record in sorted(records, key=lambda item: (item.attempt, item.created_at)):
+        latest[record.work_id] = record
+    return latest
+
+
+def _current_wave(
+    plan: ConcurrencyPlan, records: list[CodexRunRecord]
+) -> tuple[int, tuple[str, ...]]:
+    latest = _latest_states(records)
+    for wave in plan.waves:
+        incomplete = tuple(
+            work_id
+            for work_id in wave.work_ids
+            if latest.get(work_id) is None
+            or latest[work_id].state is not CodexRunState.SUCCEEDED
+        )
+        if incomplete:
+            return wave.index, incomplete
+    raise ValueError("all work items already have successful Codex executions")
+
+
+def _fair_share(
+    remaining: int | None, unfinished: int, requested: int | None
+) -> int | None:
+    if remaining is None:
+        return requested
+    if remaining <= 0:
+        raise ValueError("swarm token budget is exhausted")
+    share = max(1, remaining // max(1, unfinished))
+    if requested is None:
+        return share
+    if requested <= 0:
+        raise ValueError("requested token limit must be positive")
+    if requested > remaining:
+        raise ValueError("requested token limit exceeds remaining swarm budget")
+    return min(requested, share)
+
+
+def _parse_timestamp(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"invalid stored Codex-run timestamp: {value!r}") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"stored Codex-run timestamp has no timezone: {value!r}")
+    return parsed.astimezone(timezone.utc)
+
+
+def _remaining_wall_time(
+    maximum_seconds: int, existing_runs: list[CodexRunRecord]
+) -> int:
+    if not existing_runs:
+        return maximum_seconds
+    started = min(
+        _parse_timestamp(record.started_at or record.created_at)
+        for record in existing_runs
+    )
+    elapsed = max(0.0, (datetime.now(timezone.utc) - started).total_seconds())
+    return int(maximum_seconds - elapsed)
+
+
+def _reserve_run(
+    root: Path,
+    session_id: str,
+    work_id: str,
+    *,
+    executable: str,
+    model: str | None,
+    reasoning_effort: str | None,
+    timeout_seconds: int | None,
+    token_limit: int | None,
+) -> tuple[CodexRunRecord, WorkItem]:
+    identity = _repository_identity(root)
+    now = _utc_now()
+    with _store(root) as store:
+        session = store.require(session_id)
+        plan_data = store.get_concurrency_plan(session_id)
+        worktrees = store.list_worktrees(session_id)
+        existing_runs = store.list_codex_runs(session_id)
+    if session.repository_identity != identity:
+        raise ValueError("swarm session is bound to a different repository identity")
+    if session.state not in {SwarmSessionState.PLANNED, SwarmSessionState.RUNNING}:
+        raise ValueError(f"cannot start Codex while session is {session.state.value}")
+    if _resolve_commit(root, session.base_commit) != session.base_commit:
+        raise ValueError("swarm session base commit is no longer resolvable")
+    if plan_data is None:
+        raise ValueError("swarm session has no concurrency plan")
+    plan, _ = plan_data
+    if (
+        plan.graph_version != session.graph_version
+        or plan.graph_fingerprint != session.graph_fingerprint
+        or plan.budget_version != session.budget_version
+        or plan.budget_fingerprint != session.budget_fingerprint
+    ):
+        raise ValueError("stored concurrency plan is stale")
+    item = session.work_graph.item_map.get(work_id)
+    if item is None:
+        raise KeyError(f"unknown work item {work_id!r}")
+    by_work = {record.work_id: record for record in worktrees}
+    worktree = by_work.get(work_id)
+    if worktree is None:
+        raise ValueError(
+            f"work item {work_id!r} has no managed worktree; "
+            "run provision-worktrees first"
+        )
+    inspection_payload = inspect_swarm_worktrees(root, session_id)
+    inspection = next(
+        value
+        for value in inspection_payload["worktrees"]
+        if value["record"]["work_id"] == work_id
+    )
+    if inspection["health"] not in {
+        WorktreeHealth.READY.value,
+        WorktreeHealth.DIRTY.value,
+    }:
+        raise ValueError(
+            f"managed worktree {work_id!r} is not runnable: {inspection['health']}"
+        )
+    current_wave_index, runnable_ids = _current_wave(plan, existing_runs)
+    if work_id not in runnable_ids:
+        raise ValueError(
+            f"work item {work_id!r} is not runnable in current wave "
+            f"{current_wave_index}; runnable: {', '.join(runnable_ids)}"
+        )
+    latest = _latest_states(existing_runs)
+    missing_dependencies = [
+        dependency
+        for dependency in item.depends_on
+        if latest.get(dependency) is None
+        or latest[dependency].state is not CodexRunState.SUCCEEDED
+    ]
+    if missing_dependencies:
+        raise ValueError(
+            "work-item dependencies have not succeeded: "
+            + ", ".join(missing_dependencies)
+        )
+
+    policy = session.budget_policy
+    completed_tokens = sum(
+        record.usage.total_tokens for record in existing_runs if record.state.terminal
+    )
+    active_reserved = sum(
+        record.budget.token_limit or 0
+        for record in existing_runs
+        if record.state in _ACTIVE_STATES
+    )
+    max_tokens = policy.resources.max_total_tokens
+    remaining_tokens = (
+        None if max_tokens is None else max_tokens - completed_tokens - active_reserved
+    )
+    unfinished = sum(
+        1
+        for candidate in session.work_graph.work_items
+        if latest.get(candidate.work_id) is None
+        or latest[candidate.work_id].state is not CodexRunState.SUCCEEDED
+    )
+    run_token_limit = _fair_share(remaining_tokens, unfinished, token_limit)
+
+    remaining_seconds = _remaining_wall_time(
+        policy.resources.max_wall_time_seconds, existing_runs
+    )
+    if remaining_seconds <= 0:
+        raise ValueError("swarm wall-time budget is exhausted")
+    run_timeout = remaining_seconds if timeout_seconds is None else timeout_seconds
+    if run_timeout <= 0:
+        raise ValueError("timeout must be positive")
+    run_timeout = min(run_timeout, remaining_seconds)
+
+    run_id = f"run-{secrets.token_hex(12)}"
+    run_dir = _run_directory(root, session_id, run_id)
+    prompt = build_codex_worker_prompt(session_id, item)
+    final_path = run_dir / "final-message.txt"
+    command = [
+        executable,
+        "exec",
+        "--json",
+        "--sandbox",
+        "workspace-write",
+        "--ask-for-approval",
+        "never",
+        "--output-last-message",
+        str(final_path),
+    ]
+    if model:
+        command.extend(["--model", model])
+    if reasoning_effort:
+        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    command.append(prompt)
+    attempt = 1 + sum(1 for record in existing_runs if record.work_id == work_id)
+    budget = CodexRunBudget(
+        token_limit=run_token_limit,
+        wall_time_limit_seconds=run_timeout,
+        cost_limit_usd=policy.resources.max_cost_usd,
+    )
+    record = CodexRunRecord(
+        run_id=run_id,
+        session_id=session_id,
+        work_id=work_id,
+        attempt=attempt,
+        state=CodexRunState.RESERVED,
+        repository_identity=identity,
+        graph_version=session.graph_version,
+        graph_fingerprint=session.graph_fingerprint,
+        budget_version=session.budget_version,
+        budget_fingerprint=session.budget_fingerprint,
+        worktree_path=worktree.worktree_path,
+        branch=worktree.branch,
+        base_commit=worktree.base_commit,
+        command=tuple(command),
+        prompt_sha256=_sha256_text(prompt),
+        budget=budget,
+        run_directory=str(run_dir),
+        events_path=str(run_dir / "events.jsonl"),
+        stderr_path=str(run_dir / "stderr.log"),
+        final_message_path=str(final_path),
+        created_at=now,
+        updated_at=now,
+        metadata={
+            "wave_index": current_wave_index,
+            "codex_version": _codex_version(executable),
+            "cost_metering": "unavailable_from_codex_jsonl",
+        },
+    )
+    _create_private_run_directory(root, run_dir)
+    try:
+        (run_dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
+        (run_dir / "record.reserved.json").write_text(
+            json.dumps(record.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        with _store(root) as store:
+            record = store.reserve_codex_run(
+                record,
+                max_active=policy.workers.max_active,
+                max_active_per_work_item=policy.workers.max_active_per_work_item,
+                max_total_launches=policy.workers.max_total_launches,
+                max_attempts_per_work_item=1 + policy.retries.max_agent_restarts,
+                max_total_tokens=policy.resources.max_total_tokens,
+            )
+    except Exception:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        raise
+    return record, item
+
+
+def run_codex_work_item(
+    repo: str | Path,
+    session_id: str,
+    work_id: str,
+    *,
+    codex_binary: str = "codex",
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+    timeout_seconds: int | None = None,
+    token_limit: int | None = None,
+) -> CodexRunRecord:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    executable = _resolve_executable(codex_binary)
+    record, _ = _reserve_run(
+        root,
+        session_id,
+        work_id,
+        executable=executable,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        timeout_seconds=timeout_seconds,
+        token_limit=token_limit,
+    )
+    worktree = Path(record.worktree_path)
+    try:
+        init_project(worktree)
+        connect_codex(worktree)
+    except Exception as exc:
+        failed_at = _utc_now()
+        terminal = record.with_updates(
+            state=CodexRunState.SPAWN_FAILED,
+            updated_at=failed_at,
+            finished_at=failed_at,
+            termination_reason="connector_setup_failed",
+            error=str(exc),
+        )
+        with _store(root) as store:
+            store.update_codex_run(terminal)
+        Path(terminal.run_directory, "record.final.json").write_text(
+            json.dumps(terminal.to_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return terminal
+
+    started_at = _utc_now()
+    started_monotonic = time.monotonic()
+    stderr_path = Path(record.stderr_path)
+    events_path = Path(record.events_path)
+    usage = CodexUsage()
+    event_count = 0
+    last_event_type: str | None = None
+    thread_id: str | None = None
+    process: subprocess.Popen[str] | None = None
+    termination_reason: str | None = None
+    final_state = CodexRunState.FAILED
+    error: str | None = None
+    exit_code: int | None = None
+    try:
+        with stderr_path.open("w", encoding="utf-8") as stderr_handle, events_path.open(
+            "w", encoding="utf-8"
+        ) as events_handle:
+            process = subprocess.Popen(
+                list(record.command),
+                cwd=worktree,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=stderr_handle,
+                start_new_session=True,
+                env=os.environ.copy(),
+                bufsize=1,
+            )
+            running = record.with_updates(
+                state=CodexRunState.RUNNING,
+                started_at=started_at,
+                updated_at=started_at,
+                runner_pid=os.getpid(),
+                agent_pid=process.pid,
+            )
+            with _store(root) as store:
+                store.update_codex_run(running)
+            record = running
+            assert process.stdout is not None
+            output_queue: queue.Queue[str | None] = queue.Queue()
+            reader = threading.Thread(
+                target=_thread_reader,
+                args=(process.stdout, output_queue),
+                daemon=True,
+            )
+            reader.start()
+            stream_closed = False
+            deadline = started_monotonic + record.budget.wall_time_limit_seconds
+            while not stream_closed or process.poll() is None:
+                if time.monotonic() >= deadline and process.poll() is None:
+                    termination_reason = "wall_time_budget_exceeded"
+                    final_state = CodexRunState.TIMED_OUT
+                    _terminate_process(process)
+                with _store(root) as store:
+                    current = store.require_codex_run(record.run_id)
+                if current.state is CodexRunState.CANCELLING and process.poll() is None:
+                    termination_reason = "cancellation_requested"
+                    final_state = CodexRunState.CANCELLED
+                    _terminate_process(process)
+                try:
+                    line = output_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    stream_closed = True
+                    continue
+                events_handle.write(line)
+                events_handle.flush()
+                event_count += 1
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    last_event_type = "invalid_jsonl"
+                    continue
+                if not isinstance(event, Mapping):
+                    last_event_type = "invalid_event"
+                    continue
+                last_event_type = str(event.get("type") or "unknown")
+                if event.get("type") == "thread.started" and event.get("thread_id"):
+                    thread_id = str(event["thread_id"])
+                usage = usage.plus(_usage_from_event(event))
+                if (
+                    record.budget.token_limit is not None
+                    and usage.total_tokens > record.budget.token_limit
+                ):
+                    termination_reason = "token_budget_exceeded"
+                    final_state = CodexRunState.TOKEN_BUDGET_EXCEEDED
+                    if process.poll() is None:
+                        _terminate_process(process)
+            exit_code = process.wait()
+            if termination_reason is None:
+                with _store(root) as store:
+                    current = store.require_codex_run(record.run_id)
+                if current.state is CodexRunState.CANCELLING:
+                    final_state = CodexRunState.CANCELLED
+                    termination_reason = "cancellation_requested"
+                else:
+                    final_state = (
+                        CodexRunState.SUCCEEDED
+                        if exit_code == 0
+                        else CodexRunState.FAILED
+                    )
+                    if exit_code != 0:
+                        termination_reason = "codex_exit_nonzero"
+    except OSError as exc:
+        error = str(exc)
+        final_state = CodexRunState.SPAWN_FAILED
+        termination_reason = "spawn_failed"
+        if process is not None:
+            _terminate_process(process)
+            exit_code = process.poll()
+    except KeyboardInterrupt:
+        final_state = CodexRunState.CANCELLED
+        termination_reason = "runner_interrupted"
+        if process is not None:
+            _terminate_process(process)
+            exit_code = process.poll()
+    finished_at = _utc_now()
+    duration = max(0.0, time.monotonic() - started_monotonic)
+    intent_id: str | None = None
+    if thread_id:
+        try:
+            status = codex_intent_status(worktree, session_id=thread_id)
+            value = status.get("intent_id")
+            intent_id = str(value) if value else None
+        except (KeyError, ValueError, json.JSONDecodeError):
+            intent_id = None
+    terminal = record.with_updates(
+        state=final_state,
+        updated_at=finished_at,
+        finished_at=finished_at,
+        exit_code=exit_code,
+        duration_seconds=round(duration, 6),
+        usage=usage,
+        event_count=event_count,
+        last_event_type=last_event_type,
+        codex_thread_id=thread_id,
+        intent_id=intent_id,
+        termination_reason=termination_reason,
+        error=error,
+    )
+    with _store(root) as store:
+        store.update_codex_run(terminal)
+        store.bind_worktree_runner(
+            session_id,
+            work_id,
+            worker_id=terminal.run_id,
+            intent_id=intent_id,
+            updated_at=finished_at,
+        )
+    Path(terminal.run_directory, "record.final.json").write_text(
+        json.dumps(terminal.to_dict(), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return terminal
+
+
+def list_codex_runs(
+    repo: str | Path, session_id: str, *, work_id: str | None = None
+) -> list[CodexRunRecord]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    session_id = _validate_session_id(session_id)
+    with _store(root) as store:
+        session = store.require(session_id)
+        records = store.list_codex_runs(session_id, work_id=work_id)
+    if session.repository_identity != _repository_identity(root):
+        raise ValueError("swarm session is bound to a different repository identity")
+    return records
+
+
+def get_codex_run(repo: str | Path, run_id: str) -> CodexRunRecord:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    with _store(root) as store:
+        return store.require_codex_run(run_id)
+
+
+def cancel_codex_run(repo: str | Path, run_id: str) -> CodexRunRecord:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    now = _utc_now()
+    with _store(root) as store:
+        record = store.require_codex_run(run_id)
+        if record.state.terminal:
+            return record
+        cancelling = replace(
+            record,
+            state=CodexRunState.CANCELLING,
+            updated_at=now,
+            termination_reason="cancellation_requested",
+        )
+        store.update_codex_run(cancelling)
+    pid = cancelling.agent_pid
+    if pid is not None:
+        try:
+            if os.name == "posix":
+                os.killpg(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    return cancelling
