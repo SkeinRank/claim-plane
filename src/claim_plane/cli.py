@@ -49,6 +49,7 @@ from claim_plane.runtime import (
 from claim_plane.swarm import (
     admit_swarm_session,
     cancel_codex_run,
+    cancel_swarm_session,
     cleanup_swarm_worktrees,
     create_swarm_session,
     get_codex_run,
@@ -58,16 +59,22 @@ from claim_plane.swarm import (
     get_swarm_merge_queue,
     get_swarm_session,
     get_swarm_verification,
+    inspect_swarm_recovery,
     inspect_swarm_worktrees,
     list_codex_runs,
+    list_swarm_recovery_events,
     list_swarm_sessions,
+    pause_swarm_session,
     plan_swarm_concurrency,
     plan_swarm_merge_queue,
     integrate_next_swarm_result,
     drain_swarm_merge_queue,
     provision_swarm_worktrees,
+    recover_swarm_session,
+    replace_codex_worker,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
+    resume_swarm_session,
     run_codex_work_item,
     validate_budget_policy,
     validate_concurrency_plan,
@@ -828,6 +835,122 @@ def cmd_swarm_cancel_codex(args: argparse.Namespace) -> int:
     else:
         print(f"Codex run {record.run_id}: {record.state.value}.")
     return 0
+
+
+def cmd_swarm_recovery_status(args: argparse.Namespace) -> int:
+    result = inspect_swarm_recovery(
+        args.repo, args.session_id, stale_after_seconds=args.stale_after
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(
+            f"Recovery status for {result['session_id']}: "
+            f"session={result['session_state']}"
+        )
+        if not result["active_runs"]:
+            print("  no active worker records")
+        for item in result["active_runs"]:
+            print(
+                f"  {item['run_id']}  {item['work_id']:20}  "
+                f"{item['health']:9}  {item['detail']}"
+            )
+    unhealthy = result["summary"]["stale"] + result["summary"]["lost"]
+    return 0 if unhealthy == 0 else 2
+
+
+def cmd_swarm_recover(args: argparse.Namespace) -> int:
+    result = recover_swarm_session(
+        args.repo,
+        args.session_id,
+        stale_after_seconds=args.stale_after,
+        terminate_stale=args.terminate_stale,
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(
+            f"Recovered {result['recovered_count']} run(s) for "
+            f"{result['session_id']}; session={result['session_state']}."
+        )
+        if result["stale_requires_termination"]:
+            print(
+                "Live processes with expired leases were left untouched: "
+                + ", ".join(result["stale_requires_termination"])
+            )
+            print("Repeat with --terminate-stale to reclaim them explicitly.")
+    return 0 if not result["stale_requires_termination"] else 2
+
+
+def cmd_swarm_pause(args: argparse.Namespace) -> int:
+    result = pause_swarm_session(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(f"Swarm session {args.session_id} paused.")
+    return 0
+
+
+def cmd_swarm_resume(args: argparse.Namespace) -> int:
+    result = resume_swarm_session(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(
+            f"Swarm session {args.session_id}: "
+            f"{result['session']['state']}."
+        )
+    return 0
+
+
+def cmd_swarm_cancel(args: argparse.Namespace) -> int:
+    result = cancel_swarm_session(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(
+            f"Swarm session {args.session_id} cancelled; "
+            f"signalled {len(result['signalled_run_ids'])} active worker(s)."
+        )
+    return 0
+
+
+def cmd_swarm_recovery_events(args: argparse.Namespace) -> int:
+    events = list_swarm_recovery_events(args.repo, args.session_id)
+    payload = [event.to_dict() for event in events]
+    if args.json or args.out:
+        _write_json(payload, args.out)
+    elif not events:
+        print("No recovery events.")
+    else:
+        for event in events:
+            target = event.run_id or event.work_id or "-"
+            print(f"{event.created_at}  {event.action:24}  {target}")
+    return 0
+
+
+def cmd_swarm_replace_codex(args: argparse.Namespace) -> int:
+    record = replace_codex_worker(
+        args.repo,
+        args.session_id,
+        args.work_id,
+        replaced_run_id=args.run_id,
+        reset_worktree=args.reset_worktree,
+        codex_binary=args.codex_bin,
+        model=args.model,
+        reasoning_effort=args.reasoning_effort,
+        timeout_seconds=args.timeout,
+        token_limit=args.max_tokens,
+    )
+    if args.json or args.out:
+        _write_json(record.to_dict(), args.out)
+    else:
+        print(
+            f"Replacement run {record.run_id}: {record.state.value} "
+            f"for {record.session_id}/{record.work_id}."
+        )
+        print(f"Replaced: {record.replacement_of_run_id}")
+    return 0 if record.state.value == "succeeded" else 2
 
 
 def cmd_claim(args: argparse.Namespace) -> int:
@@ -1771,6 +1894,83 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_cancel_codex.add_argument("--json", action="store_true")
     swarm_cancel_codex.add_argument("--out")
     swarm_cancel_codex.set_defaults(func=cmd_swarm_cancel_codex)
+
+    swarm_recovery_status = swarm_sub.add_parser(
+        "recovery-status",
+        help="Inspect active worker leases, processes, and orphan recovery state.",
+    )
+    swarm_recovery_status.add_argument("session_id")
+    swarm_recovery_status.add_argument("--stale-after", type=int, default=30)
+    swarm_recovery_status.add_argument("--repo", default=".")
+    swarm_recovery_status.add_argument("--json", action="store_true")
+    swarm_recovery_status.add_argument("--out")
+    swarm_recovery_status.set_defaults(func=cmd_swarm_recovery_status)
+
+    swarm_recover = swarm_sub.add_parser(
+        "recover",
+        help="Finalize provably lost workers and reopen interrupted verification.",
+    )
+    swarm_recover.add_argument("session_id")
+    swarm_recover.add_argument("--stale-after", type=int, default=30)
+    swarm_recover.add_argument("--terminate-stale", action="store_true")
+    swarm_recover.add_argument("--repo", default=".")
+    swarm_recover.add_argument("--json", action="store_true")
+    swarm_recover.add_argument("--out")
+    swarm_recover.set_defaults(func=cmd_swarm_recover)
+
+    swarm_pause = swarm_sub.add_parser(
+        "pause", help="Pause dispatch after all active workers have stopped."
+    )
+    swarm_pause.add_argument("session_id")
+    swarm_pause.add_argument("--repo", default=".")
+    swarm_pause.add_argument("--json", action="store_true")
+    swarm_pause.add_argument("--out")
+    swarm_pause.set_defaults(func=cmd_swarm_pause)
+
+    swarm_resume = swarm_sub.add_parser(
+        "resume", help="Resume a paused swarm without repeating completed work."
+    )
+    swarm_resume.add_argument("session_id")
+    swarm_resume.add_argument("--repo", default=".")
+    swarm_resume.add_argument("--json", action="store_true")
+    swarm_resume.add_argument("--out")
+    swarm_resume.set_defaults(func=cmd_swarm_resume)
+
+    swarm_cancel = swarm_sub.add_parser(
+        "cancel", help="Cancel a swarm session and signal its active workers."
+    )
+    swarm_cancel.add_argument("session_id")
+    swarm_cancel.add_argument("--repo", default=".")
+    swarm_cancel.add_argument("--json", action="store_true")
+    swarm_cancel.add_argument("--out")
+    swarm_cancel.set_defaults(func=cmd_swarm_cancel)
+
+    swarm_recovery_events = swarm_sub.add_parser(
+        "recovery-events", help="List durable recovery and replacement events."
+    )
+    swarm_recovery_events.add_argument("session_id")
+    swarm_recovery_events.add_argument("--repo", default=".")
+    swarm_recovery_events.add_argument("--json", action="store_true")
+    swarm_recovery_events.add_argument("--out")
+    swarm_recovery_events.set_defaults(func=cmd_swarm_recovery_events)
+
+    swarm_replace_codex = swarm_sub.add_parser(
+        "replace-codex",
+        help="Start a fresh worker after rechecking current swarm authority.",
+    )
+    swarm_replace_codex.add_argument("session_id")
+    swarm_replace_codex.add_argument("--work-id", required=True)
+    swarm_replace_codex.add_argument("--run-id", required=True)
+    swarm_replace_codex.add_argument("--reset-worktree", action="store_true")
+    swarm_replace_codex.add_argument("--codex-bin", default="codex")
+    swarm_replace_codex.add_argument("--model")
+    swarm_replace_codex.add_argument("--reasoning-effort")
+    swarm_replace_codex.add_argument("--timeout", type=int)
+    swarm_replace_codex.add_argument("--max-tokens", type=int)
+    swarm_replace_codex.add_argument("--repo", default=".")
+    swarm_replace_codex.add_argument("--json", action="store_true")
+    swarm_replace_codex.add_argument("--out")
+    swarm_replace_codex.set_defaults(func=cmd_swarm_replace_codex)
 
     claim = sub.add_parser(
         "claim", help="Request a legacy fine-grained artifact claim."

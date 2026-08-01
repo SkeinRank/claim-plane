@@ -38,6 +38,7 @@ class CodexRunState(str, Enum):
     CANCELLED = "cancelled"
     TOKEN_BUDGET_EXCEEDED = "token_budget_exceeded"
     SPAWN_FAILED = "spawn_failed"
+    LOST = "lost"
 
     @property
     def terminal(self) -> bool:
@@ -48,6 +49,7 @@ class CodexRunState(str, Enum):
             CodexRunState.CANCELLED,
             CodexRunState.TOKEN_BUDGET_EXCEEDED,
             CodexRunState.SPAWN_FAILED,
+            CodexRunState.LOST,
         }
 
     @property
@@ -197,6 +199,10 @@ class CodexRunRecord:
     intent_id: str | None = None
     termination_reason: str | None = None
     error: str | None = None
+    heartbeat_at: str | None = None
+    lease_expires_at: str | None = None
+    replacement_of_run_id: str | None = None
+    recovery_generation: int = 0
     metadata: Mapping[str, Any] = field(default_factory=dict)
     protocol: str = SWARM_CODEX_RUN_PROTOCOL
 
@@ -264,6 +270,17 @@ class CodexRunRecord:
             object.__setattr__(self, "usage", CodexUsage.from_dict(self.usage))
         if self.event_count < 0:
             raise ValueError("event_count must be non-negative")
+        if self.recovery_generation < 0:
+            raise ValueError("recovery_generation must be non-negative")
+        if self.replacement_of_run_id is not None:
+            replacement = _clean(
+                self.replacement_of_run_id, field_name="replacement_of_run_id"
+            )
+            if not _RUN_ID_RE.fullmatch(replacement):
+                raise ValueError("replacement_of_run_id is not safe")
+            if replacement == self.run_id:
+                raise ValueError("a run cannot replace itself")
+            object.__setattr__(self, "replacement_of_run_id", replacement)
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     def with_updates(self, **changes: Any) -> "CodexRunRecord":
@@ -307,6 +324,10 @@ class CodexRunRecord:
             "intent_id": self.intent_id,
             "termination_reason": self.termination_reason,
             "error": self.error,
+            "heartbeat_at": self.heartbeat_at,
+            "lease_expires_at": self.lease_expires_at,
+            "replacement_of_run_id": self.replacement_of_run_id,
+            "recovery_generation": self.recovery_generation,
             "metadata": dict(self.metadata),
         }
 
@@ -374,5 +395,19 @@ class CodexRunRecord:
                 else str(data["termination_reason"])
             ),
             error=None if data.get("error") is None else str(data["error"]),
+            heartbeat_at=(
+                None if data.get("heartbeat_at") is None else str(data["heartbeat_at"])
+            ),
+            lease_expires_at=(
+                None
+                if data.get("lease_expires_at") is None
+                else str(data["lease_expires_at"])
+            ),
+            replacement_of_run_id=(
+                None
+                if data.get("replacement_of_run_id") is None
+                else str(data["replacement_of_run_id"])
+            ),
+            recovery_generation=int(data.get("recovery_generation") or 0),
             metadata=dict(data.get("metadata") or {}),
         )

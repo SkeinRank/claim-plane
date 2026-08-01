@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-08-01
+
+### Added
+
+- Add `claim-plane.swarm-recovery.v1`, durable recovery events, worker heartbeat leases, orphan inspection, and fail-closed crash classification for reserved, running, and cancelling Codex runs.
+- Add `swarm recovery-status`, `swarm recover`, and `swarm recovery-events` commands for detecting lost processes, reclaiming explicitly stale leases, reopening interrupted verification, and auditing recovery actions.
+- Add `swarm pause`, `swarm resume`, and `swarm cancel` session controls without repeating already completed or integrated work.
+- Add `swarm replace-codex`, which creates a fresh run and Codex thread only after current admission, scheduler, retry, launch, budget, dependency, and managed-worktree checks pass again.
+- Add schema-v9 migration, recovery JSON Schema, run replacement lineage, recovery generations, and regression coverage for idempotent recovery, explicit worktree reset, interrupted verification, and durable session control.
+
+### Changed
+
+- Persist heartbeat and lease expiry on active Codex runs and classify a provably missing process as terminal `lost`, allowing the existing retry scheduler to release a bounded replacement attempt.
+- Refuse to let a replacement worker silently inherit predecessor edits or commits; contaminated managed worktrees require explicit `--reset-worktree` and are restored to the predecessor's controlled execution base.
+- Keep a live process with an expired heartbeat fail-closed by default. Recovery reports it as stale and requires explicit `--terminate-stale` before authority can be reclaimed.
+- Preserve the distinction between recovery, execution success, integration, and verification: a recovered or replacement worker still must pass normal merge and final `SWARM VERIFIED` gates.
+
 ## [0.23.0] — 2026-08-01
 
 ### Added

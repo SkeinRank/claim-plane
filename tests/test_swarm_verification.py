@@ -311,5 +311,5 @@ def test_database_migrates_to_verification_schema(tmp_path: Path) -> None:
         )
     }
     connection.close()
-    assert version == 8
+    assert version == 9
     assert "swarm_verifications" in tables

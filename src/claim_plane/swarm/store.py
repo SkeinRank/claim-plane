@@ -22,7 +22,7 @@ from claim_plane.swarm.scheduler import compute_scheduler_snapshot
 from claim_plane.swarm.worktrees import ManagedWorktree
 from claim_plane.swarm.verification import SwarmVerificationReport
 
-_SCHEMA_VERSION = 8
+_SCHEMA_VERSION = 9
 
 
 class SwarmSessionStore:
@@ -209,6 +209,25 @@ class SwarmSessionStore:
                     ON DELETE CASCADE
             )
             """
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS swarm_recovery_events (
+                event_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                run_id TEXT,
+                work_id TEXT,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES swarm_sessions(session_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_swarm_recovery_events_session "
+            "ON swarm_recovery_events(session_id, created_at, event_id)"
         )
         if schema_version < _SCHEMA_VERSION:
             self._migrate_payloads()
@@ -1526,6 +1545,173 @@ class SwarmSessionStore:
             )
             self._connection.commit()
             return updated
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def set_session_state(
+        self,
+        session_id: str,
+        *,
+        target: SwarmSessionState,
+        allowed_from: set[SwarmSessionState],
+        updated_at: str,
+    ) -> SwarmSession:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session = self.require(session_id)
+            if session.state is target:
+                self._connection.commit()
+                return session
+            if session.state not in allowed_from:
+                allowed = ", ".join(sorted(state.value for state in allowed_from))
+                raise ValueError(
+                    f"cannot transition swarm session from {session.state.value} "
+                    f"to {target.value}; allowed source states: {allowed}"
+                )
+            updated = replace(session, state=target, updated_at=updated_at)
+            self._connection.execute(
+                "UPDATE swarm_sessions SET state = ?, payload_json = ?, updated_at = ? "
+                "WHERE session_id = ?",
+                (target.value, self._payload(updated), updated_at, session_id),
+            )
+            self._connection.commit()
+            return updated
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def recover_codex_run(
+        self,
+        record: CodexRunRecord,
+        *,
+        expected_updated_at: str,
+    ) -> CodexRunRecord:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._connection.execute(
+                "SELECT state, payload_json FROM swarm_codex_runs WHERE run_id = ?",
+                (record.run_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown Codex run {record.run_id!r}")
+            payload: Any = json.loads(str(row["payload_json"]))
+            if not isinstance(payload, dict):
+                raise ValueError("stored Codex run is invalid")
+            current = CodexRunRecord.from_dict(payload)
+            if current.state.terminal:
+                self._connection.commit()
+                return current
+            if current.updated_at != expected_updated_at:
+                raise ValueError("Codex run heartbeat changed during recovery")
+            self._connection.execute(
+                "UPDATE swarm_codex_runs SET state = ?, token_limit = ?, "
+                "total_tokens = ?, duration_seconds = ?, payload_json = ?, "
+                "updated_at = ? "
+                "WHERE run_id = ?",
+                (
+                    record.state.value,
+                    record.budget.token_limit,
+                    record.usage.total_tokens,
+                    record.duration_seconds,
+                    self._codex_run_payload(record),
+                    record.updated_at,
+                    record.run_id,
+                ),
+            )
+            self._connection.commit()
+            return record
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def save_recovery_event(self, payload: dict[str, Any]) -> bool:
+        raw = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        with self._connection:
+            cursor = self._connection.execute(
+                "INSERT OR IGNORE INTO swarm_recovery_events "
+                "(event_id, session_id, action, run_id, work_id, payload_json, "
+                "created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    payload["event_id"],
+                    payload["session_id"],
+                    payload["action"],
+                    payload.get("run_id"),
+                    payload.get("work_id"),
+                    raw,
+                    payload["created_at"],
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def list_recovery_events(self, session_id: str) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT payload_json FROM swarm_recovery_events "
+            "WHERE session_id = ? ORDER BY created_at, event_id",
+            (session_id,),
+        ).fetchall()
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            payload: Any = json.loads(str(row["payload_json"]))
+            if not isinstance(payload, dict):
+                raise ValueError("stored swarm recovery event is invalid")
+            events.append(payload)
+        return events
+
+    def request_session_cancellation(
+        self, session_id: str, *, updated_at: str
+    ) -> tuple[SwarmSession, list[CodexRunRecord]]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session = self.require(session_id)
+            if session.state is SwarmSessionState.COMPLETED:
+                raise ValueError("cannot cancel a completed swarm session")
+            cancelled = replace(
+                session, state=SwarmSessionState.CANCELLED, updated_at=updated_at
+            )
+            self._connection.execute(
+                "UPDATE swarm_sessions SET state = ?, payload_json = ?, updated_at = ? "
+                "WHERE session_id = ?",
+                (
+                    SwarmSessionState.CANCELLED.value,
+                    self._payload(cancelled),
+                    updated_at,
+                    session_id,
+                ),
+            )
+            rows = self._connection.execute(
+                "SELECT payload_json FROM swarm_codex_runs WHERE session_id = ? "
+                "AND state IN ('reserved', 'running', 'cancelling')",
+                (session_id,),
+            ).fetchall()
+            updated_records: list[CodexRunRecord] = []
+            for row in rows:
+                payload: Any = json.loads(str(row["payload_json"]))
+                if not isinstance(payload, dict):
+                    raise ValueError("stored Codex run is invalid")
+                current = CodexRunRecord.from_dict(payload)
+                cancelling = replace(
+                    current,
+                    state=CodexRunState.CANCELLING,
+                    updated_at=updated_at,
+                    termination_reason="swarm_cancellation_requested",
+                )
+                self._connection.execute(
+                    "UPDATE swarm_codex_runs SET state = ?, payload_json = ?, "
+                    "updated_at = ? WHERE run_id = ?",
+                    (
+                        cancelling.state.value,
+                        self._codex_run_payload(cancelling),
+                        updated_at,
+                        cancelling.run_id,
+                    ),
+                )
+                updated_records.append(cancelling)
+            self._connection.commit()
+            return cancelled, updated_records
         except Exception:
             self._connection.rollback()
             raise

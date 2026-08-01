@@ -352,3 +352,58 @@ scope + contracts + preserves + acceptance + snapshot integrity
 
 `SWARM VERIFIED` still does not advance the user's target branch. Publication or pull-request creation remains an explicit later operator action.
 
+
+## Recovery and worker replacement
+
+Version 0.24.0 adds a recovery boundary for interrupted swarm execution. Active Codex runs publish a heartbeat lease while the runner process is alive. Claim Plane distinguishes four operational conditions:
+
+- `healthy`: the agent process exists and its runner lease is current;
+- `reserved`: the launch reservation is still inside its spawn window;
+- `stale`: a process still exists but the controlling heartbeat expired;
+- `lost`: a reservation expired before spawn or the active agent process no longer exists.
+
+Inspect and recover a session with:
+
+```bash
+claim-plane swarm recovery-status <session-id>
+claim-plane swarm recover <session-id>
+```
+
+A live process with an expired lease is not terminated automatically. Reclaiming that authority requires an explicit operator decision:
+
+```bash
+claim-plane swarm recover <session-id> --terminate-stale
+```
+
+Every recovery action is recorded under `claim-plane.swarm-recovery.v1` and can be inspected with:
+
+```bash
+claim-plane swarm recovery-events <session-id>
+```
+
+Session dispatch can be paused only after active workers stop. Resume preserves successful runs, integrated prerequisites, merge-queue state, and evidence already stored:
+
+```bash
+claim-plane swarm pause <session-id>
+claim-plane swarm resume <session-id>
+claim-plane swarm cancel <session-id>
+```
+
+A replacement worker is a new execution identity. It does not inherit the predecessor's Codex thread or session-bound intent, and it must pass the current shared admission, scheduler, dependency, retry, launch, and budget checks again:
+
+```bash
+claim-plane swarm replace-codex <session-id> \
+  --work-id implementation \
+  --run-id run-previous
+```
+
+Claim Plane also refuses to silently continue from partial predecessor edits or commits. An operator may explicitly discard those changes and return the owned worktree to the predecessor's controlled execution base:
+
+```bash
+claim-plane swarm replace-codex <session-id> \
+  --work-id implementation \
+  --run-id run-previous \
+  --reset-worktree
+```
+
+Recovery does not produce verification. A replacement must still execute, enter the deterministic merge queue, and pass final two-level swarm verification before the session can become `SWARM VERIFIED`.

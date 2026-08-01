@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping, TextIO
 
@@ -54,10 +54,17 @@ _ACTIVE_STATES = {
     CodexRunState.CANCELLING,
 }
 _TERMINATE_GRACE_SECONDS = 5.0
+_HEARTBEAT_INTERVAL_SECONDS = 1.0
+_RUN_LEASE_SECONDS = 15
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _lease_expires_at(*, seconds: int = _RUN_LEASE_SECONDS) -> str:
+    expires = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return expires.isoformat().replace("+00:00", "Z")
 
 
 def _sha256_text(value: str) -> str:
@@ -279,6 +286,7 @@ def _reserve_run(
     reasoning_effort: str | None,
     timeout_seconds: int | None,
     token_limit: int | None,
+    replacement_of_run_id: str | None = None,
 ) -> tuple[CodexRunRecord, WorkItem]:
     identity = _repository_identity(root)
     now = _utc_now()
@@ -290,8 +298,25 @@ def _reserve_run(
         worktrees = store.list_worktrees(session_id)
         existing_runs = store.list_codex_runs(session_id)
         merge_queue_data = store.get_merge_queue(session_id)
+        replacement_source = (
+            None
+            if replacement_of_run_id is None
+            else store.require_codex_run(replacement_of_run_id)
+        )
     if session.repository_identity != identity:
         raise ValueError("swarm session is bound to a different repository identity")
+    if replacement_source is not None:
+        if (
+            replacement_source.session_id != session_id
+            or replacement_source.work_id != work_id
+        ):
+            raise ValueError(
+                "replacement source is bound to a different session or work item"
+            )
+        if not replacement_source.state.terminal:
+            raise ValueError("replacement source must be terminal")
+        if replacement_source.state is CodexRunState.SUCCEEDED:
+            raise ValueError("a succeeded worker cannot be replaced")
     if session.state not in {SwarmSessionState.PLANNED, SwarmSessionState.RUNNING}:
         raise ValueError(f"cannot start Codex while session is {session.state.value}")
     if _resolve_commit(root, session.base_commit) != session.base_commit:
@@ -500,6 +525,14 @@ def _reserve_run(
         final_message_path=str(final_path),
         created_at=now,
         updated_at=now,
+        heartbeat_at=now,
+        lease_expires_at=_lease_expires_at(),
+        replacement_of_run_id=replacement_of_run_id,
+        recovery_generation=(
+            0
+            if replacement_source is None
+            else replacement_source.recovery_generation + 1
+        ),
         metadata={
             "shared_admission_fingerprint": shared_admission.fingerprint(),
             "effective_dependencies": list(
@@ -508,6 +541,7 @@ def _reserve_run(
             "scheduler_snapshot_fingerprint": scheduler.fingerprint(),
             "codex_version": _codex_version(executable),
             "cost_metering": "unavailable_from_codex_jsonl",
+            "replacement_requires_fresh_admission": replacement_source is not None,
         },
     )
     _create_private_run_directory(root, run_dir)
@@ -543,6 +577,7 @@ def run_codex_work_item(
     reasoning_effort: str | None = None,
     timeout_seconds: int | None = None,
     token_limit: int | None = None,
+    replacement_of_run_id: str | None = None,
 ) -> CodexRunRecord:
     root = resolve_repository_root(repo)
     _require_initialized(root)
@@ -557,6 +592,7 @@ def run_codex_work_item(
         reasoning_effort=reasoning_effort,
         timeout_seconds=timeout_seconds,
         token_limit=token_limit,
+        replacement_of_run_id=replacement_of_run_id,
     )
     worktree = Path(record.worktree_path)
     try:
@@ -570,6 +606,8 @@ def run_codex_work_item(
             finished_at=failed_at,
             termination_reason="connector_setup_failed",
             error=str(exc),
+            heartbeat_at=failed_at,
+            lease_expires_at=None,
         )
         with _store(root) as store:
             store.update_codex_run(terminal)
@@ -612,6 +650,8 @@ def run_codex_work_item(
                 updated_at=started_at,
                 runner_pid=os.getpid(),
                 agent_pid=process.pid,
+                heartbeat_at=started_at,
+                lease_expires_at=_lease_expires_at(),
             )
             with _store(root) as store:
                 store.update_codex_run(running)
@@ -626,7 +666,30 @@ def run_codex_work_item(
             reader.start()
             stream_closed = False
             deadline = started_monotonic + record.budget.wall_time_limit_seconds
+            last_heartbeat = started_monotonic
             while not stream_closed or process.poll() is None:
+                if time.monotonic() - last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                    heartbeat_at = _utc_now()
+                    heartbeat = record.with_updates(
+                        state=CodexRunState.RUNNING,
+                        updated_at=heartbeat_at,
+                        heartbeat_at=heartbeat_at,
+                        lease_expires_at=_lease_expires_at(),
+                        usage=usage,
+                        event_count=event_count,
+                        last_event_type=last_event_type,
+                        codex_thread_id=thread_id,
+                    )
+                    with _store(root) as store:
+                        current = store.require_codex_run(record.run_id)
+                        if current.state is CodexRunState.CANCELLING:
+                            heartbeat = heartbeat.with_updates(
+                                state=CodexRunState.CANCELLING,
+                                termination_reason=current.termination_reason,
+                            )
+                        store.update_codex_run(heartbeat)
+                    record = heartbeat
+                    last_heartbeat = time.monotonic()
                 if time.monotonic() >= deadline and process.poll() is None:
                     termination_reason = "wall_time_budget_exceeded"
                     final_state = CodexRunState.TIMED_OUT
@@ -718,6 +781,8 @@ def run_codex_work_item(
         intent_id=intent_id,
         termination_reason=termination_reason,
         error=error,
+        heartbeat_at=finished_at,
+        lease_expires_at=None,
     )
     with _store(root) as store:
         store.update_codex_run(terminal)

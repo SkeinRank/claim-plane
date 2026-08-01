@@ -225,3 +225,7 @@ Governed mode is the default. Admission requires an exact base commit before a w
 
 `claim-plane.swarm-verification.v1` records final evidence for a completed swarm integration. It binds the report to the repository identity, pinned base, graph and budget versions and fingerprints, shared-admission fingerprint, deterministic merge-queue fingerprint, and integration head. The report contains per-work-item attribution, acceptance outcomes, root integration findings, snapshot-integrity evidence, and the final `verified` or `failed` status. The normative JSON Schema is `schemas/swarm-verification.schema.json`.
 
+
+## Swarm recovery
+
+`claim-plane.swarm-recovery.v1` records operator-visible recovery, pause, resume, cancellation, and replacement events. Active Codex runs carry a heartbeat and lease expiry. A missing process or expired pre-spawn reservation may be finalized as `lost`; a still-live process with an expired lease remains `stale` until an operator explicitly requests termination. Replacement runs have fresh run and Codex thread identity, reference the predecessor through `replacement_of_run_id`, and must pass current admission, scheduler, retry, launch, budget, dependency, and managed-worktree checks. The normative JSON Schema is `schemas/swarm-recovery.schema.json`.
