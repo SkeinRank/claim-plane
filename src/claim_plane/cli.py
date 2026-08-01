@@ -48,11 +48,14 @@ from claim_plane.runtime import (
 )
 from claim_plane.swarm import (
     create_swarm_session,
+    get_swarm_concurrency_plan,
     get_swarm_session,
     list_swarm_sessions,
+    plan_swarm_concurrency,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
     validate_budget_policy,
+    validate_concurrency_plan,
     validate_work_graph,
 )
 
@@ -375,6 +378,61 @@ def cmd_swarm_validate(args: argparse.Namespace) -> int:
     result = {"valid": True, **validate_work_graph(payload)}
     _write_json(result)
     return 0
+
+
+
+
+def cmd_swarm_plan(args: argparse.Namespace) -> int:
+    result = plan_swarm_concurrency(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        action = "Stored" if result["created"] else "Reused"
+        print(
+            f"{action} concurrency plan v{result['plan_version']} for "
+            f"{result['session_id']}."
+        )
+        print(
+            f"Status: {summary['status']}; waves={summary['wave_count']}; "
+            f"peak={summary['peak_concurrency']}/"
+            f"{summary['max_active_workers']}"
+        )
+        for index, wave in enumerate(summary["waves"], start=1):
+            print(f"  wave {index}: {', '.join(wave)}")
+        if summary["serialized_pairs"]:
+            print(f"Serialized pairs: {summary['serialized_pairs']}")
+        if summary["denied_pairs"]:
+            print(f"Denied pairs: {summary['denied_pairs']}")
+    return 0 if result["summary"]["status"] == "ready" else 2
+
+
+def cmd_swarm_concurrency(args: argparse.Namespace) -> int:
+    result = get_swarm_concurrency_plan(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        print(
+            f"Concurrency plan v{result['plan_version']}: "
+            f"{summary['status']}"
+        )
+        print(
+            f"Waves: {summary['wave_count']}; "
+            f"peak={summary['peak_concurrency']}/"
+            f"{summary['max_active_workers']}"
+        )
+        for index, wave in enumerate(summary["waves"], start=1):
+            print(f"  wave {index}: {', '.join(wave)}")
+    return 0 if result["summary"]["status"] == "ready" else 2
+
+
+def cmd_swarm_validate_concurrency(args: argparse.Namespace) -> int:
+    graph = _read_json(args.graph)
+    policy = _read_json(args.policy) if args.policy else None
+    result = validate_concurrency_plan(graph, policy)
+    _write_json(result)
+    return 0 if result["summary"]["status"] == "ready" else 2
 
 
 def cmd_swarm_budget(args: argparse.Namespace) -> int:
@@ -1123,6 +1181,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     swarm_validate.add_argument("--graph", required=True)
     swarm_validate.set_defaults(func=cmd_swarm_validate)
+
+
+    swarm_plan = swarm_sub.add_parser(
+        "plan",
+        help="Compute and persist deterministic adaptive execution waves.",
+    )
+    swarm_plan.add_argument("session_id")
+    swarm_plan.add_argument("--repo", default=".")
+    swarm_plan.add_argument("--json", action="store_true")
+    swarm_plan.add_argument("--out")
+    swarm_plan.set_defaults(func=cmd_swarm_plan)
+
+    swarm_concurrency = swarm_sub.add_parser(
+        "concurrency",
+        help="Inspect the persisted adaptive concurrency plan.",
+    )
+    swarm_concurrency.add_argument("session_id")
+    swarm_concurrency.add_argument("--repo", default=".")
+    swarm_concurrency.add_argument("--json", action="store_true")
+    swarm_concurrency.add_argument("--out")
+    swarm_concurrency.set_defaults(func=cmd_swarm_concurrency)
+
+    swarm_validate_concurrency = swarm_sub.add_parser(
+        "validate-concurrency",
+        help="Preview adaptive waves for a standalone graph and policy.",
+    )
+    swarm_validate_concurrency.add_argument("--graph", required=True)
+    swarm_validate_concurrency.add_argument("--policy")
+    swarm_validate_concurrency.set_defaults(func=cmd_swarm_validate_concurrency)
 
     swarm_budget = swarm_sub.add_parser(
         "budget", help="Export the versioned budget policy for one swarm session."

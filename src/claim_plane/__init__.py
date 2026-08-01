@@ -56,7 +56,13 @@ from claim_plane.runtime import (
 )
 from claim_plane.swarm import (
     ConcurrencyBudget,
+    ConcurrencyConstraint,
+    ConcurrencyConstraintAction,
+    ConcurrencyConstraintReason,
+    ConcurrencyPlan,
+    ConcurrencyPlanStatus,
     ConflictPolicy,
+    ExecutionWave,
     IntegrationTarget,
     ResourceBudget,
     RetryBudget,
@@ -84,7 +90,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -105,7 +111,13 @@ __all__ = [
     "GovernancePolicy",
     "IntegrationFinding",
     "ConcurrencyBudget",
+    "ConcurrencyConstraint",
+    "ConcurrencyConstraintAction",
+    "ConcurrencyConstraintReason",
+    "ConcurrencyPlan",
+    "ConcurrencyPlanStatus",
     "ConflictPolicy",
+    "ExecutionWave",
     "IntegrationTarget",
     "ResourceBudget",
     "RetryBudget",

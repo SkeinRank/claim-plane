@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from claim_plane.swarm.budget import SwarmBudgetPolicy
+from claim_plane.swarm.concurrency import compute_concurrency_plan
 from claim_plane.swarm.models import (
     SWARM_SESSION_SPEC_PROTOCOL,
     IntegrationTarget,
@@ -272,4 +273,88 @@ def validate_budget_policy(
     return {
         "policy": policy.to_dict(),
         "summary": policy.summary(work_items=work_items),
+    }
+
+
+def plan_swarm_concurrency(
+    repo: str | Path, session_id: str
+) -> dict[str, Any]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    with _store(root) as store:
+        current = store.require(_validate_session_id(session_id))
+        if current.repository_identity != _repository_identity(root):
+            raise ValueError(
+                "swarm session is bound to a different repository identity"
+            )
+        if _resolve_commit(root, current.base_commit) != current.base_commit:
+            raise ValueError("swarm session base commit is no longer resolvable")
+        plan = compute_concurrency_plan(
+            current.work_graph,
+            current.budget_policy,
+            graph_version=current.graph_version,
+            budget_version=current.budget_version,
+        )
+        stored, plan_version, changed = store.save_concurrency_plan(
+            current.session_id,
+            plan,
+            expected_graph_version=current.graph_version,
+            expected_budget_version=current.budget_version,
+            created_at=_utc_now(),
+        )
+    return {
+        "session_id": current.session_id,
+        "created": changed,
+        "plan_version": plan_version,
+        "plan_fingerprint": stored.fingerprint(),
+        "concurrency_plan": stored.to_dict(),
+        "summary": stored.summary(),
+    }
+
+
+def get_swarm_concurrency_plan(
+    repo: str | Path, session_id: str
+) -> dict[str, Any]:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    with _store(root) as store:
+        current = store.require(_validate_session_id(session_id))
+        if current.repository_identity != _repository_identity(root):
+            raise ValueError(
+                "swarm session is bound to a different repository identity"
+            )
+        stored = store.get_concurrency_plan(current.session_id)
+    if stored is None:
+        raise KeyError(
+            f"swarm session {current.session_id!r} has no concurrency plan; "
+            "run 'claim-plane swarm plan' first"
+        )
+    plan, plan_version = stored
+    if (
+        plan.graph_version != current.graph_version
+        or plan.graph_fingerprint != current.graph_fingerprint
+        or plan.budget_version != current.budget_version
+        or plan.budget_fingerprint != current.budget_fingerprint
+    ):
+        raise ValueError("stored concurrency plan is stale")
+    return {
+        "session_id": current.session_id,
+        "plan_version": plan_version,
+        "plan_fingerprint": plan.fingerprint(),
+        "concurrency_plan": plan.to_dict(),
+        "summary": plan.summary(),
+    }
+
+
+def validate_concurrency_plan(
+    graph_data: Mapping[str, Any],
+    policy_data: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    graph = WorkGraph.from_dict(graph_data)
+    policy = SwarmBudgetPolicy.from_dict(policy_data)
+    plan = compute_concurrency_plan(graph, policy)
+    return {
+        "valid": True,
+        "concurrency_plan": plan.to_dict(),
+        "summary": plan.summary(),
     }

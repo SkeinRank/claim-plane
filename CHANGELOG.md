@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-08-01
+
+### Added
+
+- Add `claim-plane.swarm-concurrency-plan.v1`, a deterministic plan bound to exact work-graph and budget versions and fingerprints.
+- Add an adaptive concurrency controller that respects explicit dependencies, packs independent work up to `max_active`, and emits stable execution waves without launching workers.
+- Add conservative pairwise analysis for same-file regions, unknown path or semantic overlap, shared contracts, and schema-changing work.
+- Add durable plan persistence, optimistic source-version checks, automatic invalidation after graph or budget replacement, and `swarm plan`, `swarm concurrency`, and `swarm validate-concurrency` commands.
+- Add JSON Schema, protocol exports, and regression coverage for deterministic ordering, region-safe parallelism, serialization, denial, contingent scope, and migration-safe persistence.
+
+### Changed
+
+- Treat contingent operations as non-authoritative planning surfaces until a later admitted amendment promotes them; the controller recalculates concurrency after graph or budget changes.
+- Return `replan_required` with no executable waves when a configured `deny` policy detects an unsafe decomposition.
+- Upgrade the local swarm database to schema version 3 by adding a source-bound concurrency-plan table while preserving 0.16 and 0.17 session payloads.
+- Keep 0.18.0 at the scheduling boundary: plans are computed and persisted, but worktrees and Codex worker processes are introduced in later stages.
+
 ## [0.17.0] — 2026-08-01
 
 ### Added

@@ -190,4 +190,30 @@ Opening a 0.16 swarm database upgrades it from schema version 1 to schema versio
 
 ## Current boundary
 
-Version 0.17.0 creates and validates durable planning and budget state. It does not launch workers, account provider usage, create worktrees, or schedule execution waves. The adaptive concurrency controller and runner consume these contracts in the following swarm stages.
+Version 0.18.0 creates durable planning, budget, and adaptive concurrency state. It does not launch workers, account provider usage, or create worktrees. Managed worktree provisioning and the Codex runner consume the persisted execution waves in the following swarm stages.
+
+## Adaptive concurrency planning
+
+Version 0.18.0 turns the structural dependency layers into a source-bound execution-wave proposal:
+
+```bash
+claim-plane swarm plan <session-id>
+claim-plane swarm concurrency <session-id>
+```
+
+The controller combines the explicit DAG with the active budget policy. It packs independent work up to `workers.max_active`, adds deterministic serialization constraints where parallel execution cannot be proved safe, and persists the result against exact graph and budget versions and fingerprints.
+
+The controller evaluates committed operations only. Contingent scope is excluded until an admitted amendment promotes it, at which point the work graph or authority state must be replanned before execution continues.
+
+The initial controller recognizes four policy reasons:
+
+- `same_file`: line-bounded writes may share a wave only when their declared regions are parseable and disjoint under `region_safe`;
+- `unknown_overlap`: missing regions, overlapping globs, and identical semantic resources fail closed to serialization or denial;
+- `shared_contract`: a contract and another item touching the same contract or its bound subject cannot run concurrently unless an explicit dependency already orders them;
+- `schema_change`: schema-changing work is isolated from other concurrent mutations.
+
+A `serialize` decision adds a deterministic ordering edge while preserving the original DAG. A `deny` decision produces a persisted `replan_required` result with no execution waves.
+
+Replacing either the work graph or budget policy invalidates the stored plan atomically. The next scheduler step must run `claim-plane swarm plan` again before workers can be launched.
+
+Version 0.18.0 still does not create worktrees or launch Codex processes. It provides the deterministic execution contract consumed by managed worktree provisioning and the agent runner.

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-concurrency-plan.schema.json",
+  "title": "Claim Plane Swarm Concurrency Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "graph_version",
+    "graph_fingerprint",
+    "budget_version",
+    "budget_fingerprint",
+    "max_active_workers",
+    "work_item_count",
+    "status",
+    "waves",
+    "constraints"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-concurrency-plan.v1"},
+    "graph_version": {"type": "integer", "minimum": 1},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "budget_version": {"type": "integer", "minimum": 1},
+    "budget_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "max_active_workers": {"type": "integer", "minimum": 1, "maximum": 256},
+    "work_item_count": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["ready", "replan_required"]},
+    "waves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "work_ids"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1},
+          "work_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["before", "after", "action", "reasons", "resources", "detail"],
+        "properties": {
+          "before": {"type": "string", "minLength": 1},
+          "after": {"type": "string", "minLength": 1},
+          "action": {"enum": ["serialize", "deny"]},
+          "reasons": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": ["same_file", "unknown_overlap", "shared_contract", "schema_change"]
+            }
+          },
+          "resources": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "metadata": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "replan_required"}}},
+      "then": {"properties": {"waves": {"maxItems": 0}}}
+    }
+  ]
+}

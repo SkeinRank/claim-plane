@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from claim_plane.swarm.budget import SwarmBudgetPolicy
+from claim_plane.swarm.concurrency import ConcurrencyPlan
 from claim_plane.swarm.models import SwarmSession, WorkGraph
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 class SwarmSessionStore:
@@ -67,6 +68,24 @@ class SwarmSessionStore:
         self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_swarm_sessions_updated "
             "ON swarm_sessions(updated_at DESC, session_id ASC)"
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS swarm_concurrency_plans (
+                session_id TEXT PRIMARY KEY,
+                plan_version INTEGER NOT NULL,
+                graph_version INTEGER NOT NULL,
+                graph_fingerprint TEXT NOT NULL,
+                budget_version INTEGER NOT NULL,
+                budget_fingerprint TEXT NOT NULL,
+                plan_fingerprint TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES swarm_sessions(session_id)
+                    ON DELETE CASCADE
+            )
+            """
         )
         if schema_version < _SCHEMA_VERSION:
             self._migrate_payloads()
@@ -243,6 +262,10 @@ class SwarmSessionStore:
                 raise ValueError(
                     "work graph changed concurrently; retry with fresh status"
                 )
+            self._connection.execute(
+                "DELETE FROM swarm_concurrency_plans WHERE session_id = ?",
+                (session_id,),
+            )
             self._connection.commit()
             return updated
         except Exception:
@@ -298,8 +321,136 @@ class SwarmSessionStore:
                 raise ValueError(
                     "budget policy changed concurrently; retry with fresh status"
                 )
+            self._connection.execute(
+                "DELETE FROM swarm_concurrency_plans WHERE session_id = ?",
+                (session_id,),
+            )
             self._connection.commit()
             return updated
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    @staticmethod
+    def _plan_payload(plan: ConcurrencyPlan) -> str:
+        return json.dumps(
+            plan.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def get_concurrency_plan(
+        self, session_id: str
+    ) -> tuple[ConcurrencyPlan, int] | None:
+        row = self._connection.execute(
+            "SELECT plan_version, payload_json FROM swarm_concurrency_plans "
+            "WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(str(row["payload_json"]))
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"stored concurrency plan for {session_id!r} is invalid"
+            )
+        return ConcurrencyPlan.from_dict(payload), int(row["plan_version"])
+
+    def save_concurrency_plan(
+        self,
+        session_id: str,
+        plan: ConcurrencyPlan,
+        *,
+        expected_graph_version: int,
+        expected_budget_version: int,
+        created_at: str,
+    ) -> tuple[ConcurrencyPlan, int, bool]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session_row = self._connection.execute(
+                "SELECT graph_version, graph_fingerprint, budget_version, "
+                "budget_fingerprint FROM swarm_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session_row is None:
+                raise KeyError(f"unknown swarm session {session_id!r}")
+            current_graph_version = int(session_row["graph_version"])
+            current_budget_version = int(session_row["budget_version"])
+            if current_graph_version != expected_graph_version:
+                raise ValueError(
+                    "work graph changed while concurrency was being planned; retry"
+                )
+            if current_budget_version != expected_budget_version:
+                raise ValueError(
+                    "budget policy changed while concurrency was being planned; retry"
+                )
+            if (
+                plan.graph_version != current_graph_version
+                or plan.graph_fingerprint != str(session_row["graph_fingerprint"])
+                or plan.budget_version != current_budget_version
+                or plan.budget_fingerprint != str(session_row["budget_fingerprint"])
+            ):
+                raise ValueError(
+                    "concurrency plan is not bound to the current graph and budget"
+                )
+            existing = self._connection.execute(
+                "SELECT plan_version, plan_fingerprint, payload_json, created_at "
+                "FROM swarm_concurrency_plans WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            fingerprint = plan.fingerprint()
+            if (
+                existing is not None
+                and str(existing["plan_fingerprint"]) == fingerprint
+            ):
+                payload = json.loads(str(existing["payload_json"]))
+                if not isinstance(payload, dict):
+                    raise ValueError(
+                        f"stored concurrency plan for {session_id!r} is invalid"
+                    )
+                self._connection.commit()
+                return (
+                    ConcurrencyPlan.from_dict(payload),
+                    int(existing["plan_version"]),
+                    False,
+                )
+            plan_version = 1 if existing is None else int(existing["plan_version"]) + 1
+            first_created_at = (
+                created_at if existing is None else str(existing["created_at"])
+            )
+            self._connection.execute(
+                """
+                INSERT INTO swarm_concurrency_plans (
+                    session_id, plan_version, graph_version, graph_fingerprint,
+                    budget_version, budget_fingerprint, plan_fingerprint,
+                    payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    plan_version = excluded.plan_version,
+                    graph_version = excluded.graph_version,
+                    graph_fingerprint = excluded.graph_fingerprint,
+                    budget_version = excluded.budget_version,
+                    budget_fingerprint = excluded.budget_fingerprint,
+                    plan_fingerprint = excluded.plan_fingerprint,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    session_id,
+                    plan_version,
+                    plan.graph_version,
+                    plan.graph_fingerprint,
+                    plan.budget_version,
+                    plan.budget_fingerprint,
+                    fingerprint,
+                    self._plan_payload(plan),
+                    first_created_at,
+                    created_at,
+                ),
+            )
+            self._connection.commit()
+            return plan, plan_version, True
         except Exception:
             self._connection.rollback()
             raise

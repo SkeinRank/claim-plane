@@ -10,6 +10,16 @@ from claim_plane.swarm.budget import (
     SwarmBudgetPolicy,
     WorkerBudget,
 )
+from claim_plane.swarm.concurrency import (
+    SWARM_CONCURRENCY_PLAN_PROTOCOL,
+    ConcurrencyConstraint,
+    ConcurrencyConstraintAction,
+    ConcurrencyConstraintReason,
+    ConcurrencyPlan,
+    ConcurrencyPlanStatus,
+    ExecutionWave,
+    compute_concurrency_plan,
+)
 from claim_plane.swarm.models import (
     SWARM_SESSION_PROTOCOL,
     SWARM_SESSION_SPEC_PROTOCOL,
@@ -23,21 +33,31 @@ from claim_plane.swarm.models import (
 )
 from claim_plane.swarm.service import (
     create_swarm_session,
+    get_swarm_concurrency_plan,
     get_swarm_session,
     list_swarm_sessions,
+    plan_swarm_concurrency,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
     validate_budget_policy,
+    validate_concurrency_plan,
     validate_work_graph,
 )
 
 __all__ = [
     "SWARM_BUDGET_POLICY_PROTOCOL",
+    "SWARM_CONCURRENCY_PLAN_PROTOCOL",
     "SWARM_SESSION_PROTOCOL",
     "SWARM_SESSION_SPEC_PROTOCOL",
     "SWARM_WORK_GRAPH_PROTOCOL",
     "ConcurrencyBudget",
+    "ConcurrencyConstraint",
+    "ConcurrencyConstraintAction",
+    "ConcurrencyConstraintReason",
+    "ConcurrencyPlan",
+    "ConcurrencyPlanStatus",
     "ConflictPolicy",
+    "ExecutionWave",
     "IntegrationTarget",
     "ResourceBudget",
     "RetryBudget",
@@ -49,11 +69,15 @@ __all__ = [
     "WorkGraph",
     "WorkItem",
     "WorkerBudget",
+    "compute_concurrency_plan",
     "create_swarm_session",
+    "get_swarm_concurrency_plan",
     "get_swarm_session",
     "list_swarm_sessions",
+    "plan_swarm_concurrency",
     "replace_swarm_budget_policy",
     "replace_swarm_work_graph",
     "validate_budget_policy",
+    "validate_concurrency_plan",
     "validate_work_graph",
 ]
