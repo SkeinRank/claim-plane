@@ -68,5 +68,30 @@
         ]
       }
     ]
+  },
+  "budget_policy": {
+    "protocol": "claim-plane.swarm-budget-policy.v1",
+    "workers": {
+      "max_active": 4,
+      "max_active_per_work_item": 1,
+      "max_work_items": 24,
+      "max_total_launches": 40
+    },
+    "resources": {
+      "max_total_tokens": 500000,
+      "max_cost_usd": "25",
+      "max_wall_time_seconds": 7200
+    },
+    "retries": {
+      "max_replans": 2,
+      "max_repairs_per_work_item": 2,
+      "max_agent_restarts": 1
+    },
+    "concurrency": {
+      "same_file": "region_safe",
+      "unknown_overlap": "serialize",
+      "shared_contract": "serialize",
+      "schema_change": "serialize"
+    }
   }
 }

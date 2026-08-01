@@ -4,7 +4,11 @@
   "title": "Claim Plane Swarm Session Spec v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol", "root_task", "work_graph"],
+  "required": [
+    "protocol",
+    "root_task",
+    "work_graph"
+  ],
   "properties": {
     "protocol": {
       "const": "claim-plane.swarm-session-spec.v1"
@@ -20,13 +24,19 @@
     },
     "metadata": {
       "type": "object"
+    },
+    "budget_policy": {
+      "$ref": "swarm-budget-policy.schema.json"
     }
   },
   "$defs": {
     "rootTask": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title", "goal"],
+      "required": [
+        "title",
+        "goal"
+      ],
       "properties": {
         "title": {
           "type": "string",
@@ -52,7 +62,9 @@
     "integrationTarget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["branch"],
+      "required": [
+        "branch"
+      ],
       "properties": {
         "branch": {
           "type": "string",

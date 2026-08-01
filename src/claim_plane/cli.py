@@ -50,7 +50,9 @@ from claim_plane.swarm import (
     create_swarm_session,
     get_swarm_session,
     list_swarm_sessions,
+    replace_swarm_budget_policy,
     replace_swarm_work_graph,
+    validate_budget_policy,
     validate_work_graph,
 )
 
@@ -267,12 +269,19 @@ def cmd_swarm_create(args: argparse.Namespace) -> int:
     else:
         session = result["session"]
         graph = result["graph"]
+        budget = result["budget"]
         action = "Created" if result["created"] else "Found existing"
         print(f"{action} swarm session {session['session_id']}.")
         print(f"Base: {session['base_commit']} ({session['base_branch']})")
         print(
             f"Work graph v{session['graph_version']}: "
             f"{graph['work_items']} items, {graph['dependency_edges']} dependencies"
+        )
+        print(
+            f"Budget v{session['budget_version']}: "
+            f"max_active={budget['max_active_workers']}, "
+            f"launches={budget['max_total_launches']}, "
+            f"cost_usd={budget['max_cost_usd']}"
         )
         print("Dependency layers:")
         for index, layer in enumerate(graph["dependency_layers"], start=1):
@@ -292,6 +301,7 @@ def cmd_swarm_list(args: argparse.Namespace) -> int:
             print(
                 f"{session.session_id}  {session.state.value:10}  "
                 f"graph=v{session.graph_version}  "
+                f"budget=v{session.budget_version}  "
                 f"items={len(session.work_graph.work_items)}  "
                 f"base={session.base_commit[:12]}"
             )
@@ -302,6 +312,9 @@ def cmd_swarm_status(args: argparse.Namespace) -> int:
     session = get_swarm_session(args.repo, args.session_id)
     payload = session.to_dict()
     payload["graph_summary"] = session.work_graph.summary()
+    payload["budget_summary"] = session.budget_policy.summary(
+        work_items=len(session.work_graph.work_items)
+    )
     if args.json:
         _write_json(payload)
     else:
@@ -319,6 +332,12 @@ def cmd_swarm_status(args: argparse.Namespace) -> int:
         print(
             "Topological order: "
             + " -> ".join(session.work_graph.topological_order())
+        )
+        print(
+            f"Budget: v{session.budget_version}; "
+            f"max_active={session.budget_policy.workers.max_active}; "
+            f"max_launches={session.budget_policy.workers.max_total_launches}; "
+            f"fingerprint={session.budget_fingerprint[:20]}"
         )
     return 0
 
@@ -356,6 +375,47 @@ def cmd_swarm_validate(args: argparse.Namespace) -> int:
     result = {"valid": True, **validate_work_graph(payload)}
     _write_json(result)
     return 0
+
+
+def cmd_swarm_budget(args: argparse.Namespace) -> int:
+    session = get_swarm_session(args.repo, args.session_id)
+    payload = {
+        "session_id": session.session_id,
+        "budget_version": session.budget_version,
+        "budget_fingerprint": session.budget_fingerprint,
+        "budget_policy": session.budget_policy.to_dict(),
+        "summary": session.budget_policy.summary(
+            work_items=len(session.work_graph.work_items)
+        ),
+    }
+    _write_json(payload, args.out)
+    return 0
+
+
+def cmd_swarm_replace_budget(args: argparse.Namespace) -> int:
+    session = replace_swarm_budget_policy(
+        args.repo,
+        args.session_id,
+        policy_data=_read_json(args.policy),
+        expected_version=args.expected_version,
+    )
+    payload = {
+        "session": session.to_dict(),
+        "budget": session.budget_policy.summary(
+            work_items=len(session.work_graph.work_items)
+        ),
+    }
+    _write_json(payload, args.out)
+    return 0
+
+
+def cmd_swarm_validate_budget(args: argparse.Namespace) -> int:
+    result = validate_budget_policy(
+        _read_json(args.policy), work_items=args.work_items
+    )
+    _write_json({"valid": True, **result})
+    return 0
+
 
 def cmd_claim(args: argparse.Namespace) -> int:
     plane = _plane(args)
@@ -1008,7 +1068,6 @@ def build_parser() -> argparse.ArgumentParser:
     codex_intent_status_parser.add_argument("--json", action="store_true")
     codex_intent_status_parser.set_defaults(func=cmd_codex_intent_status)
 
-
     swarm = sub.add_parser(
         "swarm", help="Create and inspect repository-bound swarm planning sessions."
     )
@@ -1064,6 +1123,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     swarm_validate.add_argument("--graph", required=True)
     swarm_validate.set_defaults(func=cmd_swarm_validate)
+
+    swarm_budget = swarm_sub.add_parser(
+        "budget", help="Export the versioned budget policy for one swarm session."
+    )
+    swarm_budget.add_argument("session_id")
+    swarm_budget.add_argument("--repo", default=".")
+    swarm_budget.add_argument("--out")
+    swarm_budget.set_defaults(func=cmd_swarm_budget)
+
+    swarm_replace_budget = swarm_sub.add_parser(
+        "replace-budget",
+        help="Replace a planned budget policy with optimistic version checking.",
+    )
+    swarm_replace_budget.add_argument("session_id")
+    swarm_replace_budget.add_argument("--policy", required=True)
+    swarm_replace_budget.add_argument(
+        "--expected-version", type=int, required=True
+    )
+    swarm_replace_budget.add_argument("--repo", default=".")
+    swarm_replace_budget.add_argument("--out")
+    swarm_replace_budget.set_defaults(func=cmd_swarm_replace_budget)
+
+    swarm_validate_budget = swarm_sub.add_parser(
+        "validate-budget",
+        help="Validate and normalize a standalone swarm budget policy.",
+    )
+    swarm_validate_budget.add_argument("--policy", required=True)
+    swarm_validate_budget.add_argument(
+        "--work-items",
+        type=int,
+        help="Optionally verify that a proposed graph size fits the policy.",
+    )
+    swarm_validate_budget.set_defaults(func=cmd_swarm_validate_budget)
 
     claim = sub.add_parser(
         "claim", help="Request a legacy fine-grained artifact claim."

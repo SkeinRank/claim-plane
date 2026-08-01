@@ -15,6 +15,7 @@ from enum import Enum
 from typing import Any, Iterable, Mapping
 
 from claim_plane.core import IntentOperation, ResourceKind
+from claim_plane.swarm.budget import SwarmBudgetPolicy
 
 SWARM_SESSION_PROTOCOL = "claim-plane.swarm-session.v1"
 SWARM_SESSION_SPEC_PROTOCOL = "claim-plane.swarm-session-spec.v1"
@@ -398,7 +399,9 @@ class SwarmSession:
     root_task: RootTask
     integration_target: IntegrationTarget
     work_graph: WorkGraph
+    budget_policy: SwarmBudgetPolicy
     graph_version: int
+    budget_version: int
     state: SwarmSessionState
     created_at: str
     updated_at: str
@@ -440,8 +443,17 @@ class SwarmSession:
             )
         if not isinstance(self.work_graph, WorkGraph):
             object.__setattr__(self, "work_graph", WorkGraph.from_dict(self.work_graph))
+        if not isinstance(self.budget_policy, SwarmBudgetPolicy):
+            object.__setattr__(
+                self,
+                "budget_policy",
+                SwarmBudgetPolicy.from_dict(self.budget_policy),
+            )
+        self.budget_policy.validate_work_item_count(len(self.work_graph.work_items))
         if self.graph_version <= 0:
             raise ValueError("graph_version must be positive")
+        if self.budget_version <= 0:
+            raise ValueError("budget_version must be positive")
         object.__setattr__(self, "state", SwarmSessionState(self.state))
         object.__setattr__(
             self, "created_at", _clean(self.created_at, field_name="created_at")
@@ -455,15 +467,35 @@ class SwarmSession:
     def graph_fingerprint(self) -> str:
         return self.work_graph.fingerprint()
 
+    @property
+    def budget_fingerprint(self) -> str:
+        return self.budget_policy.fingerprint()
+
     def with_graph(self, graph: WorkGraph, *, updated_at: str) -> "SwarmSession":
         if self.state is not SwarmSessionState.PLANNED:
             raise ValueError(
                 f"cannot replace work graph while session is {self.state.value}"
             )
+        self.budget_policy.validate_work_item_count(len(graph.work_items))
         return replace(
             self,
             work_graph=graph,
             graph_version=self.graph_version + 1,
+            updated_at=updated_at,
+        )
+
+    def with_budget_policy(
+        self, policy: SwarmBudgetPolicy, *, updated_at: str
+    ) -> "SwarmSession":
+        if self.state is not SwarmSessionState.PLANNED:
+            raise ValueError(
+                f"cannot replace budget policy while session is {self.state.value}"
+            )
+        policy.validate_work_item_count(len(self.work_graph.work_items))
+        return replace(
+            self,
+            budget_policy=policy,
+            budget_version=self.budget_version + 1,
             updated_at=updated_at,
         )
 
@@ -481,6 +513,9 @@ class SwarmSession:
             "graph_version": self.graph_version,
             "graph_fingerprint": self.graph_fingerprint,
             "work_graph": self.work_graph.to_dict(),
+            "budget_version": self.budget_version,
+            "budget_fingerprint": self.budget_fingerprint,
+            "budget_policy": self.budget_policy.to_dict(),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "metadata": dict(self.metadata),
@@ -500,7 +535,9 @@ class SwarmSession:
                 data.get("integration_target") or {}
             ),
             work_graph=WorkGraph.from_dict(data.get("work_graph") or {}),
+            budget_policy=SwarmBudgetPolicy.from_dict(data.get("budget_policy")),
             graph_version=int(data.get("graph_version") or 0),
+            budget_version=int(data.get("budget_version") or 1),
             state=SwarmSessionState(
                 data.get("state") or SwarmSessionState.PLANNED.value
             ),

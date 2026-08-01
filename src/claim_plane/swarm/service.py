@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from claim_plane.swarm.budget import SwarmBudgetPolicy
 from claim_plane.swarm.models import (
     SWARM_SESSION_SPEC_PROTOCOL,
     IntegrationTarget,
@@ -97,7 +98,13 @@ def _store(root: Path) -> SwarmSessionStore:
 
 def parse_session_spec(
     data: Mapping[str, Any],
-) -> tuple[RootTask, IntegrationTarget | None, WorkGraph, dict[str, Any]]:
+) -> tuple[
+    RootTask,
+    IntegrationTarget | None,
+    WorkGraph,
+    SwarmBudgetPolicy,
+    dict[str, Any],
+]:
     protocol = str(data.get("protocol") or SWARM_SESSION_SPEC_PROTOCOL)
     if protocol != SWARM_SESSION_SPEC_PROTOCOL:
         raise ValueError(f"unsupported swarm-session spec protocol {protocol!r}")
@@ -113,13 +120,20 @@ def parse_session_spec(
         if not isinstance(target_raw, Mapping):
             raise ValueError("integration_target must be an object")
         target = IntegrationTarget.from_dict(target_raw)
+    budget_raw = data.get("budget_policy")
+    if budget_raw is not None and not isinstance(budget_raw, Mapping):
+        raise ValueError("budget_policy must be an object")
     metadata = data.get("metadata") or {}
     if not isinstance(metadata, Mapping):
         raise ValueError("metadata must be an object")
+    graph = WorkGraph.from_dict(graph_raw)
+    budget = SwarmBudgetPolicy.from_dict(budget_raw)
+    budget.validate_work_item_count(len(graph.work_items))
     return (
         RootTask.from_dict(root_task_raw),
         target,
-        WorkGraph.from_dict(graph_raw),
+        graph,
+        budget,
         dict(metadata),
     )
 
@@ -133,7 +147,7 @@ def create_swarm_session(
 ) -> dict[str, Any]:
     root = resolve_repository_root(repo)
     _require_initialized(root)
-    root_task, target, graph, metadata = parse_session_spec(spec)
+    root_task, target, graph, budget, metadata = parse_session_spec(spec)
     base_commit = _resolve_commit(root, base_revision)
     base_branch = _current_branch(root)
     if target is None:
@@ -149,7 +163,9 @@ def create_swarm_session(
         root_task=root_task,
         integration_target=target,
         work_graph=graph,
+        budget_policy=budget,
         graph_version=1,
+        budget_version=1,
         state=SwarmSessionState.PLANNED,
         created_at=now,
         updated_at=now,
@@ -161,6 +177,9 @@ def create_swarm_session(
         "created": created,
         "session": stored.to_dict(),
         "graph": stored.work_graph.summary(),
+        "budget": stored.budget_policy.summary(
+            work_items=len(stored.work_graph.work_items)
+        ),
     }
 
 
@@ -217,3 +236,40 @@ def validate_work_graph(graph_data: Mapping[str, Any]) -> dict[str, Any]:
         graph_data = nested
     graph = WorkGraph.from_dict(graph_data)
     return graph.summary()
+
+
+def replace_swarm_budget_policy(
+    repo: str | Path,
+    session_id: str,
+    *,
+    policy_data: Mapping[str, Any],
+    expected_version: int,
+) -> SwarmSession:
+    root = resolve_repository_root(repo)
+    _require_initialized(root)
+    policy = SwarmBudgetPolicy.from_dict(policy_data)
+    with _store(root) as store:
+        current = store.require(_validate_session_id(session_id))
+        if current.repository_identity != _repository_identity(root):
+            raise ValueError(
+                "swarm session is bound to a different repository identity"
+            )
+        if _resolve_commit(root, current.base_commit) != current.base_commit:
+            raise ValueError("swarm session base commit is no longer resolvable")
+        policy.validate_work_item_count(len(current.work_graph.work_items))
+        return store.replace_budget_policy(
+            current.session_id,
+            policy,
+            expected_version=expected_version,
+            updated_at=_utc_now(),
+        )
+
+
+def validate_budget_policy(
+    policy_data: Mapping[str, Any], *, work_items: int | None = None
+) -> dict[str, Any]:
+    policy = SwarmBudgetPolicy.from_dict(policy_data)
+    return {
+        "policy": policy.to_dict(),
+        "summary": policy.summary(work_items=work_items),
+    }

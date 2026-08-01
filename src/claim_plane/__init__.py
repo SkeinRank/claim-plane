@@ -55,8 +55,14 @@ from claim_plane.runtime import (
     serve_broker,
 )
 from claim_plane.swarm import (
+    ConcurrencyBudget,
+    ConflictPolicy,
     IntegrationTarget,
+    ResourceBudget,
+    RetryBudget,
     RootTask,
+    SameFilePolicy,
+    SwarmBudgetPolicy,
     SwarmSession,
     SwarmSessionState,
     WorkGraph,
@@ -78,7 +84,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -98,7 +104,13 @@ __all__ = [
     "FindingSeverity",
     "GovernancePolicy",
     "IntegrationFinding",
+    "ConcurrencyBudget",
+    "ConflictPolicy",
     "IntegrationTarget",
+    "ResourceBudget",
+    "RetryBudget",
+    "SameFilePolicy",
+    "SwarmBudgetPolicy",
     "IntegrationAttempt",
     "IntegrationReport",
     "IntegrationRunResult",

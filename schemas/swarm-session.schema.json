@@ -72,6 +72,17 @@
     "work_graph": {
       "$ref": "swarm-work-graph.schema.json"
     },
+    "budget_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "budget_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "budget_policy": {
+      "$ref": "swarm-budget-policy.schema.json"
+    },
     "created_at": {
       "type": "string",
       "minLength": 1

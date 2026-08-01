@@ -8,6 +8,21 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-08-01
+
+### Added
+
+- Add the `claim-plane.swarm-budget-policy.v1` protocol with conservative defaults and hard ceilings for active workers, per-work-item concurrency, work-graph size, total launches, tokens, cost, wall time, replans, repairs, and agent restarts.
+- Add explicit concurrency policy for region-safe same-file work and fail-closed serialization or denial of unknown overlap, shared contracts, and schema changes.
+- Bind one independently versioned budget policy to every `SwarmSession`, including deterministic fingerprints, graph-capacity summaries, and backward-compatible migration of 0.16 swarm databases.
+- Add `claim-plane swarm budget`, `replace-budget`, and `validate-budget`, plus JSON Schema and executable policy examples.
+
+### Changed
+
+- Validate a proposed work graph against its session budget before persistence and reject later graph or policy replacements that would exceed `max_work_items` or `max_total_launches`.
+- Require optimistic budget-version checks while keeping repository identity, pinned Git base, root task, integration target, and work graph unchanged.
+- Keep 0.17.0 at the planning boundary: budgets are durable authority ceilings, but worker accounting and adaptive scheduling are introduced by later swarm stages.
+
 ## [0.16.0] — 2026-08-01
 
 ### Added
