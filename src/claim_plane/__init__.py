@@ -68,6 +68,7 @@ from claim_plane.swarm import (
     ConflictPolicy,
     ExecutionWave,
     IntegrationTarget,
+    OperatorEvent,
     DeterministicMergeQueue,
     MergeEntryState,
     MergeQueueEntry,
@@ -83,6 +84,8 @@ from claim_plane.swarm import (
     SharedAdmissionPlan,
     SharedAdmissionStatus,
     SwarmBudgetPolicy,
+    SWARM_OPERATOR_EVENT_PROTOCOL,
+    SWARM_OPERATOR_SNAPSHOT_PROTOCOL,
     SwarmSession,
     SwarmSessionState,
     SwarmVerificationReport,
@@ -92,6 +95,10 @@ from claim_plane.swarm import (
     WorkAdmission,
     WorkGraph,
     WorkItem,
+    create_and_run_swarm_demo,
+    get_swarm_operator_snapshot,
+    list_swarm_operator_logs,
+    start_swarm_session,
 )
 from claim_plane.integration import (
     CommandExecution,
@@ -109,7 +116,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.24.0"
+__version__ = "0.25.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -142,6 +149,7 @@ __all__ = [
     "ConflictPolicy",
     "ExecutionWave",
     "IntegrationTarget",
+    "OperatorEvent",
     "DeterministicMergeQueue",
     "MergeEntryState",
     "MergeQueueEntry",
@@ -156,6 +164,8 @@ __all__ = [
     "SharedAdmissionPlan",
     "SharedAdmissionStatus",
     "SwarmBudgetPolicy",
+    "SWARM_OPERATOR_EVENT_PROTOCOL",
+    "SWARM_OPERATOR_SNAPSHOT_PROTOCOL",
     "IntegrationAttempt",
     "IntegrationReport",
     "IntegrationRunResult",
@@ -212,5 +222,9 @@ __all__ = [
     "WorkAdmission",
     "WorkGraph",
     "WorkItem",
+    "create_and_run_swarm_demo",
+    "get_swarm_operator_snapshot",
+    "list_swarm_operator_logs",
+    "start_swarm_session",
     "__version__",
 ]

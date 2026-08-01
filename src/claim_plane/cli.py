@@ -8,8 +8,9 @@ import os
 import secrets
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from claim_plane import __version__
 from claim_plane.connectors import (
@@ -52,17 +53,20 @@ from claim_plane.swarm import (
     cancel_swarm_session,
     cleanup_swarm_worktrees,
     create_swarm_session,
+    create_and_run_swarm_demo,
     get_codex_run,
     get_swarm_admission,
     get_swarm_concurrency_plan,
     get_swarm_scheduler,
     get_swarm_merge_queue,
+    get_swarm_operator_snapshot,
     get_swarm_session,
     get_swarm_verification,
     inspect_swarm_recovery,
     inspect_swarm_worktrees,
     list_codex_runs,
     list_swarm_recovery_events,
+    list_swarm_operator_logs,
     list_swarm_sessions,
     pause_swarm_session,
     plan_swarm_concurrency,
@@ -76,6 +80,7 @@ from claim_plane.swarm import (
     replace_swarm_work_graph,
     resume_swarm_session,
     run_codex_work_item,
+    start_swarm_session,
     validate_budget_policy,
     validate_concurrency_plan,
     validate_work_graph,
@@ -334,38 +339,161 @@ def cmd_swarm_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_swarm_status(args: argparse.Namespace) -> int:
-    session = get_swarm_session(args.repo, args.session_id)
-    payload = session.to_dict()
-    payload["graph_summary"] = session.work_graph.summary()
-    payload["budget_summary"] = session.budget_policy.summary(
-        work_items=len(session.work_graph.work_items)
+def _print_operator_snapshot(payload: Mapping[str, Any]) -> None:
+    print(f"Swarm {payload['session_id']}: {str(payload['phase']).upper()}")
+    print(f"Task: {payload['root_task']['title']}")
+    usage = payload["usage"]
+    budget = payload["budget"]
+    print(
+        "Workers: "
+        f"{usage['active_workers']}/{budget['max_active_workers']} active; "
+        f"runs={usage['runs']}; tokens={usage['total_tokens']}"
     )
-    if args.json:
-        _write_json(payload)
+    scheduler = payload.get("scheduler") or {}
+    if scheduler:
+        dispatchable = (
+            ", ".join(scheduler.get("dispatchable_work_ids") or ()) or "none"
+        )
+        print(f"Dispatchable: {dispatchable}")
+    merge = payload.get("merge_queue") or {}
+    if merge:
+        print(f"Merge queue: {merge.get('status', 'unknown')}")
+    verification = payload.get("verification") or {}
+    if verification:
+        print(f"Verification: {verification.get('status', 'unknown')}")
+    print(f"{'WORK':20} {'SCHEDULER':16} {'RUN':18} {'MERGE':12} {'NEXT'}")
+    for item in payload["work"]:
+        run_state = item["run_state"] or "-"
+        merge_state = item["merge_state"] or "-"
+        print(
+            f"{item['work_id'][:20]:20} "
+            f"{item['scheduler_state'][:16]:16} "
+            f"{run_state[:18]:18} "
+            f"{merge_state[:12]:12} "
+            f"{item['next_action']}"
+        )
+
+
+def cmd_swarm_status(args: argparse.Namespace) -> int:
+    payload = get_swarm_operator_snapshot(args.repo, args.session_id)
+    if args.json or getattr(args, "out", None):
+        _write_json(payload, getattr(args, "out", None))
     else:
-        print(f"Swarm session: {session.session_id}")
-        print(f"State: {session.state.value}")
-        print(f"Root task: {session.root_task.title}")
-        print(f"Goal: {session.root_task.goal}")
-        print(f"Base: {session.base_commit} ({session.base_branch})")
-        print(f"Integration target: {session.integration_target.branch}")
+        _print_operator_snapshot(payload)
+    failure_phases = {"failed", "integration_conflict", "replan_required"}
+    return 0 if payload["phase"] not in failure_phases else 2
+
+
+def _operator_event_printer(event: Mapping[str, Any]) -> None:
+    stage = str(event.get("stage") or "operator")
+    if stage == "dispatch":
+        print("Dispatch: " + ", ".join(event.get("work_ids") or ()))
+    elif stage == "worker":
         print(
-            f"Work graph: v{session.graph_version}; "
-            f"{len(session.work_graph.work_items)} items; "
-            f"fingerprint={session.graph_fingerprint[:20]}"
+            f"Worker {event.get('work_id')}: {event.get('state')} "
+            f"({event.get('tokens', 0)} tokens)"
         )
+    elif stage == "worker_error":
+        print(f"Worker {event.get('work_id')}: ERROR — {event.get('error')}")
+    else:
+        summary = event.get("summary") or {}
+        status = summary.get("status") or summary.get("state") or "ready"
+        print(f"{stage.replace('_', ' ').title()}: {status}")
+
+
+def cmd_swarm_start(args: argparse.Namespace) -> int:
+    session_id = args.session_id
+    if args.spec:
+        created = create_swarm_session(
+            args.repo,
+            spec=_read_json(args.spec),
+            session_id=session_id,
+            base_revision=args.base,
+        )
+        session_id = str(created["session"]["session_id"])
+    if not session_id:
+        raise ValueError("session_id is required unless --spec creates one")
+    result = start_swarm_session(
+        args.repo,
+        session_id,
+        codex_binary=args.codex_bin,
+        model=args.model,
+        reasoning_effort=args.reasoning_effort,
+        timeout_seconds=args.timeout,
+        token_limit=args.max_tokens,
+        acceptance_timeout=args.acceptance_timeout,
+        run_acceptance=not args.no_acceptance,
+        prepare_only=args.prepare_only,
+        reset_failed_worktrees=args.reset_failed_worktrees,
+        max_cycles=args.max_cycles,
+        on_event=None if args.json or args.out else _operator_event_printer,
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print()
+        _print_operator_snapshot(result["snapshot"])
+        if result.get("errors"):
+            print("Action required:")
+            for error in result["errors"]:
+                print(f"  {error.get('work_id', '-')}: {error.get('error')}")
+    return 0 if result["status"] in {"verified", "prepared"} else 2
+
+
+def cmd_swarm_logs(args: argparse.Namespace) -> int:
+    if args.follow and (args.json or args.out):
+        raise ValueError("--follow cannot be combined with --json or --out")
+    seen: set[tuple[str, str, str | None, str | None, str]] = set()
+    while True:
+        events = list_swarm_operator_logs(
+            args.repo,
+            args.session_id,
+            work_id=args.work_id,
+            limit=args.limit,
+            include_codex_events=not args.no_codex_events,
+        )
+        fresh = []
+        for event in events:
+            key = (
+                str(event["timestamp"]),
+                str(event["event"]),
+                event.get("work_id"),
+                event.get("run_id"),
+                json.dumps(event.get("metadata") or {}, sort_keys=True),
+            )
+            if key not in seen:
+                seen.add(key)
+                fresh.append(event)
+        if args.json or args.out:
+            _write_json(fresh, args.out)
+        else:
+            for event in fresh:
+                target = event.get("work_id") or "-"
+                detail = f"  {event['detail']}" if event.get("detail") else ""
+                print(
+                    f"{event['timestamp']}  {target:20}  "
+                    f"{event['event']}{detail}"
+                )
+        if not args.follow:
+            return 0
+        snapshot = get_swarm_operator_snapshot(args.repo, args.session_id)
+        if snapshot["session_state"] in {"completed", "failed", "cancelled"}:
+            return 0
+        time.sleep(args.interval)
+
+
+def cmd_swarm_demo(args: argparse.Namespace) -> int:
+    result = create_and_run_swarm_demo(args.directory, keep=True)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(f"Demo repository: {result['repository']}")
+        _print_operator_snapshot(result["result"]["snapshot"])
+        print("Inspect evidence with:")
         print(
-            "Topological order: "
-            + " -> ".join(session.work_graph.topological_order())
+            f"  claim-plane swarm evidence swm-demo --repo {result['repository']}"
         )
-        print(
-            f"Budget: v{session.budget_version}; "
-            f"max_active={session.budget_policy.workers.max_active}; "
-            f"max_launches={session.budget_policy.workers.max_total_launches}; "
-            f"fingerprint={session.budget_fingerprint[:20]}"
-        )
-    return 0
+    return 0 if result["result"]["verified"] else 2
 
 
 def cmd_swarm_graph(args: argparse.Namespace) -> int:
@@ -1628,12 +1756,63 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_list.set_defaults(func=cmd_swarm_list)
 
     swarm_status = swarm_sub.add_parser(
-        "status", help="Show one swarm session and its pinned work graph."
+        "status", help="Show one compact operator view across the swarm lifecycle."
     )
     swarm_status.add_argument("session_id")
     swarm_status.add_argument("--repo", default=".")
     swarm_status.add_argument("--json", action="store_true")
+    swarm_status.add_argument("--out")
     swarm_status.set_defaults(func=cmd_swarm_status)
+
+    swarm_start = swarm_sub.add_parser(
+        "start",
+        help="Prepare, execute, integrate, and verify a bounded Codex swarm.",
+    )
+    swarm_start.add_argument("session_id", nargs="?")
+    swarm_start.add_argument(
+        "--spec", help="Create the session from this JSON spec before starting."
+    )
+    swarm_start.add_argument("--base", default="HEAD")
+    swarm_start.add_argument("--codex-bin", default="codex")
+    swarm_start.add_argument("--model")
+    swarm_start.add_argument("--reasoning-effort")
+    swarm_start.add_argument("--timeout", type=int)
+    swarm_start.add_argument("--max-tokens", type=int)
+    swarm_start.add_argument("--acceptance-timeout", type=int, default=300)
+    swarm_start.add_argument("--no-acceptance", action="store_true")
+    swarm_start.add_argument("--prepare-only", action="store_true")
+    swarm_start.add_argument("--reset-failed-worktrees", action="store_true")
+    swarm_start.add_argument("--max-cycles", type=int, default=100)
+    swarm_start.add_argument("--repo", default=".")
+    swarm_start.add_argument("--json", action="store_true")
+    swarm_start.add_argument("--out")
+    swarm_start.set_defaults(func=cmd_swarm_start)
+
+    swarm_logs = swarm_sub.add_parser(
+        "logs",
+        help=(
+            "Show one normalized timeline across workers, recovery, merge, "
+            "and verification."
+        ),
+    )
+    swarm_logs.add_argument("session_id")
+    swarm_logs.add_argument("--work-id")
+    swarm_logs.add_argument("--limit", type=int, default=200)
+    swarm_logs.add_argument("--no-codex-events", action="store_true")
+    swarm_logs.add_argument("--follow", action="store_true")
+    swarm_logs.add_argument("--interval", type=float, default=2.0)
+    swarm_logs.add_argument("--repo", default=".")
+    swarm_logs.add_argument("--json", action="store_true")
+    swarm_logs.add_argument("--out")
+    swarm_logs.set_defaults(func=cmd_swarm_logs)
+
+    swarm_demo = swarm_sub.add_parser(
+        "demo", help="Run an offline deterministic three-worker SWARM VERIFIED demo."
+    )
+    swarm_demo.add_argument("--directory")
+    swarm_demo.add_argument("--json", action="store_true")
+    swarm_demo.add_argument("--out")
+    swarm_demo.set_defaults(func=cmd_swarm_demo)
 
     swarm_graph = swarm_sub.add_parser(
         "graph", help="Export one versioned swarm work graph and graph summary."

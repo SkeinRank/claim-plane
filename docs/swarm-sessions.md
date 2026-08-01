@@ -186,11 +186,11 @@ Graph and budget versions are independent. Changing one does not silently overwr
 
 ## Database migration
 
-Opening an older swarm database upgrades it in place to schema version 7. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans; schema version 4 retains managed-worktree ownership; schema version 5 retains durable Codex-run records. The schema-6 migration adds source-bound shared-admission records. Schema version 7 adds the deterministic merge queue without rewriting existing sessions, plans, worktrees, admissions, or run records. Existing work graphs, budgets, plans, worktrees, runs, repository bindings, base commits, timestamps, and session identities remain unchanged.
+Opening an older swarm database upgrades it in place to schema version 9. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; versions 2 and 3 retain concurrency plans; schema version 4 retains managed-worktree ownership; version 5 retains durable Codex-run records; version 6 adds source-bound shared admission; version 7 adds the deterministic merge queue; version 8 adds durable verification; and version 9 adds recovery events and worker leases. Existing work graphs, budgets, plans, worktrees, admissions, runs, merge queues, verification reports, repository bindings, base commits, timestamps, and session identities remain unchanged. Version 0.25.0 adds no new database tables because its operator view is derived from those durable protocol records.
 
 ## Current boundary
 
-Version 0.23.0 adds durable two-level swarm verification on top of deterministic merge ordering and the Claim Plane-owned integration branch. Integration remains isolated from the configured target branch, and only a clean final evidence report transitions the session to `COMPLETED`.
+Version 0.25.0 provides an end-to-end Codex swarm operator over the durable lifecycle. Integration remains isolated from the configured target branch, and only a clean final evidence report transitions the session to `COMPLETED`. Publication to the user's branch or pull request remains explicit and outside the protocol.
 
 ## Adaptive concurrency planning
 
@@ -407,3 +407,37 @@ claim-plane swarm replace-codex <session-id> \
 ```
 
 Recovery does not produce verification. A replacement must still execute, enter the deterministic merge queue, and pass final two-level swarm verification before the session can become `SWARM VERIFIED`.
+
+
+## Operator UX and offline demo
+
+Version 0.25.0 composes the lower-level protocols into one operator workflow:
+
+```bash
+claim-plane swarm start --spec swarm-session.json
+claim-plane swarm status <session-id>
+claim-plane swarm logs <session-id> --follow
+```
+
+`swarm start` first materializes the current concurrency plan, shared admission, managed worktrees, and deterministic merge queue. It then asks the dynamic scheduler for dispatchable work and starts no more workers than the current capacity permits. Independent items are executed concurrently. Each worker still enters through the normal Codex runner, receives its own managed worktree and budget slice, and may mutate only through its admitted authority.
+
+After every dispatch group, successful results enter the deterministic merge queue. Integrated prerequisites release downstream work. A completed queue triggers two-level swarm verification automatically. The high-level command returns success only for `SWARM VERIFIED`; process success, integration success, and verified completion remain distinct.
+
+Control-plane exceptions, stale state, unexpected dirty first-dispatch worktrees, and merge conflicts stop the loop rather than causing repeated autonomous retries. Ordinary terminal agent failures may receive a fresh-identity bounded replacement only while retry and launch budgets permit. Reusing predecessor changes requires the same explicit reset decision as `swarm replace-codex --reset-worktree`.
+
+The read-only `claim-plane.swarm-operator-snapshot.v1` document combines:
+
+- session phase and root task;
+- active capacity and consumed token/run totals;
+- scheduler, worker, worktree, merge, recovery, and verification state;
+- one row per work item with its current next action.
+
+`swarm logs` emits `claim-plane.swarm-operator-event.v1` records by normalizing durable Codex JSONL, run lifecycle, recovery, merge, and verification events. It does not create a second source of truth.
+
+A network-free demonstration is included:
+
+```bash
+claim-plane swarm demo
+```
+
+It creates a disposable Git repository, executes two independent workers in the first wave, integrates them, executes one dependent worker, and produces final evidence. The deterministic demo agent is confined to the generated fixture and is not used by normal swarm execution.

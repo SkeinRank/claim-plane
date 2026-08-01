@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-operator-event.schema.json",
+  "title": "Claim Plane Swarm Operator Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "timestamp", "event", "session_id", "work_id", "run_id", "detail", "metadata"],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-operator-event.v1"},
+    "timestamp": {"type": "string", "minLength": 1},
+    "event": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "work_id": {"type": ["string", "null"]},
+    "run_id": {"type": ["string", "null"]},
+    "detail": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

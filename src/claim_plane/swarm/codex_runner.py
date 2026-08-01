@@ -167,7 +167,13 @@ def _create_private_run_directory(root: Path, run_dir: Path) -> None:
         try:
             info = current.lstat()
         except FileNotFoundError:
-            current.mkdir(mode=0o700)
+            try:
+                current.mkdir(mode=0o700)
+            except FileExistsError:
+                # Parallel workers may create the same trusted parent between
+                # lstat() and mkdir(). Re-read it and continue only after the
+                # normal symlink/directory checks below.
+                pass
             info = current.lstat()
         if stat.S_ISLNK(info.st_mode):
             raise ValueError(

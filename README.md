@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.24.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.25.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -115,6 +115,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - a deterministic merge queue that snapshots successful worker worktrees, integrates results on a Claim Plane-owned branch in effective-dependency order, blocks downstream workers until prerequisites are integrated, captures real Git conflicts, and leaves the user target branch untouched;
 - two-level swarm verification that checks each integrated work item against its admitted scope, reruns work-item and root acceptance on the managed integration head, detects acceptance-induced mutations, and persists a final `SWARM VERIFIED` evidence report;
 - crash-safe swarm recovery with worker heartbeat leases, orphan detection, durable pause/resume/cancel controls, and fresh-identity replacement that rechecks authority and never silently inherits predecessor edits;
+- one-command swarm operation with bounded parallel dispatch, compact status, normalized logs, deterministic integration, final verification, and an offline three-worker demo;
 - CLI, stdio MCP, JSON Schemas, examples, and a deterministic protocol benchmark.
 
 The base package has no runtime dependencies. Agent Lexicon remains an optional semantic layer.
@@ -149,6 +150,33 @@ Run the complete checks and example:
 ./scripts/check.sh
 ./scripts/demo.sh
 ```
+
+## Codex swarm operator
+
+Version 0.25.0 exposes the complete swarm lifecycle through one bounded operator command:
+
+```bash
+claim-plane init
+claim-plane swarm start --spec swarm-session.json
+```
+
+For an existing session:
+
+```bash
+claim-plane swarm start <session-id>
+claim-plane swarm status <session-id>
+claim-plane swarm logs <session-id> --follow
+```
+
+`swarm start` does not grant new authority. It materializes the current concurrency plan, shared admission, managed worktrees, and merge queue, then dispatches only scheduler-runnable work within the session budget. Successful workers are integrated in deterministic order and the session reaches `COMPLETED` only after two-level verification produces `SWARM VERIFIED`. Merge conflicts, dirty failed worktrees, stale state, or control-plane errors stop the operator loop and remain explicit recovery work.
+
+Run the fully offline demo without an API key or network access:
+
+```bash
+claim-plane swarm demo
+```
+
+The demo creates three work items, runs two independent workers concurrently, releases the dependent worker only after integration, and leaves the repository and evidence available for inspection.
 
 ## Swarm planning foundation
 

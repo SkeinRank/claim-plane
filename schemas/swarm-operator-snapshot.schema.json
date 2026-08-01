@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-operator-snapshot.schema.json",
+  "title": "Claim Plane Swarm Operator Snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol", "generated_at", "session_id", "session_state", "phase",
+    "root_task", "base_commit", "integration_target", "graph", "budget",
+    "usage", "scheduler", "merge_queue", "verification", "recovery",
+    "worktree_summary", "work"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-operator-snapshot.v1"},
+    "generated_at": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "session_state": {"enum": ["planned", "running", "paused", "verifying", "completed", "failed", "cancelled"]},
+    "phase": {"enum": ["planning", "ready", "executing", "blocked", "ready_to_integrate", "integrating", "integration_conflict", "ready_to_verify", "verifying", "verified", "replan_required", "paused", "failed", "cancelled"]},
+    "root_task": {"type": "object"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "integration_target": {"type": "object"},
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "fingerprint", "work_items"],
+      "properties": {
+        "version": {"type": "integer", "minimum": 1},
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "work_items": {"type": "integer", "minimum": 1}
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "fingerprint", "max_active_workers", "max_total_launches", "max_total_tokens", "max_cost_usd", "max_wall_time_seconds"],
+      "properties": {
+        "version": {"type": "integer", "minimum": 1},
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "max_active_workers": {"type": "integer", "minimum": 1},
+        "max_total_launches": {"type": "integer", "minimum": 1},
+        "max_total_tokens": {"type": ["integer", "null"], "minimum": 1},
+        "max_cost_usd": {"type": ["string", "null"]},
+        "max_wall_time_seconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runs", "active_workers", "succeeded_work_items", "failed_work_items", "total_tokens", "summed_worker_duration_seconds"],
+      "properties": {
+        "runs": {"type": "integer", "minimum": 0},
+        "active_workers": {"type": "integer", "minimum": 0},
+        "succeeded_work_items": {"type": "integer", "minimum": 0},
+        "failed_work_items": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": "integer", "minimum": 0},
+        "summed_worker_duration_seconds": {"type": "number", "minimum": 0}
+      }
+    },
+    "scheduler": {"type": ["object", "null"]},
+    "merge_queue": {"type": ["object", "null"]},
+    "verification": {"type": ["object", "null"]},
+    "recovery": {"type": "object"},
+    "worktree_summary": {"type": "object"},
+    "work": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["work_id", "title", "scheduler_state", "effective_dependencies", "run_id", "run_state", "attempt", "tokens", "merge_state", "verified", "worktree_health", "detail", "next_action"],
+        "properties": {
+          "work_id": {"type": "string", "minLength": 1},
+          "title": {"type": "string", "minLength": 1},
+          "scheduler_state": {"type": "string", "minLength": 1},
+          "effective_dependencies": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "run_id": {"type": ["string", "null"]},
+          "run_state": {"type": ["string", "null"]},
+          "attempt": {"type": "integer", "minimum": 0},
+          "tokens": {"type": "integer", "minimum": 0},
+          "merge_state": {"type": ["string", "null"]},
+          "verified": {"type": "boolean"},
+          "worktree_health": {"type": ["string", "null"]},
+          "detail": {"type": "string"},
+          "next_action": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

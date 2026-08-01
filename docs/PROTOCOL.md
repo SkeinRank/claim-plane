@@ -229,3 +229,12 @@ Governed mode is the default. Admission requires an exact base commit before a w
 ## Swarm recovery
 
 `claim-plane.swarm-recovery.v1` records operator-visible recovery, pause, resume, cancellation, and replacement events. Active Codex runs carry a heartbeat and lease expiry. A missing process or expired pre-spawn reservation may be finalized as `lost`; a still-live process with an expired lease remains `stale` until an operator explicitly requests termination. Replacement runs have fresh run and Codex thread identity, reference the predecessor through `replacement_of_run_id`, and must pass current admission, scheduler, retry, launch, budget, dependency, and managed-worktree checks. The normative JSON Schema is `schemas/swarm-recovery.schema.json`.
+
+
+## Swarm operator snapshot and event protocols
+
+`claim-plane.swarm-operator-snapshot.v1` is a read-only projection over the durable swarm session, budget, scheduler, worker-run, managed-worktree, merge-queue, recovery, and verification records. It does not grant authority or persist an alternative lifecycle. Each work row reports scheduler state, latest run and attempt, token use, merge state, verification state, worktree health, and the next operator action. The normative JSON Schema is `schemas/swarm-operator-snapshot.schema.json`.
+
+`claim-plane.swarm-operator-event.v1` normalizes durable lifecycle records for `swarm logs`. Events may originate from Codex JSONL, worker terminal records, recovery actions, merge entries, or verification. The event preserves its source payload under metadata where useful, but ordering and display do not replace the authoritative source record. The normative JSON Schema is `schemas/swarm-operator-event.schema.json`.
+
+The `swarm start` command is orchestration rather than a new authority protocol. Every dispatch still passes current shared admission, scheduler capacity, retry and resource budgets, managed-worktree ownership, deterministic integration, and final verification.

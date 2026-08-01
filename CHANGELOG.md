@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-08-01
+
+### Added
+
+- Add the operator-facing `claim-plane.swarm-operator-snapshot.v1` view, which combines session, scheduler, worker, budget, recovery, worktree, merge, and verification state into one read-only status document.
+- Add `swarm start` to prepare, dispatch, integrate, and verify an existing swarm session, or create and start one directly from `--spec`, without bypassing the underlying budget, admission, scheduler, worktree, merge, or evidence protocols.
+- Add `swarm logs` with a normalized durable timeline across Codex JSONL events, worker lifecycle records, recovery actions, merge entries, and final verification.
+- Add `swarm demo`, an offline deterministic three-worker example that demonstrates a parallel first wave, dependency-gated downstream execution, deterministic integration, and a final `SWARM VERIFIED` report.
+- Add operator snapshot and event JSON Schemas, public Python APIs, CLI regression coverage, and an executable demo helper.
+
+### Changed
+
+- Upgrade `swarm status` from a planning-only view to a compact work-by-work operator display with phase, active capacity, token usage, scheduler state, run state, merge state, verification state, and next action.
+- Make evidence-directory creation race-safe when multiple Codex workers start concurrently and create the same trusted parent namespace.
+- Stop the high-level operator loop on control-plane or worktree exceptions instead of repeatedly dispatching the same scheduler item; ordinary agent failures continue through bounded fresh-identity replacement when policy permits.
+- Keep `swarm start` idempotent for completed sessions and fail closed for dirty first-dispatch worktrees, paused sessions, stale authority, merge conflicts, exhausted budgets, and failed verification.
+
 ## [0.24.0] — 2026-08-01
 
 ### Added
