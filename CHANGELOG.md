@@ -8,6 +8,22 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-08-01
+
+### Added
+
+- Add `claim-plane.swarm-merge-queue.v1`, a durable deterministic integration queue bound to the exact repository, base commit, graph, budget, shared-admission fingerprint, and Claim Plane-owned integration branch.
+- Add `swarm merge-plan`, `swarm merge-queue`, `swarm merge-next`, and `swarm merge-all` commands for planning, inspecting, reserving, and draining integration work without mutating the user target branch.
+- Add deterministic worker snapshot commits, ordered integration commits, conflict-path capture, no-op result handling, and rollback to the previous integration head after a failed cherry-pick.
+- Add a managed integration worktree under the existing swarm ownership namespace and schema-v7 migration with JSON Schema and regression coverage.
+
+### Changed
+
+- Release effective dependencies only after their worker result is integrated when a merge queue exists; a successful process alone no longer makes downstream work runnable in that lifecycle.
+- Advance a clean dependent worktree to the durable integration head before execution so the worker observes integrated prerequisite changes while the original session base remains the authority anchor.
+- Keep integration separate from final verification: the queue produces an unverified integration branch and never updates the configured target branch.
+- Fail closed when worker branches contain unexpected commits, integration state is dirty or stale, queue reservations race, or actual Git conflicts contradict the planner-declared concurrency model.
+
 ## [0.21.0] — 2026-08-01
 
 ### Added

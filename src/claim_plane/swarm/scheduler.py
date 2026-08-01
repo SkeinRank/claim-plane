@@ -145,6 +145,8 @@ def compute_scheduler_snapshot(
     session: SwarmSession,
     admission: SharedAdmissionPlan,
     records: list[CodexRunRecord],
+    *,
+    integrated_work_ids: set[str] | None = None,
 ) -> SchedulerSnapshot:
     if (
         admission.session_id != session.session_id
@@ -210,6 +212,10 @@ def compute_scheduler_snapshot(
             for dependency in item.effective_dependencies
             if latest.get(dependency) is None
             or latest[dependency].state is not CodexRunState.SUCCEEDED
+            or (
+                integrated_work_ids is not None
+                and dependency not in integrated_work_ids
+            )
         ]
         exhausted_dependency = [
             dependency
@@ -309,5 +315,10 @@ def compute_scheduler_snapshot(
         metadata={
             "success_semantics": "codex_execution_succeeded_not_verified",
             "ordering": "effective-dependencies-then-topological-fairness",
+            "dependency_release": (
+                "integrated"
+                if integrated_work_ids is not None
+                else "execution_succeeded"
+            ),
         },
     )

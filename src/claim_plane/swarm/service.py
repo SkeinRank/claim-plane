@@ -20,6 +20,7 @@ from claim_plane.swarm.concurrency import (
     ConcurrencyPlanStatus,
     compute_concurrency_plan,
 )
+from claim_plane.swarm.merge_queue import MergeEntryState
 from claim_plane.swarm.models import (
     SWARM_SESSION_SPEC_PROTOCOL,
     IntegrationTarget,
@@ -459,6 +460,7 @@ def get_swarm_scheduler(repo: str | Path, session_id: str) -> dict[str, Any]:
         session = store.require(session_id)
         stored = store.get_shared_admission(session_id)
         records = store.list_codex_runs(session_id)
+        merge_queue = store.get_merge_queue(session_id)
     if session.repository_identity != _repository_identity(root):
         raise ValueError("swarm session is bound to a different repository identity")
     if stored is None:
@@ -467,7 +469,18 @@ def get_swarm_scheduler(repo: str | Path, session_id: str) -> dict[str, Any]:
             "run 'claim-plane swarm admit' first"
         )
     admission, admission_version = stored
-    snapshot = compute_scheduler_snapshot(session, admission, records)
+    integrated = (
+        None
+        if merge_queue is None
+        else {
+            entry.work_id
+            for entry in merge_queue[0].entries
+            if entry.state is MergeEntryState.INTEGRATED
+        }
+    )
+    snapshot = compute_scheduler_snapshot(
+        session, admission, records, integrated_work_ids=integrated
+    )
     return {
         "session_id": session_id,
         "admission_version": admission_version,
@@ -668,6 +681,7 @@ def inspect_swarm_worktrees(repo: str | Path, session_id: str) -> dict[str, Any]
     with _store(root) as store:
         session = store.require(session_id)
         records = store.list_worktrees(session_id)
+        merge_queue = store.get_merge_queue(session_id)
     if session.repository_identity != _repository_identity(root):
         raise ValueError("swarm session is bound to a different repository identity")
     registered = _registered_worktrees(root)
@@ -681,6 +695,9 @@ def inspect_swarm_worktrees(repo: str | Path, session_id: str) -> dict[str, Any]
         _inspect_record(root, session, record, registered) for record in records
     ]
     owned_paths = {Path(record.worktree_path).resolve() for record in records}
+    if merge_queue is not None:
+        queue, _ = merge_queue
+        owned_paths.add(Path(queue.integration_worktree_path).resolve())
     session_root = _session_worktree_root(root, session_id)
     orphans = []
     for path, item in sorted(registered.items(), key=lambda pair: str(pair[0])):

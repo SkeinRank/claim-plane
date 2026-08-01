@@ -263,7 +263,7 @@ def test_database_migrates_to_shared_admission_schema(tmp_path: Path) -> None:
         ).fetchall()
     }
     connection.close()
-    assert version == 6
+    assert version == 7
     assert "swarm_shared_admissions" in tables
 
 def test_atomic_scheduler_reservation_prevents_stale_double_dispatch(

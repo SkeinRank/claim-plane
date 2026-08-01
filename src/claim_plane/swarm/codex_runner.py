@@ -25,6 +25,7 @@ from claim_plane.connectors.codex import (
 )
 from claim_plane.core import IntentOperation
 from claim_plane.swarm.admission import SharedAdmissionStatus
+from claim_plane.swarm.merge_queue import MergeEntryState
 from claim_plane.swarm.models import SwarmSessionState, WorkItem
 from claim_plane.swarm.runs import (
     CodexRunBudget,
@@ -33,9 +34,11 @@ from claim_plane.swarm.runs import (
     CodexUsage,
 )
 from claim_plane.swarm.service import (
+    _git_result,
     _repository_identity,
     _require_initialized,
     _resolve_commit,
+    _worktree_dirty,
     _store,
     _validate_session_id,
     ensure_swarm_admission,
@@ -286,6 +289,7 @@ def _reserve_run(
         shared_data = store.get_shared_admission(session_id)
         worktrees = store.list_worktrees(session_id)
         existing_runs = store.list_codex_runs(session_id)
+        merge_queue_data = store.get_merge_queue(session_id)
     if session.repository_identity != identity:
         raise ValueError("swarm session is bound to a different repository identity")
     if session.state not in {SwarmSessionState.PLANNED, SwarmSessionState.RUNNING}:
@@ -325,6 +329,54 @@ def _reserve_run(
             f"work item {work_id!r} has no managed worktree; "
             "run provision-worktrees first"
         )
+    integrated_work_ids = (
+        None
+        if merge_queue_data is None
+        else {
+            entry.work_id
+            for entry in merge_queue_data[0].entries
+            if entry.state is MergeEntryState.INTEGRATED
+        }
+    )
+    execution_base = _resolve_commit(Path(worktree.worktree_path), "HEAD")
+    admission_record = shared_admission.admission_map[work_id]
+    if merge_queue_data is not None and admission_record.effective_dependencies:
+        missing_integrated = [
+            dependency
+            for dependency in admission_record.effective_dependencies
+            if dependency not in (integrated_work_ids or set())
+        ]
+        if missing_integrated:
+            raise ValueError(
+                "work item dependencies have not been integrated: "
+                + ", ".join(missing_integrated)
+            )
+        target_head = merge_queue_data[0].integration_head
+        worktree_path = Path(worktree.worktree_path)
+        if _worktree_dirty(worktree_path):
+            raise ValueError(
+                "cannot advance a dirty dependent worktree to the integration head"
+            )
+        if execution_base != target_head:
+            ancestor = _git_result(
+                worktree_path,
+                "merge-base",
+                "--is-ancestor",
+                execution_base,
+                target_head,
+            )
+            if ancestor.returncode != 0:
+                raise ValueError(
+                    "dependent worktree cannot be advanced to the integration head"
+                )
+            reset = _git_result(worktree_path, "reset", "--hard", target_head)
+            if reset.returncode != 0:
+                raise ValueError(
+                    reset.stderr.strip()
+                    or reset.stdout.strip()
+                    or "failed to advance dependent worktree"
+                )
+            execution_base = target_head
     inspection_payload = inspect_swarm_worktrees(root, session_id)
     inspection = next(
         value
@@ -353,7 +405,12 @@ def _reserve_run(
         and attempts_for_work >= 1 + session.budget_policy.retries.max_agent_restarts
     ):
         raise ValueError(f"restart budget is exhausted for work item {work_id!r}")
-    scheduler = compute_scheduler_snapshot(session, shared_admission, existing_runs)
+    scheduler = compute_scheduler_snapshot(
+        session,
+        shared_admission,
+        existing_runs,
+        integrated_work_ids=integrated_work_ids,
+    )
     if work_id not in scheduler.dispatchable_work_ids:
         work_state = next(
             value.state.value for value in scheduler.work if value.work_id == work_id
@@ -363,8 +420,6 @@ def _reserve_run(
             f"work item {work_id!r} is not runnable in current wave; "
             f"scheduler state={work_state}; dispatchable: {runnable}"
         )
-    admission_record = shared_admission.admission_map[work_id]
-
     policy = session.budget_policy
     completed_tokens = sum(
         record.usage.total_tokens for record in existing_runs if record.state.terminal
@@ -435,7 +490,7 @@ def _reserve_run(
         budget_fingerprint=session.budget_fingerprint,
         worktree_path=worktree.worktree_path,
         branch=worktree.branch,
-        base_commit=worktree.base_commit,
+        base_commit=execution_base,
         command=tuple(command),
         prompt_sha256=_sha256_text(prompt),
         budget=budget,

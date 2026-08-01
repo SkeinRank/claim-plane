@@ -11,12 +11,17 @@ from typing import Any
 from claim_plane.swarm.admission import SharedAdmissionPlan, SharedAdmissionStatus
 from claim_plane.swarm.budget import SwarmBudgetPolicy
 from claim_plane.swarm.concurrency import ConcurrencyPlan
+from claim_plane.swarm.merge_queue import (
+    DeterministicMergeQueue,
+    MergeEntryState,
+    MergeQueueEntry,
+)
 from claim_plane.swarm.models import SwarmSession, SwarmSessionState, WorkGraph
 from claim_plane.swarm.runs import CodexRunRecord, CodexRunState
 from claim_plane.swarm.scheduler import compute_scheduler_snapshot
 from claim_plane.swarm.worktrees import ManagedWorktree
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 
 
 class SwarmSessionStore:
@@ -154,6 +159,26 @@ class SwarmSessionStore:
                 budget_fingerprint TEXT NOT NULL,
                 concurrency_plan_fingerprint TEXT NOT NULL,
                 admission_fingerprint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES swarm_sessions(session_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS swarm_merge_queues (
+                session_id TEXT PRIMARY KEY,
+                queue_version INTEGER NOT NULL,
+                graph_version INTEGER NOT NULL,
+                graph_fingerprint TEXT NOT NULL,
+                budget_version INTEGER NOT NULL,
+                budget_fingerprint TEXT NOT NULL,
+                admission_fingerprint TEXT NOT NULL,
+                queue_fingerprint TEXT NOT NULL,
                 status TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -346,6 +371,10 @@ class SwarmSessionStore:
                 "DELETE FROM swarm_shared_admissions WHERE session_id = ?",
                 (session_id,),
             )
+            self._connection.execute(
+                "DELETE FROM swarm_merge_queues WHERE session_id = ?",
+                (session_id,),
+            )
             self._connection.commit()
             return updated
         except Exception:
@@ -407,6 +436,10 @@ class SwarmSessionStore:
             )
             self._connection.execute(
                 "DELETE FROM swarm_shared_admissions WHERE session_id = ?",
+                (session_id,),
+            )
+            self._connection.execute(
+                "DELETE FROM swarm_merge_queues WHERE session_id = ?",
                 (session_id,),
             )
             self._connection.commit()
@@ -777,8 +810,213 @@ class SwarmSessionStore:
                     created_at,
                 ),
             )
+            self._connection.execute(
+                "DELETE FROM swarm_merge_queues WHERE session_id = ?",
+                (session_id,),
+            )
             self._connection.commit()
             return plan, version, True
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    @staticmethod
+    def _merge_queue_payload(queue: DeterministicMergeQueue) -> str:
+        return json.dumps(
+            queue.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def get_merge_queue(
+        self, session_id: str
+    ) -> tuple[DeterministicMergeQueue, int] | None:
+        row = self._connection.execute(
+            "SELECT queue_version, payload_json FROM swarm_merge_queues "
+            "WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        payload: Any = json.loads(str(row["payload_json"]))
+        if not isinstance(payload, dict):
+            raise ValueError(f"stored merge queue for {session_id!r} is invalid")
+        return DeterministicMergeQueue.from_dict(payload), int(row["queue_version"])
+
+    def save_merge_queue(
+        self,
+        session_id: str,
+        queue: DeterministicMergeQueue,
+        *,
+        expected_admission_fingerprint: str,
+    ) -> tuple[DeterministicMergeQueue, int, bool]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session = self.require(session_id)
+            shared = self.get_shared_admission(session_id)
+            if shared is None:
+                raise ValueError("swarm session has no shared admission")
+            admission, _ = shared
+            if admission.fingerprint() != expected_admission_fingerprint:
+                raise ValueError("shared admission changed while planning merge queue")
+            if (
+                queue.graph_version != session.graph_version
+                or queue.graph_fingerprint != session.graph_fingerprint
+                or queue.budget_version != session.budget_version
+                or queue.budget_fingerprint != session.budget_fingerprint
+                or queue.admission_fingerprint != admission.fingerprint()
+            ):
+                raise ValueError("merge queue is stale for the current swarm session")
+            existing = self._connection.execute(
+                "SELECT queue_version, queue_fingerprint, created_at "
+                "FROM swarm_merge_queues WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            fingerprint = queue.fingerprint()
+            if (
+                existing is not None
+                and str(existing["queue_fingerprint"]) == fingerprint
+            ):
+                self._connection.commit()
+                return queue, int(existing["queue_version"]), False
+            version = 1 if existing is None else int(existing["queue_version"]) + 1
+            created_at = (
+                queue.created_at
+                if existing is None
+                else str(existing["created_at"])
+            )
+            self._connection.execute(
+                """
+                INSERT INTO swarm_merge_queues (
+                    session_id, queue_version, graph_version, graph_fingerprint,
+                    budget_version, budget_fingerprint, admission_fingerprint,
+                    queue_fingerprint, status, payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    queue_version = excluded.queue_version,
+                    graph_version = excluded.graph_version,
+                    graph_fingerprint = excluded.graph_fingerprint,
+                    budget_version = excluded.budget_version,
+                    budget_fingerprint = excluded.budget_fingerprint,
+                    admission_fingerprint = excluded.admission_fingerprint,
+                    queue_fingerprint = excluded.queue_fingerprint,
+                    status = excluded.status,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    session_id,
+                    version,
+                    queue.graph_version,
+                    queue.graph_fingerprint,
+                    queue.budget_version,
+                    queue.budget_fingerprint,
+                    queue.admission_fingerprint,
+                    fingerprint,
+                    queue.status.value,
+                    self._merge_queue_payload(queue),
+                    created_at,
+                    queue.updated_at,
+                ),
+            )
+            self._connection.commit()
+            return queue, version, True
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def claim_merge_entry(
+        self,
+        session_id: str,
+        work_id: str,
+        *,
+        expected_queue_fingerprint: str,
+        updated_at: str,
+    ) -> tuple[DeterministicMergeQueue, int, MergeQueueEntry]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            stored = self.get_merge_queue(session_id)
+            if stored is None:
+                raise ValueError("swarm session has no deterministic merge queue")
+            queue, version = stored
+            if queue.fingerprint() != expected_queue_fingerprint:
+                raise ValueError("merge queue changed concurrently; refresh and retry")
+            entry = queue.entry_map.get(work_id)
+            if entry is None:
+                raise KeyError(f"unknown merge-queue work item {work_id!r}")
+            if entry.state is not MergeEntryState.READY:
+                raise ValueError(
+                    f"merge-queue work item {work_id!r} is not ready "
+                    f"(state={entry.state.value})"
+                )
+            claimed = MergeQueueEntry(
+                work_id=entry.work_id,
+                order=entry.order,
+                effective_dependencies=entry.effective_dependencies,
+                source_branch=entry.source_branch,
+                state=MergeEntryState.INTEGRATING,
+                run_id=entry.run_id,
+                source_commit=entry.source_commit,
+                integration_commit=entry.integration_commit,
+                conflict_paths=entry.conflict_paths,
+                detail="merge integration reserved",
+            )
+            updated = queue.with_entry(
+                claimed, integration_head=queue.integration_head, updated_at=updated_at
+            )
+            self._connection.execute(
+                "UPDATE swarm_merge_queues SET queue_version = ?, queue_fingerprint = ?, "
+                "status = ?, payload_json = ?, updated_at = ? WHERE session_id = ?",
+                (
+                    version + 1,
+                    updated.fingerprint(),
+                    updated.status.value,
+                    self._merge_queue_payload(updated),
+                    updated_at,
+                    session_id,
+                ),
+            )
+            self._connection.commit()
+            return updated, version + 1, claimed
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def finish_merge_entry(
+        self,
+        session_id: str,
+        entry: MergeQueueEntry,
+        *,
+        integration_head: str,
+        updated_at: str,
+    ) -> tuple[DeterministicMergeQueue, int]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            stored = self.get_merge_queue(session_id)
+            if stored is None:
+                raise ValueError("swarm session has no deterministic merge queue")
+            queue, version = stored
+            current = queue.entry_map.get(entry.work_id)
+            if current is None or current.state is not MergeEntryState.INTEGRATING:
+                raise ValueError("merge entry is no longer reserved by this integrator")
+            updated = queue.with_entry(
+                entry, integration_head=integration_head, updated_at=updated_at
+            )
+            self._connection.execute(
+                "UPDATE swarm_merge_queues SET queue_version = ?, queue_fingerprint = ?, "
+                "status = ?, payload_json = ?, updated_at = ? WHERE session_id = ?",
+                (
+                    version + 1,
+                    updated.fingerprint(),
+                    updated.status.value,
+                    self._merge_queue_payload(updated),
+                    updated_at,
+                    session_id,
+                ),
+            )
+            self._connection.commit()
+            return updated, version + 1
         except Exception:
             self._connection.rollback()
             raise
@@ -879,7 +1117,22 @@ class SwarmSessionStore:
             if admission.status is not SharedAdmissionStatus.READY:
                 raise ValueError("shared admission requires replanning")
             existing_records = self.list_codex_runs(record.session_id)
-            snapshot = compute_scheduler_snapshot(session, admission, existing_records)
+            merge_queue = self.get_merge_queue(record.session_id)
+            integrated = (
+                None
+                if merge_queue is None
+                else {
+                    entry.work_id
+                    for entry in merge_queue[0].entries
+                    if entry.state is MergeEntryState.INTEGRATED
+                }
+            )
+            snapshot = compute_scheduler_snapshot(
+                session,
+                admission,
+                existing_records,
+                integrated_work_ids=integrated,
+            )
             if record.work_id not in snapshot.dispatchable_work_ids:
                 state = next(
                     item.state.value

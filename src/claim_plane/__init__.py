@@ -68,6 +68,10 @@ from claim_plane.swarm import (
     ConflictPolicy,
     ExecutionWave,
     IntegrationTarget,
+    DeterministicMergeQueue,
+    MergeEntryState,
+    MergeQueueEntry,
+    MergeQueueStatus,
     ResourceBudget,
     RetryBudget,
     RootTask,
@@ -101,7 +105,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.21.0"
+__version__ = "0.22.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -134,6 +138,10 @@ __all__ = [
     "ConflictPolicy",
     "ExecutionWave",
     "IntegrationTarget",
+    "DeterministicMergeQueue",
+    "MergeEntryState",
+    "MergeQueueEntry",
+    "MergeQueueStatus",
     "ResourceBudget",
     "RetryBudget",
     "SameFilePolicy",

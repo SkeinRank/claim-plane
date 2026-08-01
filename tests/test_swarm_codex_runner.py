@@ -329,5 +329,5 @@ def test_database_migrates_to_codex_run_schema(tmp_path: Path) -> None:
         ).fetchall()
     }
     connection.close()
-    assert version == 6
+    assert version == 7
     assert "swarm_codex_runs" in tables

@@ -350,6 +350,6 @@ def test_v1_database_migrates_to_default_budget_policy(tmp_path: Path) -> None:
         migrated = store.require("swm-migrate")
         version = int(store._connection.execute("PRAGMA user_version").fetchone()[0])
 
-    assert version == 6
+    assert version == 7
     assert migrated.budget_policy == SwarmBudgetPolicy()
     assert migrated.budget_version == 1

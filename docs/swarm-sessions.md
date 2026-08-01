@@ -186,11 +186,11 @@ Graph and budget versions are independent. Changing one does not silently overwr
 
 ## Database migration
 
-Opening an older swarm database upgrades it in place to schema version 6. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans; schema version 4 retains managed-worktree ownership; schema version 5 retains durable Codex-run records. The schema-6 migration adds source-bound shared-admission records only. Existing work graphs, budgets, plans, worktrees, runs, repository bindings, base commits, timestamps, and session identities remain unchanged.
+Opening an older swarm database upgrades it in place to schema version 7. Version-1 sessions receive the conservative default budget and deterministic budget fingerprint; version-2 and version-3 databases retain their stored concurrency plans; schema version 4 retains managed-worktree ownership; schema version 5 retains durable Codex-run records. The schema-6 migration adds source-bound shared-admission records. Schema version 7 adds the deterministic merge queue without rewriting existing sessions, plans, worktrees, admissions, or run records. Existing work graphs, budgets, plans, worktrees, runs, repository bindings, base commits, timestamps, and session identities remain unchanged.
 
 ## Current boundary
 
-Version 0.21.0 adds shared authority admission and a dynamic dependency scheduler on top of durable planning, budgets, adaptive concurrency, managed Git worktrees, and bounded Codex execution. Process success can release execution prerequisites, but it remains distinct from Claim Plane verification and final integration.
+Version 0.22.0 adds deterministic merge ordering and a Claim Plane-owned integration branch on top of durable planning, budgets, adaptive concurrency, managed Git worktrees, bounded Codex execution, shared admission, and dynamic scheduling. Integration remains distinct from swarm verification and never mutates the configured target branch.
 
 ## Adaptive concurrency planning
 
@@ -216,7 +216,7 @@ A `serialize` decision adds a deterministic ordering edge while preserving the o
 
 Replacing either the work graph or budget policy invalidates the stored plan atomically. The next scheduler step must run `claim-plane swarm plan` again before workers can be launched.
 
-Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. Version 0.20.0 added bounded Codex process execution. Version 0.21.0 converts serialization constraints into effective dependencies and releases work dynamically instead of requiring a complete static wave barrier.
+Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. Version 0.20.0 added bounded Codex process execution. Version 0.21.0 converts serialization constraints into effective dependencies. Version 0.22.0 releases dependent work only after prerequisites are integrated into the durable integration branch.
 
 ## Shared admission and dependency scheduling
 
@@ -244,7 +244,7 @@ The dependency scheduler is operational rather than static. It combines the admi
 
 The Codex runner re-evaluates this snapshot inside the same SQLite transaction that reserves a worker slot and binds that reservation to the shared-admission fingerprint. Two concurrent launch attempts therefore cannot both rely on an obsolete capacity view. For compatibility with upgraded 0.20 sessions, the runner can create a missing admission record automatically, but explicit `swarm admit` is the preferred operator flow.
 
-A `succeeded` process releases execution dependencies only. It is not evidence that the work item is semantically verified, mergeable, or accepted.
+Without a merge queue, a `succeeded` process is the compatibility release signal. Once `swarm merge-plan` creates the deterministic queue, effective dependencies are released only after their entries are `integrated`. This prevents a dependent worker from starting against the original base while its prerequisite exists only as uncommitted changes in another worktree. Process success and integration are still not evidence that the work item is semantically verified or accepted.
 
 ## Managed worktree provisioning
 
@@ -300,3 +300,24 @@ Codex JSONL events, stderr, the final agent message, prompt digest, command, PID
 A `succeeded` run means only that the bounded Codex process exited successfully. It may release execution dependencies in the scheduler, but it does not mean the work item or swarm is `VERIFIED`. Merge ordering, cross-intent verification, and final integration remain later lifecycle stages.
 
 Codex JSONL currently exposes token usage but not authoritative provider cost. The run record therefore preserves the session cost ceiling and explicitly marks cost metering as unavailable instead of fabricating a dollar estimate.
+
+## Deterministic merge queue
+
+Version 0.22.0 materializes successful worker results on a dedicated Claim Plane-owned integration branch:
+
+```bash
+claim-plane swarm merge-plan <session-id>
+claim-plane swarm merge-queue <session-id>
+claim-plane swarm merge-next <session-id>
+claim-plane swarm merge-all <session-id>
+```
+
+The queue is bound to the current graph, budget, shared admission, repository identity, and pinned session base. Its order follows effective dependencies and the deterministic work-graph topological order. Replanning or changing authority invalidates the queue instead of silently reusing an obsolete integration order.
+
+A ready worker result is snapshotted from its Claim Plane-owned branch into a commit. Codex control files and `.claim-plane` state are excluded. The snapshot is applied to a managed integration worktree and committed in queue order. The configured integration target branch is metadata only at this stage and is never checked out, reset, or advanced.
+
+If actual Git changes conflict despite planner-declared compatibility, the cherry-pick is aborted, the integration worktree is reset to the previous durable head, conflict paths are recorded, and the queue enters `conflict`. This makes the real repository result authoritative over the planner's concurrency estimate.
+
+When a work item has effective dependencies, its clean managed worktree is advanced to the current integration head before Codex starts. The recorded execution base therefore contains integrated prerequisite changes. Dirty dependent worktrees and non-ancestor integration heads fail closed rather than losing local work.
+
+Queue entry states are `pending`, `blocked`, `ready`, `integrating`, `integrated`, and `conflict`. Queue status is `waiting`, `ready`, `integrating`, `conflict`, or `completed`. `integrated` means only that Git composition succeeded on the managed branch; swarm verification and final target publication remain later stages.

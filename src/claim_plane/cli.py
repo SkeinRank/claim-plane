@@ -55,11 +55,15 @@ from claim_plane.swarm import (
     get_swarm_admission,
     get_swarm_concurrency_plan,
     get_swarm_scheduler,
+    get_swarm_merge_queue,
     get_swarm_session,
     inspect_swarm_worktrees,
     list_codex_runs,
     list_swarm_sessions,
     plan_swarm_concurrency,
+    plan_swarm_merge_queue,
+    integrate_next_swarm_result,
+    drain_swarm_merge_queue,
     provision_swarm_worktrees,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
@@ -509,6 +513,76 @@ def cmd_swarm_scheduler(args: argparse.Namespace) -> int:
         for item in result["scheduler"]["work"]:
             print(f"  {item['work_id']}: {item['state']} — {item['detail']}")
     return 0 if result["summary"]["status"] != "replan_required" else 2
+
+
+def cmd_swarm_merge_plan(args: argparse.Namespace) -> int:
+    result = plan_swarm_merge_queue(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        action = "Stored" if result["created"] else "Refreshed"
+        print(
+            f"{action} deterministic merge queue v{result['queue_version']} "
+            f"for {result['session_id']}."
+        )
+        print(
+            f"Status: {summary['status']}; ready="
+            f"{', '.join(summary['ready_work_ids']) or 'none'}"
+        )
+        print(f"Integration head: {summary['integration_head']}")
+    return 0 if result["summary"]["status"] != "conflict" else 2
+
+
+def cmd_swarm_merge_queue(args: argparse.Namespace) -> int:
+    result = get_swarm_merge_queue(
+        args.repo, args.session_id, refresh=not args.no_refresh
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        print(
+            f"Merge queue v{result['queue_version']} for "
+            f"{result['session_id']}: {summary['status']}"
+        )
+        for entry in result["merge_queue"]["entries"]:
+            print(f"  {entry['order']}: {entry['work_id']} — {entry['state']}")
+            if entry["detail"]:
+                print(f"    {entry['detail']}")
+        print(f"Integration head: {summary['integration_head']}")
+    return 0 if result["summary"]["status"] != "conflict" else 2
+
+
+def cmd_swarm_merge_next(args: argparse.Namespace) -> int:
+    result = integrate_next_swarm_result(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        entry = result["entry"]
+        print(
+            f"Merge {entry['work_id']}: {entry['state']} "
+            f"into the managed integration branch."
+        )
+        if entry["conflict_paths"]:
+            print("Conflicts: " + ", ".join(entry["conflict_paths"]))
+        print(f"Integration head: {result['summary']['integration_head']}")
+    return 0 if result["integrated"] else 2
+
+
+def cmd_swarm_merge_all(args: argparse.Namespace) -> int:
+    result = drain_swarm_merge_queue(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(
+            f"Merge queue for {result['session_id']}: "
+            f"{result['summary']['status']}; integrated={len(result['integrated'])}."
+        )
+        for entry in result["integrated"]:
+            print(f"  {entry['work_id']}: {entry['state']}")
+        print(f"Integration head: {result['summary']['integration_head']}")
+    return 0 if result["summary"]["status"] != "conflict" else 2
 
 
 def cmd_swarm_budget(args: argparse.Namespace) -> int:
@@ -1466,6 +1540,47 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_scheduler.add_argument("--json", action="store_true")
     swarm_scheduler.add_argument("--out")
     swarm_scheduler.set_defaults(func=cmd_swarm_scheduler)
+
+    swarm_merge_plan = swarm_sub.add_parser(
+        "merge-plan",
+        help="Compute or refresh the deterministic integration queue.",
+    )
+    swarm_merge_plan.add_argument("session_id")
+    swarm_merge_plan.add_argument("--repo", default=".")
+    swarm_merge_plan.add_argument("--json", action="store_true")
+    swarm_merge_plan.add_argument("--out")
+    swarm_merge_plan.set_defaults(func=cmd_swarm_merge_plan)
+
+    swarm_merge_queue = swarm_sub.add_parser(
+        "merge-queue",
+        help="Inspect deterministic integration order and durable entry states.",
+    )
+    swarm_merge_queue.add_argument("session_id")
+    swarm_merge_queue.add_argument("--repo", default=".")
+    swarm_merge_queue.add_argument("--no-refresh", action="store_true")
+    swarm_merge_queue.add_argument("--json", action="store_true")
+    swarm_merge_queue.add_argument("--out")
+    swarm_merge_queue.set_defaults(func=cmd_swarm_merge_queue)
+
+    swarm_merge_next = swarm_sub.add_parser(
+        "merge-next",
+        help="Integrate the next ready worker result into the managed branch.",
+    )
+    swarm_merge_next.add_argument("session_id")
+    swarm_merge_next.add_argument("--repo", default=".")
+    swarm_merge_next.add_argument("--json", action="store_true")
+    swarm_merge_next.add_argument("--out")
+    swarm_merge_next.set_defaults(func=cmd_swarm_merge_next)
+
+    swarm_merge_all = swarm_sub.add_parser(
+        "merge-all",
+        help="Drain all currently ready merge entries until waiting or conflict.",
+    )
+    swarm_merge_all.add_argument("session_id")
+    swarm_merge_all.add_argument("--repo", default=".")
+    swarm_merge_all.add_argument("--json", action="store_true")
+    swarm_merge_all.add_argument("--out")
+    swarm_merge_all.set_defaults(func=cmd_swarm_merge_all)
 
     swarm_budget = swarm_sub.add_parser(
         "budget", help="Export the versioned budget policy for one swarm session."

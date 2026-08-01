@@ -172,6 +172,23 @@ The default `tree` sandbox is a repository-tree mutation detector, not an operat
 
 Evidence stores both the SHA-256 of the exact pretty-printed file and the SHA-256 of its canonical JSON payload. HMAC-SHA256 signatures use a shared CI secret. Ed25519 signatures use a PEM private key and can be verified independently with the corresponding public key. Both bind the canonical evidence payload.
 
+## Deterministic swarm merge queue
+
+`claim-plane.swarm-merge-queue.v1` binds integration state to one swarm session,
+repository identity, exact base commit, work-graph version, budget version, and
+shared-admission fingerprint. Eligible worker snapshots are ordered by the
+effective dependency graph and applied only to a Claim Plane-owned integration
+branch and worktree. The configured user target branch is never mutated by this
+protocol.
+
+Each entry moves through `pending`, `blocked`, `ready`, `integrating`,
+`integrated`, or `conflict`. Reserving an entry and publishing its durable result
+are serialized in the swarm SQLite store. A Git conflict aborts the cherry-pick,
+restores the previous integration head, and records the conflicting paths. Once a
+queue exists, downstream scheduling requires prerequisites to be `integrated`,
+not merely process-successful. Integration remains distinct from semantic
+verification and final acceptance.
+
 ## Compatibility
 
 The `0.x` protocol is experimental. Newly introduced strict fields default to secure behavior, while `result_ref` remains optional. Unbound `contract:<identifier>=<signature>` preserve policies remain accepted for compatibility, while `contract:<subject>::<identifier>=<signature>` is preferred. Integration runs are additive and optional.

@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.21.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.22.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -38,6 +38,9 @@ claim-plane swarm scheduler <session-id>
 claim-plane swarm provision-worktrees <session-id>
 claim-plane swarm worktrees <session-id>
 claim-plane swarm run-codex <session-id> --work-id <work-id>
+claim-plane swarm merge-plan <session-id>
+claim-plane swarm merge-next <session-id>
+claim-plane swarm merge-queue <session-id>
 claim-plane swarm runs <session-id>
 ```
 
@@ -106,6 +109,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - adaptive concurrency plans that combine the dependency DAG with region, overlap, contract, schema, and worker-budget constraints to produce deterministic execution waves or a fail-closed `replan_required` result;
 - shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, and promotes serialization constraints into effective dependencies;
 - a dynamic dependency scheduler that releases only admitted, prerequisite-complete work within current worker capacity and distinguishes runnable, active, retryable, terminal, and dependency-blocked items;
+- a deterministic merge queue that snapshots successful worker worktrees, integrates results on a Claim Plane-owned branch in effective-dependency order, blocks downstream workers until prerequisites are integrated, captures real Git conflicts, and leaves the user target branch untouched;
 - CLI, stdio MCP, JSON Schemas, examples, and a deterministic protocol benchmark.
 
 The base package has no runtime dependencies. Agent Lexicon remains an optional semantic layer.
@@ -157,11 +161,13 @@ claim-plane swarm concurrency <session-id>
 claim-plane swarm admit <session-id>
 claim-plane swarm admission <session-id>
 claim-plane swarm scheduler <session-id>
+claim-plane swarm merge-plan <session-id>
+claim-plane swarm merge-queue <session-id>
 ```
 
 The session is bound to one repository identity and exact Git commit. Work items carry proposed operations, preserve requirements, acceptance commands, and explicit dependencies. Claim Plane rejects duplicate identifiers, missing dependencies, cycles, repository-escaping paths, and attempts to include control-plane or Git state.
 
-The budget is a separate versioned protocol object. It caps active workers, per-work-item concurrency, work-graph size, total launches, token use, cost, wall time, replans, repairs, and restarts. It also records fail-closed policies for same-file work, unknown overlap, shared contracts, and schema changes. Work graph and budget replacements each require their own expected version, preventing concurrent planner updates from silently overwriting one another. The adaptive concurrency controller consumes the exact graph and budget versions, adds deterministic serialization constraints, packs safe work up to `max_active`, and persists source-bound execution waves. A graph or budget replacement invalidates that plan atomically. Shared admission then derives one source-bound ChangeIntent per work item and checks the authority topology before execution. The dynamic scheduler combines those admitted intents, effective dependencies, durable run state, retry ceilings, and remaining worker capacity to release only currently runnable work. Graph, budget, or concurrency-plan changes invalidate the admission record atomically.
+The budget is a separate versioned protocol object. It caps active workers, per-work-item concurrency, work-graph size, total launches, token use, cost, wall time, replans, repairs, and restarts. It also records fail-closed policies for same-file work, unknown overlap, shared contracts, and schema changes. Work graph and budget replacements each require their own expected version, preventing concurrent planner updates from silently overwriting one another. The adaptive concurrency controller consumes the exact graph and budget versions, adds deterministic serialization constraints, packs safe work up to `max_active`, and persists source-bound execution waves. A graph or budget replacement invalidates that plan atomically. Shared admission then derives one source-bound ChangeIntent per work item and checks the authority topology before execution. The dynamic scheduler combines those admitted intents, effective dependencies, durable run state, retry ceilings, and remaining worker capacity to release only currently runnable work. Graph, budget, or concurrency-plan changes invalidate the admission record atomically. Once `merge-plan` exists, dependency release is integration-aware: a successful prerequisite must reach the managed integration branch before a dependent worker can start.
 
 See [Swarm sessions and work graphs](docs/swarm-sessions.md) for the complete format and CLI.
 
