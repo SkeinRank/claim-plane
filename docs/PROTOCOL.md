@@ -220,3 +220,8 @@ The broker enforces exact capabilities rather than a generic mutation flag: `wri
 ## Governed and exploratory modes
 
 Governed mode is the default. Admission requires an exact base commit before a worker starts. Exploratory mode is an explicit compatibility mode for local prototyping; integration still requires an exact pinned commit.
+
+## Swarm verification protocol
+
+`claim-plane.swarm-verification.v1` records final evidence for a completed swarm integration. It binds the report to the repository identity, pinned base, graph and budget versions and fingerprints, shared-admission fingerprint, deterministic merge-queue fingerprint, and integration head. The report contains per-work-item attribution, acceptance outcomes, root integration findings, snapshot-integrity evidence, and the final `verified` or `failed` status. The normative JSON Schema is `schemas/swarm-verification.schema.json`.
+

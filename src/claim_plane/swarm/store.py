@@ -20,8 +20,9 @@ from claim_plane.swarm.models import SwarmSession, SwarmSessionState, WorkGraph
 from claim_plane.swarm.runs import CodexRunRecord, CodexRunState
 from claim_plane.swarm.scheduler import compute_scheduler_snapshot
 from claim_plane.swarm.worktrees import ManagedWorktree
+from claim_plane.swarm.verification import SwarmVerificationReport
 
-_SCHEMA_VERSION = 7
+_SCHEMA_VERSION = 8
 
 
 class SwarmSessionStore:
@@ -179,6 +180,27 @@ class SwarmSessionStore:
                 budget_fingerprint TEXT NOT NULL,
                 admission_fingerprint TEXT NOT NULL,
                 queue_fingerprint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES swarm_sessions(session_id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        self._connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS swarm_verifications (
+                session_id TEXT PRIMARY KEY,
+                verification_version INTEGER NOT NULL,
+                graph_version INTEGER NOT NULL,
+                graph_fingerprint TEXT NOT NULL,
+                budget_version INTEGER NOT NULL,
+                budget_fingerprint TEXT NOT NULL,
+                admission_fingerprint TEXT NOT NULL,
+                merge_queue_fingerprint TEXT NOT NULL,
+                verification_fingerprint TEXT NOT NULL,
                 status TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -1065,6 +1087,203 @@ class SwarmSessionStore:
         if record is None:
             raise KeyError(f"unknown Codex run {run_id!r}")
         return record
+
+    @staticmethod
+    def _verification_payload(report: SwarmVerificationReport) -> str:
+        return json.dumps(
+            report.to_dict(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def get_verification(
+        self, session_id: str
+    ) -> tuple[SwarmVerificationReport, int] | None:
+        row = self._connection.execute(
+            "SELECT verification_version, payload_json FROM swarm_verifications "
+            "WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        payload: Any = json.loads(str(row["payload_json"]))
+        if not isinstance(payload, dict):
+            raise ValueError(f"stored swarm verification for {session_id!r} is invalid")
+        return SwarmVerificationReport.from_dict(payload), int(
+            row["verification_version"]
+        )
+
+    def begin_verification(
+        self,
+        session_id: str,
+        *,
+        expected_queue_fingerprint: str,
+        updated_at: str,
+    ) -> SwarmSession:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session = self.require(session_id)
+            if session.state is SwarmSessionState.CANCELLED:
+                raise ValueError("cannot verify a cancelled swarm session")
+            queue_data = self.get_merge_queue(session_id)
+            if (
+                queue_data is None
+                or queue_data[0].fingerprint() != expected_queue_fingerprint
+            ):
+                raise ValueError("merge queue changed before swarm verification")
+            active = int(
+                self._connection.execute(
+                    "SELECT COUNT(*) FROM swarm_codex_runs WHERE session_id = ? "
+                    "AND state IN ('reserved', 'running', 'cancelling')",
+                    (session_id,),
+                ).fetchone()[0]
+            )
+            if active:
+                raise ValueError("cannot verify while swarm workers are active")
+            verifying = replace(
+                session,
+                state=SwarmSessionState.VERIFYING,
+                updated_at=updated_at,
+            )
+            self._connection.execute(
+                "UPDATE swarm_sessions SET state = ?, payload_json = ?, updated_at = ? "
+                "WHERE session_id = ?",
+                (
+                    SwarmSessionState.VERIFYING.value,
+                    self._payload(verifying),
+                    updated_at,
+                    session_id,
+                ),
+            )
+            self._connection.commit()
+            return verifying
+        except Exception:
+            self._connection.rollback()
+            raise
+
+    def save_verification(
+        self,
+        report: SwarmVerificationReport,
+        *,
+        expected_queue_fingerprint: str,
+    ) -> tuple[SwarmVerificationReport, int, bool]:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            session = self.require(report.session_id)
+            shared = self.get_shared_admission(report.session_id)
+            queue_data = self.get_merge_queue(report.session_id)
+            if shared is None or queue_data is None:
+                raise ValueError("swarm verification inputs are missing")
+            queue = queue_data[0]
+            if queue.fingerprint() != expected_queue_fingerprint:
+                raise ValueError("merge queue changed during swarm verification")
+            if (
+                report.repository_identity != session.repository_identity
+                or report.base_commit != session.base_commit
+                or report.graph_version != session.graph_version
+                or report.graph_fingerprint != session.graph_fingerprint
+                or report.budget_version != session.budget_version
+                or report.budget_fingerprint != session.budget_fingerprint
+                or report.admission_fingerprint != shared[0].fingerprint()
+                or report.merge_queue_fingerprint != queue.fingerprint()
+                or report.integration_head != queue.integration_head
+            ):
+                raise ValueError("swarm verification is stale for the current session")
+            existing = self._connection.execute(
+                "SELECT verification_version, verification_fingerprint, created_at "
+                "FROM swarm_verifications WHERE session_id = ?",
+                (report.session_id,),
+            ).fetchone()
+            fingerprint = report.fingerprint()
+            target_state = (
+                SwarmSessionState.COMPLETED
+                if report.verified
+                else SwarmSessionState.FAILED
+            )
+            finished_session = replace(
+                session,
+                state=target_state,
+                updated_at=report.created_at,
+            )
+            if (
+                existing is not None
+                and str(existing["verification_fingerprint"]) == fingerprint
+            ):
+                self._connection.execute(
+                    "UPDATE swarm_sessions SET state = ?, payload_json = ?, updated_at = ? "
+                    "WHERE session_id = ?",
+                    (
+                        target_state.value,
+                        self._payload(finished_session),
+                        report.created_at,
+                        report.session_id,
+                    ),
+                )
+                self._connection.commit()
+                return report, int(existing["verification_version"]), False
+            version = (
+                1
+                if existing is None
+                else int(existing["verification_version"]) + 1
+            )
+            created_at = (
+                report.created_at
+                if existing is None
+                else str(existing["created_at"])
+            )
+            self._connection.execute(
+                """
+                INSERT INTO swarm_verifications (
+                    session_id, verification_version, graph_version, graph_fingerprint,
+                    budget_version, budget_fingerprint, admission_fingerprint,
+                    merge_queue_fingerprint, verification_fingerprint, status,
+                    payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    verification_version = excluded.verification_version,
+                    graph_version = excluded.graph_version,
+                    graph_fingerprint = excluded.graph_fingerprint,
+                    budget_version = excluded.budget_version,
+                    budget_fingerprint = excluded.budget_fingerprint,
+                    admission_fingerprint = excluded.admission_fingerprint,
+                    merge_queue_fingerprint = excluded.merge_queue_fingerprint,
+                    verification_fingerprint = excluded.verification_fingerprint,
+                    status = excluded.status,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    report.session_id,
+                    version,
+                    report.graph_version,
+                    report.graph_fingerprint,
+                    report.budget_version,
+                    report.budget_fingerprint,
+                    report.admission_fingerprint,
+                    report.merge_queue_fingerprint,
+                    fingerprint,
+                    report.status.value,
+                    self._verification_payload(report),
+                    created_at,
+                    report.created_at,
+                ),
+            )
+            self._connection.execute(
+                "UPDATE swarm_sessions SET state = ?, payload_json = ?, updated_at = ? "
+                "WHERE session_id = ?",
+                (
+                    target_state.value,
+                    self._payload(finished_session),
+                    report.created_at,
+                    report.session_id,
+                ),
+            )
+            self._connection.commit()
+            return report, version, True
+        except Exception:
+            self._connection.rollback()
+            raise
 
     def reserve_codex_run(
         self,

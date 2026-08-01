@@ -85,6 +85,10 @@ from claim_plane.swarm import (
     SwarmBudgetPolicy,
     SwarmSession,
     SwarmSessionState,
+    SwarmVerificationReport,
+    SwarmVerificationStatus,
+    VerificationFinding,
+    WorkVerificationEvidence,
     WorkAdmission,
     WorkGraph,
     WorkItem,
@@ -105,7 +109,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.22.0"
+__version__ = "0.23.0"
 
 __all__ = [
     "AcceptanceResult",
@@ -201,6 +205,10 @@ __all__ = [
     "RootTask",
     "SwarmSession",
     "SwarmSessionState",
+    "SwarmVerificationReport",
+    "SwarmVerificationStatus",
+    "VerificationFinding",
+    "WorkVerificationEvidence",
     "WorkAdmission",
     "WorkGraph",
     "WorkItem",

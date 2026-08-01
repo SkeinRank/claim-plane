@@ -95,6 +95,15 @@ from claim_plane.swarm.service import (
     validate_concurrency_plan,
     validate_work_graph,
 )
+from claim_plane.swarm.verification import (
+    SWARM_VERIFICATION_PROTOCOL,
+    SwarmVerificationReport,
+    SwarmVerificationStatus,
+    VerificationFinding,
+    WorkVerificationEvidence,
+    get_swarm_verification,
+    verify_swarm_session,
+)
 from claim_plane.swarm.worktrees import (
     SWARM_MANAGED_WORKTREE_PROTOCOL,
     ManagedWorktree,
@@ -113,6 +122,7 @@ __all__ = [
     "SWARM_CONCURRENCY_PLAN_PROTOCOL",
     "SWARM_MANAGED_WORKTREE_PROTOCOL",
     "SWARM_MERGE_QUEUE_PROTOCOL",
+    "SWARM_VERIFICATION_PROTOCOL",
     "SWARM_SCHEDULER_SNAPSHOT_PROTOCOL",
     "SWARM_SESSION_PROTOCOL",
     "SWARM_SESSION_SPEC_PROTOCOL",
@@ -150,9 +160,13 @@ __all__ = [
     "SwarmBudgetPolicy",
     "SwarmSession",
     "SwarmSessionState",
+    "SwarmVerificationReport",
+    "SwarmVerificationStatus",
     "WorkAdmission",
     "WorkGraph",
     "WorkItem",
+    "WorkVerificationEvidence",
+    "VerificationFinding",
     "WorkerBudget",
     "WorktreeHealth",
     "WorktreeInspection",
@@ -172,6 +186,7 @@ __all__ = [
     "get_swarm_scheduler",
     "get_swarm_merge_queue",
     "get_swarm_session",
+    "get_swarm_verification",
     "inspect_swarm_worktrees",
     "list_codex_runs",
     "list_swarm_sessions",
@@ -192,4 +207,5 @@ __all__ = [
     "validate_budget_policy",
     "validate_concurrency_plan",
     "validate_work_graph",
+    "verify_swarm_session",
 ]

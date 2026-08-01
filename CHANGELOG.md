@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-08-01
+
+### Added
+
+- Add `claim-plane.swarm-verification.v1`, a durable two-level evidence report bound to the exact repository, base commit, graph, budget, shared admission, merge queue, and integrated Git head.
+- Add `swarm verify` and `swarm evidence` commands for executing and inspecting final swarm verification in human-readable or JSON form.
+- Add per-work-item evidence for integrated paths, changed regions, source and integration commits, acceptance results, declared-scope violations, and verification status.
+- Add root-level verification over the complete integration worktree using the union of admitted ChangeIntents, contract and preserve checks, root acceptance criteria, and immutable snapshot integrity.
+- Add schema-v8 migration, JSON Schema, and regression coverage for successful verification, undeclared integrated changes, acceptance mutation, incomplete queues, and durable evidence retrieval.
+
+### Changed
+
+- Transition the swarm session to `VERIFYING` before evidence collection and to `COMPLETED` only after a clean report; failed verification transitions the session to `FAILED`.
+- Keep process success and Git integration distinct from verified completion: only a clean two-level report produces `SWARM VERIFIED`.
+- Restore the managed integration worktree to its durable integration head when acceptance commands mutate repository content, preserving the evidence boundary for later repair or recovery.
+- Reject verification while workers are active, when the merge queue is incomplete or stale, when the integration worktree is dirty, or when its HEAD differs from the durable queue state.
+
 ## [0.22.0] — 2026-08-01
 
 ### Added

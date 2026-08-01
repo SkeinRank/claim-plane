@@ -190,7 +190,7 @@ Opening an older swarm database upgrades it in place to schema version 7. Versio
 
 ## Current boundary
 
-Version 0.22.0 adds deterministic merge ordering and a Claim Plane-owned integration branch on top of durable planning, budgets, adaptive concurrency, managed Git worktrees, bounded Codex execution, shared admission, and dynamic scheduling. Integration remains distinct from swarm verification and never mutates the configured target branch.
+Version 0.23.0 adds durable two-level swarm verification on top of deterministic merge ordering and the Claim Plane-owned integration branch. Integration remains isolated from the configured target branch, and only a clean final evidence report transitions the session to `COMPLETED`.
 
 ## Adaptive concurrency planning
 
@@ -216,7 +216,7 @@ A `serialize` decision adds a deterministic ordering edge while preserving the o
 
 Replacing either the work graph or budget policy invalidates the stored plan atomically. The next scheduler step must run `claim-plane swarm plan` again before workers can be launched.
 
-Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. Version 0.20.0 added bounded Codex process execution. Version 0.21.0 converts serialization constraints into effective dependencies. Version 0.22.0 releases dependent work only after prerequisites are integrated into the durable integration branch.
+Version 0.19.0 consumes this deterministic execution contract to provision isolated Git worktrees. Version 0.20.0 added bounded Codex process execution. Version 0.21.0 converts serialization constraints into effective dependencies. Version 0.22.0 releases dependent work only after prerequisites are integrated into the durable integration branch. Version 0.23.0 verifies the integrated result and emits durable `SWARM VERIFIED` evidence.
 
 ## Shared admission and dependency scheduling
 
@@ -321,3 +321,34 @@ If actual Git changes conflict despite planner-declared compatibility, the cherr
 When a work item has effective dependencies, its clean managed worktree is advanced to the current integration head before Codex starts. The recorded execution base therefore contains integrated prerequisite changes. Dirty dependent worktrees and non-ancestor integration heads fail closed rather than losing local work.
 
 Queue entry states are `pending`, `blocked`, `ready`, `integrating`, `integrated`, and `conflict`. Queue status is `waiting`, `ready`, `integrating`, `conflict`, or `completed`. `integrated` means only that Git composition succeeded on the managed branch; swarm verification and final target publication remain later stages.
+
+## Swarm verification and evidence
+
+Version 0.23.0 closes the execution lifecycle without publishing to the configured target branch:
+
+```bash
+claim-plane swarm verify <session-id>
+claim-plane swarm evidence <session-id>
+```
+
+Verification requires a completed deterministic merge queue, no active workers, a clean Claim Plane-owned integration worktree, and an integration `HEAD` that exactly matches the durable queue. The session enters `VERIFYING` before evidence collection. A clean report transitions it to `COMPLETED`; any verification error transitions it to `FAILED`.
+
+The first level verifies every integrated work item independently. Claim Plane records the worker run, source snapshot commit, integration commit, actual paths and line regions, work-item acceptance results, and any undeclared, missing, or out-of-region change. This attribution is derived from the actual integration commit rather than from the agent's final message.
+
+The second level treats the entire integration branch as one root change. Claim Plane constructs a root verification intent from all shared-admission intents, collects the Git manifest from the pinned session base to the integration head, verifies the union of declared operations, contracts, and preserves, and runs root acceptance criteria. Work-item acceptance criteria are also rerun on the final integrated state so later merges cannot silently invalidate an earlier worker result.
+
+Acceptance commands are part of evidence, not trusted mutation authority. Claim Plane captures the integration tree before and after acceptance. If tests or scripts alter tracked or non-ignored repository content, the report records `snapshot_mutation`, verification fails closed, and the managed integration worktree is reset to the durable integration head.
+
+The persisted `claim-plane.swarm-verification.v1` report is bound to the repository identity, base commit, graph and budget versions, shared-admission fingerprint, merge-queue fingerprint, and integration head. `succeeded`, `integrated`, and `verified` are therefore three distinct lifecycle states:
+
+```text
+Codex exit 0
+  -> succeeded
+Git composition
+  -> integrated
+scope + contracts + preserves + acceptance + snapshot integrity
+  -> SWARM VERIFIED
+```
+
+`SWARM VERIFIED` still does not advance the user's target branch. Publication or pull-request creation remains an explicit later operator action.
+

@@ -57,6 +57,7 @@ from claim_plane.swarm import (
     get_swarm_scheduler,
     get_swarm_merge_queue,
     get_swarm_session,
+    get_swarm_verification,
     inspect_swarm_worktrees,
     list_codex_runs,
     list_swarm_sessions,
@@ -71,6 +72,7 @@ from claim_plane.swarm import (
     validate_budget_policy,
     validate_concurrency_plan,
     validate_work_graph,
+    verify_swarm_session,
 )
 
 DEFAULT_DB = ".claim-plane/plane.db"
@@ -583,6 +585,59 @@ def cmd_swarm_merge_all(args: argparse.Namespace) -> int:
             print(f"  {entry['work_id']}: {entry['state']}")
         print(f"Integration head: {result['summary']['integration_head']}")
     return 0 if result["summary"]["status"] != "conflict" else 2
+
+
+def cmd_swarm_verify(args: argparse.Namespace) -> int:
+    result = verify_swarm_session(
+        args.repo,
+        args.session_id,
+        run_acceptance=not args.no_acceptance,
+        acceptance_timeout=args.acceptance_timeout,
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        label = "SWARM VERIFIED" if summary["verified"] else "SWARM UNVERIFIED"
+        print(f"{label}: {result['session_id']}")
+        print(
+            f"Work: {summary['work_verified']}/{summary['work_items']} verified; "
+            f"changed_paths={summary['changed_paths']}"
+        )
+        print(
+            f"Root acceptance={'passed' if summary['root_acceptance_passed'] else 'failed'}; "
+            f"snapshot_integrity={str(summary['snapshot_integrity_ok']).lower()}"
+        )
+        print(
+            f"Errors={summary['errors']}; warnings={summary['warnings']}; "
+            f"fingerprint={result['verification_fingerprint'][:20]}"
+        )
+        for item in result["verification"]["work_evidence"]:
+            print(
+                f"  {item['work_id']}: "
+                f"{'VERIFIED' if item['verified'] else 'UNVERIFIED'}; "
+                f"paths={len(item['changed_paths'])}"
+            )
+    return 0 if result["summary"]["verified"] else 2
+
+
+def cmd_swarm_evidence(args: argparse.Namespace) -> int:
+    result = get_swarm_verification(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        summary = result["summary"]
+        print(
+            f"Swarm evidence v{result['verification_version']} for "
+            f"{result['session_id']}: {summary['status']}"
+        )
+        print(
+            f"Work: {summary['work_verified']}/{summary['work_items']}; "
+            f"errors={summary['errors']}; warnings={summary['warnings']}"
+        )
+        print(f"Integration head: {result['verification']['integration_head']}")
+        print(f"Fingerprint: {result['verification_fingerprint']}")
+    return 0 if result["summary"]["verified"] else 2
 
 
 def cmd_swarm_budget(args: argparse.Namespace) -> int:
@@ -1581,6 +1636,28 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_merge_all.add_argument("--json", action="store_true")
     swarm_merge_all.add_argument("--out")
     swarm_merge_all.set_defaults(func=cmd_swarm_merge_all)
+
+    swarm_verify = swarm_sub.add_parser(
+        "verify",
+        help="Verify integrated worker evidence and root acceptance.",
+    )
+    swarm_verify.add_argument("session_id")
+    swarm_verify.add_argument("--repo", default=".")
+    swarm_verify.add_argument("--no-acceptance", action="store_true")
+    swarm_verify.add_argument("--acceptance-timeout", type=int, default=300)
+    swarm_verify.add_argument("--json", action="store_true")
+    swarm_verify.add_argument("--out")
+    swarm_verify.set_defaults(func=cmd_swarm_verify)
+
+    swarm_evidence = swarm_sub.add_parser(
+        "evidence",
+        help="Inspect the latest durable swarm verification report.",
+    )
+    swarm_evidence.add_argument("session_id")
+    swarm_evidence.add_argument("--repo", default=".")
+    swarm_evidence.add_argument("--json", action="store_true")
+    swarm_evidence.add_argument("--out")
+    swarm_evidence.set_defaults(func=cmd_swarm_evidence)
 
     swarm_budget = swarm_sub.add_parser(
         "budget", help="Export the versioned budget policy for one swarm session."
