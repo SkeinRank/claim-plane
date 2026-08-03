@@ -15,19 +15,27 @@ from claim_plane.connectors import codex as codex_runtime
 from claim_plane.core import Plane
 from claim_plane.protocol import (
     AGENT_ADAPTER_PROTOCOL_VERSION,
+    AdapterCapabilityManifest,
     AdapterErrorCode,
     AdapterOperation,
     AdapterProtocolError,
     AdapterRequest,
     AdapterResponse,
     AdapterStatus,
+    CapabilityLevel,
+    EnforcementLevel,
+    GuaranteeDeclaration,
+    GuaranteeProvider,
     LifecycleEventStore,
     LifecycleStoreError,
+    RuntimeIdentity,
+    AdapterRegistry,
+    AdapterSource,
     record_adapter_lifecycle,
 )
 
 CODEX_ADAPTER_NAME = "codex"
-CODEX_ADAPTER_REVISION = 2
+CODEX_ADAPTER_REVISION = 3
 _REQUEST_CACHE = Path(".claim-plane/adapters/codex/requests")
 _PLANE_DB = Path(".claim-plane/plane.db")
 _LIFECYCLE_DB = Path(".claim-plane/lifecycle/events.sqlite3")
@@ -129,6 +137,172 @@ class CodexAdapter:
 
     name = CODEX_ADAPTER_NAME
     protocol_version = AGENT_ADAPTER_PROTOCOL_VERSION
+    supported_protocol_range = ">=1.0,<2.0"
+
+    def registry_handshake(self, project_root: str = "."):
+        """Negotiate the built-in descriptor and enforce an existing project pin."""
+
+        registry = AdapterRegistry()
+        registry.register(
+            self.name,
+            lambda: self,
+            protocol_range=self.supported_protocol_range,
+            source=AdapterSource.BUILTIN,
+        )
+        return registry.handshake(self.name, project_root=project_root)
+
+    def capability_manifest(
+        self, project_root: str = "."
+    ) -> AdapterCapabilityManifest:
+        """Return the effective Codex capability and guarantee declaration."""
+
+        root = codex_runtime.resolve_project_root(project_root)
+        report = codex_runtime.doctor_codex(root)
+        checks = {str(item.get("name")): item for item in report.checks}
+
+        def status(name: str) -> str:
+            return str(checks.get(name, {}).get("status") or "error")
+
+        hooks_complete = all(
+            status(name) == "ok"
+            for name in (
+                "project_initialized",
+                "enrollment_state",
+                "lifecycle_hooks",
+                "connector_hook_definition",
+                "project_hook_feature",
+            )
+        )
+        pre_write_complete = hooks_complete and status(
+            "pre_mutation_guard_compatibility"
+        ) == "ok"
+        completion_complete = hooks_complete
+
+        capabilities = {
+            "pre_write_blocking": (
+                CapabilityLevel.COMPLETE
+                if pre_write_complete
+                else CapabilityLevel.PARTIAL
+                if hooks_complete
+                else CapabilityLevel.UNAVAILABLE
+            ),
+            "shell_mutation_visibility": (
+                CapabilityLevel.PARTIAL
+                if hooks_complete
+                else CapabilityLevel.UNAVAILABLE
+            ),
+            "direct_filesystem_visibility": (
+                CapabilityLevel.PARTIAL
+                if hooks_complete
+                else CapabilityLevel.UNAVAILABLE
+            ),
+            "streamed_events": (
+                CapabilityLevel.COMPLETE
+                if hooks_complete
+                else CapabilityLevel.UNAVAILABLE
+            ),
+            "subagent_visibility": (
+                CapabilityLevel.PARTIAL
+                if hooks_complete
+                else CapabilityLevel.UNAVAILABLE
+            ),
+            "resume_support": (
+                CapabilityLevel.COMPLETE
+                if hooks_complete
+                else CapabilityLevel.UNAVAILABLE
+            ),
+            "completion_verification": (
+                CapabilityLevel.COMPLETE
+                if completion_complete
+                else CapabilityLevel.UNAVAILABLE
+            ),
+            "worktree_control": CapabilityLevel.EXTERNAL,
+        }
+
+        if pre_write_complete:
+            undeclared_tool_write = GuaranteeDeclaration(
+                EnforcementLevel.HARD_BLOCKED,
+                GuaranteeProvider.COMPOSITE,
+                (
+                    "Codex PreToolUse interception",
+                    "Claim Plane intent-version and mutation admission",
+                ),
+                required_capability="pre_write_blocking",
+                detail="Supported tool writes are denied before mutation.",
+            )
+        elif completion_complete:
+            undeclared_tool_write = GuaranteeDeclaration(
+                EnforcementLevel.POST_VERIFIED,
+                GuaranteeProvider.CLAIM_PLANE,
+                ("final Git state and admitted authority comparison",),
+                required_capability="completion_verification",
+                detail=(
+                    "Runtime pre-write coverage is incomplete; "
+                    "final verification remains required."
+                ),
+            )
+        else:
+            undeclared_tool_write = GuaranteeDeclaration(
+                EnforcementLevel.UNAVAILABLE,
+                GuaranteeProvider.COMPOSITE,
+                (),
+                detail=(
+                    "Neither complete interception nor final verification is available."
+                ),
+            )
+
+        post_verified = (
+            GuaranteeDeclaration(
+                EnforcementLevel.POST_VERIFIED,
+                GuaranteeProvider.CLAIM_PLANE,
+                ("final Git state and admitted authority comparison",),
+                required_capability="completion_verification",
+            )
+            if completion_complete
+            else GuaranteeDeclaration(
+                EnforcementLevel.UNAVAILABLE,
+                GuaranteeProvider.CLAIM_PLANE,
+                (),
+            )
+        )
+        guarantees = {
+            "undeclared_tool_write": undeclared_tool_write,
+            "bypassed_host_write": post_verified,
+            "subagent_mutation": post_verified,
+            "completion_verification": post_verified,
+            "corrupted_session_state": GuaranteeDeclaration(
+                EnforcementLevel.HARD_BLOCKED,
+                GuaranteeProvider.CLAIM_PLANE,
+                ("validated append-only lifecycle chain",),
+            ),
+            "stale_intent_version": GuaranteeDeclaration(
+                EnforcementLevel.HARD_BLOCKED,
+                GuaranteeProvider.CLAIM_PLANE,
+                ("pre-operation active intent binding check",),
+            ),
+            "cancellation_revokes_authority": GuaranteeDeclaration(
+                EnforcementLevel.HARD_BLOCKED,
+                GuaranteeProvider.CLAIM_PLANE,
+                ("atomic intent abandonment and authority release",),
+            ),
+        }
+        return AdapterCapabilityManifest(
+            adapter=self.name,
+            adapter_version=str(CODEX_ADAPTER_REVISION),
+            adapter_protocol_version=self.protocol_version,
+            runtime=RuntimeIdentity(
+                name="codex",
+                version=report.codex_version,
+                detected=report.codex_version is not None,
+            ),
+            capabilities=capabilities,
+            guarantees=guarantees,
+            metadata={
+                "connector_revision": codex_runtime.CODEX_CONNECTOR_REVISION,
+                "project_root": str(root),
+                "doctor_ready": report.ready,
+            },
+        )
 
     def _validate(self, request: AdapterRequest, operation: AdapterOperation) -> Path:
         if request.adapter != self.name:
@@ -353,6 +527,23 @@ class CodexAdapter:
                     allow_missing_version_zero=allow_missing_version_zero,
                 )
             payload = dict(action(root))
+            if operation in {
+                AdapterOperation.DOCTOR,
+                AdapterOperation.START_SESSION,
+                AdapterOperation.RESUME,
+            }:
+                manifest = self.capability_manifest(str(root))
+                handshake = self.registry_handshake(str(root))
+                payload["adapter_manifest"] = (
+                    manifest.to_dict()
+                    if operation is AdapterOperation.DOCTOR
+                    else manifest.evidence_summary()
+                )
+                payload["adapter_handshake"] = (
+                    handshake.to_dict()
+                    if operation is AdapterOperation.DOCTOR
+                    else handshake.evidence_summary()
+                )
         except AdapterProtocolError as error:
             self._record_lifecycle(root, request, error=error)
             raise
@@ -453,6 +644,7 @@ class CodexAdapter:
         )
 
     def start_session(self, request: AdapterRequest) -> AdapterResponse:
+        self.registry_handshake(request.project_root).require_compatible()
         return self._perform(
             request,
             AdapterOperation.START_SESSION,
@@ -579,6 +771,7 @@ class CodexAdapter:
         )
 
     def resume(self, request: AdapterRequest) -> AdapterResponse:
+        self.registry_handshake(request.project_root).require_compatible()
         return self._perform(
             request,
             AdapterOperation.RESUME,

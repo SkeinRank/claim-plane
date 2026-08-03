@@ -72,6 +72,43 @@ The dependency-free `ReferenceAdapter` is intended for Claim Plane Core tests an
 claim-plane adapters conformance codex --json
 ```
 
+## Adapter registry and version negotiation
+
+`claim-plane.adapter-registry.v1` discovers built-in adapters and third-party Python entry points from the `claim_plane.adapters` group. Every registry entry declares a semantic protocol range. Before a controlled session starts, Claim Plane intersects that range with its supported Agent Adapter Protocol versions and produces `claim-plane.adapter-handshake.v1`.
+
+The handshake binds:
+
+- adapter identity and semantic version;
+- declared protocol range and negotiated protocol version;
+- detected runtime identity and version;
+- effective capability-manifest digest;
+- registry source and distribution identity;
+- optional project-local pin;
+- deterministic compatibility findings and migration guidance.
+
+No overlapping protocol version produces an incompatible handshake before session state or mutation authority is created. An adapter whose manifest identity or protocol version disagrees with its registry descriptor also fails closed.
+
+Project pins use `claim-plane.adapter-pin.v1` and are stored under `.claim-plane/adapters/pins/`. A pin records the exact adapter version, negotiated protocol, detected runtime version, source, distribution, and capability-manifest digest. Adapter, protocol, runtime, or source drift is an error. A changed capability manifest is surfaced as a warning so the user can inspect the new boundary and rerun conformance before refreshing the pin.
+
+```bash
+claim-plane adapters list --inspect
+claim-plane adapters inspect codex
+claim-plane adapters doctor codex
+claim-plane adapters pin codex
+claim-plane adapters pin codex --clear
+```
+
+The registry, handshake, and pin documents are described by [`schemas/adapter-registry.schema.json`](../schemas/adapter-registry.schema.json), [`schemas/adapter-handshake.schema.json`](../schemas/adapter-handshake.schema.json), and [`schemas/adapter-pin.schema.json`](../schemas/adapter-pin.schema.json). Session-start evidence includes the negotiated protocol and pin digest in addition to the effective capability manifest.
+
+External adapters do not require changes to Claim Plane Core. A package exposes an adapter class or factory through:
+
+```toml
+[project.entry-points."claim_plane.adapters"]
+my-agent = "my_package.adapter:MyAgentAdapter"
+```
+
+The implementation must satisfy `AgentAdapter` and declare `name`, `protocol_version`, and an optional `supported_protocol_range`. Entry-point adapters pass through the same handshake, pin, capability, and conformance paths as built-in adapters.
+
 ## Normalized lifecycle events
 
 `claim-plane.lifecycle-event.v1` is the runtime-neutral, append-only chronology for an agent session. Native runtime callbacks are reduced to a stable vocabulary:

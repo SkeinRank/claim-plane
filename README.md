@@ -108,6 +108,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - transparent economy/standard/frontier worker-tier recommendations;
 - a public runtime-neutral Agent Adapter Protocol with stable request/session/run/intent identities, persistent idempotency, stale intent-version rejection, structured failures, explicit cancellation and resume semantics, and Codex as the first complete implementation;
 - machine-readable adapter capability and guarantee manifests with explicit enforcement levels, guarantee providers, adapter/runtime version binding, policy compatibility checks, lifecycle evidence projection, and executable conformance coverage;
+- an adapter registry with semantic protocol negotiation, project-local adapter/runtime pins, fail-closed migration diagnostics, built-in and entry-point discovery, and negotiated-version evidence binding;
 - project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, session-bound task bootstrap, pinned Git bases, atomic ChangeIntent admission, pre-mutation authorization, ticketed scope amendment, and verified completion for autonomous Codex work;
 - repository-bound swarm sessions with exact Git bases, planner-proposed work items, deterministic DAG validation, graph fingerprints, dependency layers, and optimistic graph-version replacement;
 - versioned swarm budget policies with hard worker, graph-size, launch, token, cost, wall-time, retry, and concurrency ceilings that the planner cannot widen silently;
@@ -174,9 +175,23 @@ claim-plane adapters conformance reference --out conformance.json
 
 The same thirteen scenarios are applied to the dependency-free reference adapter and Codex. The report covers declared and undeclared mutations, atomic amendments, stale authority, lease expiry, idempotency, invalid event order, crash resume, cancellation, completion coverage, corrupt state, and secret redaction. Every available guarantee must map to passing scenarios; an uncovered or failed claim makes the report incompatible and returns a non-zero exit code.
 
+## Adapter registry
+
+Discover available adapters, verify protocol compatibility, and pin the selected runtime before controlled work:
+
+```bash
+claim-plane adapters list --inspect
+claim-plane adapters doctor codex --repo .
+claim-plane adapters pin codex --repo .
+```
+
+The handshake negotiates the installed Claim Plane protocol against the adapter's semantic version range and reports the adapter, runtime, capabilities, guarantees, source, and project pin. An incompatible range or a pinned adapter/runtime mismatch fails before a Codex session starts. The pin is stored under `.claim-plane/adapters/pins/` and may be removed with `claim-plane adapters pin codex --clear`.
+
+External adapter packages can publish a `claim_plane.adapters` Python entry point. They are discovered without changing Claim Plane Core and use the same manifest, conformance, handshake, and pinning paths as Codex.
+
 ## Codex swarm operator
 
-Version 0.29.0 exposes the complete swarm lifecycle through one bounded operator command:
+Version 0.30.0 exposes the complete swarm lifecycle through one bounded operator command:
 
 ```bash
 claim-plane init

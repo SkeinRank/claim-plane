@@ -14,14 +14,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from claim_plane import __version__
-from claim_plane.connectors import CodexAdapter, init_project
-from claim_plane.testing.codex import CodexConformanceDriver
-from claim_plane.testing.conformance import ReferenceConformanceDriver
+from claim_plane.connectors import build_adapter_registry, init_project
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
+    AdapterHandshake,
     AdapterOperation,
     AdapterRequest,
     evaluate_adapter_policy,
+    remove_adapter_pin,
     run_adapter_conformance,
 )
 from claim_plane.core import (
@@ -86,9 +86,46 @@ from claim_plane.swarm import (
     verify_swarm_session,
 )
 
+from claim_plane.testing.codex import CodexConformanceDriver
+from claim_plane.testing.conformance import ReferenceConformanceDriver
+
 DEFAULT_DB = ".claim-plane/plane.db"
 
-_CODEX_ADAPTER = CodexAdapter()
+_ADAPTER_REGISTRY = build_adapter_registry()
+_CODEX_ADAPTER = _ADAPTER_REGISTRY.create("codex")
+
+
+def _adapter_handshake(
+    adapter: str,
+    *,
+    repo: str,
+    require_compatible: bool = False,
+) -> AdapterHandshake:
+    handshake = _ADAPTER_REGISTRY.handshake(adapter, project_root=repo)
+    if require_compatible:
+        handshake.require_compatible()
+    return handshake
+
+
+def _print_adapter_handshake(payload: Mapping[str, Any]) -> None:
+    negotiated = payload.get("negotiated_protocol_version") or "none"
+    runtime = payload.get("runtime") or {}
+    print(
+        f"Handshake: core {', '.join(payload.get('core_protocol_versions') or [])} "
+        f"↔ adapter {payload.get('adapter_protocol_range')} → {negotiated}"
+    )
+    print(
+        f"Runtime: {runtime.get('name', 'unknown')} "
+        f"{runtime.get('version') or 'not detected'}"
+    )
+    pin = payload.get("pin")
+    print("Pin: present" if pin else "Pin: none")
+    for finding in payload.get("findings") or []:
+        print(
+            f"  [{str(finding['severity']).upper():7}] "
+            f"{finding['message']}"
+        )
+    print("Compatibility: OK" if payload.get("compatible") else "Compatibility: FAILED")
 
 
 def _adapter_request_id(
@@ -190,6 +227,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_connect_codex(args: argparse.Namespace) -> int:
+    _adapter_handshake("codex", repo=args.repo, require_compatible=True)
     response = _CODEX_ADAPTER.enroll_project(
         _codex_request(
             AdapterOperation.ENROLL_PROJECT, repo=args.repo
@@ -268,13 +306,99 @@ def _print_adapter_manifest(payload: Mapping[str, Any]) -> None:
 
 
 def cmd_adapters_inspect(args: argparse.Namespace) -> int:
-    manifest = _CODEX_ADAPTER.capability_manifest(args.repo)
-    payload, compatible = _manifest_with_policy(manifest, args.policy)
+    adapter = _ADAPTER_REGISTRY.create(args.adapter)
+    manifest = adapter.capability_manifest(args.repo)
+    payload, policy_compatible = _manifest_with_policy(manifest, args.policy)
+    handshake = _adapter_handshake(args.adapter, repo=args.repo)
+    payload["registry_handshake"] = handshake.to_dict()
+    compatible = policy_compatible and handshake.compatible
     if args.json:
         _write_json(payload)
     else:
         _print_adapter_manifest(payload)
+        _print_adapter_handshake(payload["registry_handshake"])
     return 0 if compatible else 2
+
+
+def cmd_adapters_list(args: argparse.Namespace) -> int:
+    payload = _ADAPTER_REGISTRY.list_payload(
+        project_root=args.repo, inspect=args.inspect
+    )
+    if args.json:
+        _write_json(payload)
+    else:
+        print(
+            "Claim Plane adapter registry "
+            f"(protocols {', '.join(payload['core_protocol_versions'])})"
+        )
+        for adapter in payload["adapters"]:
+            pin = "pinned" if adapter.get("pinned") else "unpinned"
+            print(
+                f"{adapter['name']}: {adapter['source']} · "
+                f"{adapter['protocol_range']} · {pin}"
+            )
+            handshake = adapter.get("handshake")
+            if isinstance(handshake, Mapping):
+                status = "OK" if handshake.get("compatible") else "FAILED"
+                print(
+                    f"  negotiated={handshake.get('negotiated_protocol_version')} "
+                    "runtime="
+                    f"{(handshake.get('runtime') or {}).get('version') or 'not detected'} "
+                    f"compatibility={status}"
+                )
+        for finding in payload.get("discovery_findings") or []:
+            print(f"[{str(finding['severity']).upper()}] {finding['message']}")
+    return 0
+
+
+def cmd_adapters_pin(args: argparse.Namespace) -> int:
+    if args.clear:
+        removed = remove_adapter_pin(args.repo, args.adapter)
+        payload = {
+            "adapter": args.adapter,
+            "removed": removed,
+            "path": str(
+                Path(args.repo).expanduser().resolve()
+                / ".claim-plane"
+                / "adapters"
+                / "pins"
+                / f"{args.adapter}.json"
+            ),
+        }
+        if args.json:
+            _write_json(payload)
+        else:
+            print(
+                f"Removed adapter pin for {args.adapter}."
+                if removed
+                else f"No adapter pin exists for {args.adapter}."
+            )
+        return 0
+    pin, path = _ADAPTER_REGISTRY.pin(args.adapter, project_root=args.repo)
+    payload = pin.to_dict()
+    payload["path"] = str(path)
+    if args.json:
+        _write_json(payload)
+    else:
+        print(
+            f"Pinned {pin.adapter} {pin.adapter_version} to protocol "
+            f"{pin.protocol_version}."
+        )
+        print(f"Runtime: {pin.runtime_name} {pin.runtime_version or 'not detected'}")
+        print(f"Wrote {path}")
+    return 0
+
+
+def cmd_adapters_doctor(args: argparse.Namespace) -> int:
+    if args.adapter != "codex":
+        handshake = _adapter_handshake(args.adapter, repo=args.repo)
+        payload = handshake.to_dict()
+        if args.json:
+            _write_json(payload)
+        else:
+            _print_adapter_handshake(payload)
+        return 0 if handshake.compatible else 2
+    return cmd_doctor_codex(args)
 
 
 def _print_conformance_report(payload: Mapping[str, Any]) -> None:
@@ -320,6 +444,7 @@ def cmd_adapters_conformance(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor_codex(args: argparse.Namespace) -> int:
+    handshake = _adapter_handshake("codex", repo=args.repo)
     response = _CODEX_ADAPTER.doctor(
         _codex_request(AdapterOperation.DOCTOR, repo=args.repo)
     )
@@ -336,7 +461,10 @@ def cmd_doctor_codex(args: argparse.Namespace) -> int:
             report["policy_compatibility"] = manifest_payload[
                 "policy_compatibility"
             ]
-    report["ready"] = bool(report.get("ready")) and policy_compatible
+    report["registry_handshake"] = handshake.to_dict()
+    report["ready"] = (
+        bool(report.get("ready")) and policy_compatible and handshake.compatible
+    )
     if args.json:
         _write_json(report)
     else:
@@ -352,6 +480,7 @@ def cmd_doctor_codex(args: argparse.Namespace) -> int:
             print(f"Codex: {report['codex_version']}")
         if isinstance(report.get("adapter_manifest"), Mapping):
             _print_adapter_manifest(report["adapter_manifest"])
+        _print_adapter_handshake(report["registry_handshake"])
         print("Status: ready" if report["ready"] else "Status: action required")
     return 0 if report["ready"] else 2
 
@@ -364,6 +493,9 @@ def cmd_codex_hook(args: argparse.Namespace) -> int:
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("Codex hook input must be a JSON object")
+    if payload.get("hook_event_name") == "SessionStart":
+        repo = str(payload.get("cwd") or ".")
+        _adapter_handshake("codex", repo=repo, require_compatible=True)
     return _CODEX_ADAPTER.dispatch_hook(payload, output=sys.stdout)
 
 
@@ -1832,10 +1964,25 @@ def build_parser() -> argparse.ArgumentParser:
     adapters_sub = adapters.add_subparsers(
         dest="adapters_command", required=True
     )
+    adapters_list = adapters_sub.add_parser(
+        "list", help="List built-in and discovered external adapters."
+    )
+    adapters_list.add_argument("--repo", default=".")
+    adapters_list.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Run protocol negotiation and pin checks for each adapter.",
+    )
+    adapters_list.add_argument("--json", action="store_true")
+    adapters_list.set_defaults(func=cmd_adapters_list)
+
     adapters_inspect = adapters_sub.add_parser(
         "inspect", help="Show one machine-readable adapter capability manifest."
     )
-    adapters_inspect.add_argument("adapter", choices=("codex",))
+    adapters_inspect.add_argument(
+        "adapter",
+        choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
+    )
     adapters_inspect.add_argument("--repo", default=".")
     adapters_inspect.add_argument(
         "--policy", choices=("observe", "guarded", "strict", "critical")
@@ -1858,6 +2005,34 @@ def build_parser() -> argparse.ArgumentParser:
     adapters_conformance.add_argument("--json", action="store_true")
     adapters_conformance.add_argument("--out", default=None)
     adapters_conformance.set_defaults(func=cmd_adapters_conformance)
+
+    adapters_doctor = adapters_sub.add_parser(
+        "doctor", help="Negotiate versions and diagnose adapter compatibility."
+    )
+    adapters_doctor.add_argument(
+        "adapter",
+        choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
+    )
+    adapters_doctor.add_argument("--repo", default=".")
+    adapters_doctor.add_argument(
+        "--policy", choices=("observe", "guarded", "strict", "critical")
+    )
+    adapters_doctor.add_argument("--json", action="store_true")
+    adapters_doctor.set_defaults(func=cmd_adapters_doctor)
+
+    adapters_pin = adapters_sub.add_parser(
+        "pin", help="Pin an adapter, runtime, and negotiated protocol for this project."
+    )
+    adapters_pin.add_argument(
+        "adapter",
+        choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
+    )
+    adapters_pin.add_argument("--repo", default=".")
+    adapters_pin.add_argument(
+        "--clear", action="store_true", help="Remove the project-local adapter pin."
+    )
+    adapters_pin.add_argument("--json", action="store_true")
+    adapters_pin.set_defaults(func=cmd_adapters_pin)
 
     connect = sub.add_parser(
         "connect", help="Enroll a coding-agent runtime in this project."

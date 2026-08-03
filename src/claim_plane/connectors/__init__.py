@@ -33,6 +33,8 @@ from claim_plane.connectors.codex_adapter import (
     CodexAdapter,
 )
 
+from claim_plane.connectors.registry import build_adapter_registry
+
 __all__ = [
     "CODEX_ADAPTER_NAME",
     "CODEX_ADAPTER_REVISION",
@@ -60,4 +62,5 @@ __all__ = [
     "doctor_codex",
     "handle_codex_hook",
     "init_project",
+    "build_adapter_registry",
 ]

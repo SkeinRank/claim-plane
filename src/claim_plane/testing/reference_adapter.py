@@ -72,6 +72,7 @@ class ReferenceAdapter:
 
     name = REFERENCE_ADAPTER_NAME
     protocol_version = AGENT_ADAPTER_PROTOCOL_VERSION
+    supported_protocol_range = ">=1.0,<2.0"
 
     def capability_manifest(
         self, project_root: str = "."

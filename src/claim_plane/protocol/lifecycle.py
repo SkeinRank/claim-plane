@@ -306,6 +306,8 @@ class LifecycleReport:
     intent_version: int | None
     denied_mutations: int
     granted_amendments: int
+    adapter_manifest: Mapping[str, Any] | None = None
+    adapter_handshake: Mapping[str, Any] | None = None
     findings: tuple[LifecycleFinding, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -324,6 +326,16 @@ class LifecycleReport:
             "intent_version": self.intent_version,
             "denied_mutations": self.denied_mutations,
             "granted_amendments": self.granted_amendments,
+            "adapter_manifest": (
+                dict(self.adapter_manifest)
+                if self.adapter_manifest is not None
+                else None
+            ),
+            "adapter_handshake": (
+                dict(self.adapter_handshake)
+                if self.adapter_handshake is not None
+                else None
+            ),
             "findings": [item.to_dict() for item in self.findings],
         }
 
@@ -575,6 +587,8 @@ def build_lifecycle_report(events: Sequence[LifecycleEvent]) -> LifecycleReport:
             intent_version=None,
             denied_mutations=0,
             granted_amendments=0,
+            adapter_manifest=None,
+            adapter_handshake=None,
             findings=findings,
         )
 
@@ -585,7 +599,15 @@ def build_lifecycle_report(events: Sequence[LifecycleEvent]) -> LifecycleReport:
     granted_amendments = 0
     verified = False
     outcome = "in_progress"
+    adapter_manifest: dict[str, Any] | None = None
+    adapter_handshake: dict[str, Any] | None = None
     for event in events:
+        candidate_manifest = event.payload.get("adapter_manifest")
+        if isinstance(candidate_manifest, Mapping):
+            adapter_manifest = dict(candidate_manifest)
+        candidate_handshake = event.payload.get("adapter_handshake")
+        if isinstance(candidate_handshake, Mapping):
+            adapter_handshake = dict(candidate_handshake)
         if event.intent_id is not None:
             intent_id = event.intent_id
         if event.intent_version is not None:
@@ -621,6 +643,8 @@ def build_lifecycle_report(events: Sequence[LifecycleEvent]) -> LifecycleReport:
         intent_version=intent_version,
         denied_mutations=denied_mutations,
         granted_amendments=granted_amendments,
+        adapter_manifest=adapter_manifest,
+        adapter_handshake=adapter_handshake,
         findings=findings,
     )
 
@@ -1101,6 +1125,12 @@ def _response_summary(
         paths = _safe_paths(payload.get(key))
         if paths:
             summary[key] = list(paths)
+    adapter_manifest = payload.get("adapter_manifest")
+    if isinstance(adapter_manifest, Mapping):
+        summary["adapter_manifest"] = dict(adapter_manifest)
+    adapter_handshake = payload.get("adapter_handshake")
+    if isinstance(adapter_handshake, Mapping):
+        summary["adapter_handshake"] = dict(adapter_handshake)
     return summary
 
 
@@ -1135,7 +1165,12 @@ def lifecycle_event_drafts(
 
     operation = request.operation
     if operation in {AdapterOperation.START_SESSION, AdapterOperation.RESUME}:
-        return (draft(LifecycleEventType.SESSION_STARTED, request_summary),)
+        return (
+            draft(
+                LifecycleEventType.SESSION_STARTED,
+                {**request_summary, **response_summary},
+            ),
+        )
     if operation is AdapterOperation.SUBMIT_TASK:
         return (draft(LifecycleEventType.TASK_SUBMITTED, request_summary),)
     if operation is AdapterOperation.PROPOSE_INTENT:

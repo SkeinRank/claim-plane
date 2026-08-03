@@ -37,6 +37,20 @@ Every session-bearing Codex request also emits normalized events through the sha
 
 Adapter authors can validate the same behavior contract through `claim_plane.protocol.run_adapter_conformance`. A driver translates the canonical scenarios into runtime-specific requests while the shared runner owns result semantics, report digests, and guarantee-to-scenario coverage. `claim_plane.testing.ReferenceAdapter` provides a dependency-free implementation for core tests, and `claim-plane adapters conformance codex` produces the Codex compatibility report in isolated Git fixtures.
 
+Adapter selection should go through the registry when an integration may load more than one runtime. The registry performs semantic protocol negotiation and verifies a project pin before returning a compatible implementation:
+
+```python
+from claim_plane.connectors import build_adapter_registry
+
+registry = build_adapter_registry()
+handshake = registry.handshake("codex", project_root=".").require_compatible()
+adapter = registry.create(handshake.adapter)
+```
+
+Use `claim-plane adapters pin codex` after reviewing the runtime, capability manifest, and conformance report. A later adapter, runtime, protocol, or provider change then fails before `SessionStart` and includes a migration finding. The normalized handshake summary is included in session evidence.
+
+Third-party packages register adapters through the `claim_plane.adapters` entry-point group. The loaded class or factory is validated against `AgentAdapter`, and its declared protocol range is negotiated in exactly the same way as the built-in Codex adapter. Programmatic registration remains available for embedded applications through `AdapterRegistry.register(...)`.
+
 The same APIs read events from Codex or another adapter:
 
 ```python

@@ -8,6 +8,21 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane.adapter-registry.v1` with built-in, programmatic, and `claim_plane.adapters` entry-point discovery.
+- Add dependency-free semantic version ranges and `claim-plane.adapter-handshake.v1` negotiation before controlled session start.
+- Add project-local `claim-plane.adapter-pin.v1` records that bind adapter, runtime, negotiated protocol, provider source, distribution, and capability-manifest digest.
+- Add `claim-plane adapters list`, `adapters doctor`, and `adapters pin` commands with structured compatibility and migration findings.
+- Add registry, handshake, and pin JSON Schemas plus regression coverage for incompatible ranges, runtime drift, external discovery, and pre-session refusal.
+
+### Changed
+
+- Bind negotiated protocol and project pin identity into Codex session-start and resume evidence.
+- Require an existing adapter pin to match before Codex creates or resumes session authority.
+
 ## [0.29.0] — 2026-08-03
 
 ### Added
