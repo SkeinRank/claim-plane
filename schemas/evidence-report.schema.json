@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/evidence-report.schema.json",
+  "title": "Claim Plane evidence report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol", "run_id", "outcome", "verified", "task", "repository",
+    "agent", "intent", "policy", "guarantees", "changes", "acceptance",
+    "verification", "decisions", "execution", "lifecycle", "integrity",
+    "evidence_digest"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.evidence-report.v1"},
+    "run_id": {"type": "string", "pattern": "^cpr_[0-9a-f]{24}$"},
+    "outcome": {"type": "string"},
+    "verified": {"type": "boolean"},
+    "task": {"type": "object"},
+    "repository": {"type": "object"},
+    "agent": {"type": "object"},
+    "intent": {"type": "object"},
+    "policy": {"type": "object"},
+    "guarantees": {"type": "object"},
+    "changes": {"type": "object"},
+    "acceptance": {"type": "object"},
+    "verification": {"type": "object"},
+    "decisions": {"type": "object"},
+    "execution": {"type": "object"},
+    "lifecycle": {"type": ["object", "null"]},
+    "integrity": {
+      "type": "object",
+      "required": ["valid", "findings"],
+      "properties": {
+        "valid": {"type": "boolean"},
+        "findings": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "evidence_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

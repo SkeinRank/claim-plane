@@ -30,6 +30,8 @@
     "risk",
     "runtime",
     "completion",
+    "changes",
+    "acceptance",
     "lifecycle",
     "cancellation",
     "error"
@@ -161,6 +163,12 @@
     },
     "risk": {
       "$ref": "risk-classification.schema.json"
+    },
+    "changes": {
+      "$ref": "change-summary.schema.json"
+    },
+    "acceptance": {
+      "$ref": "acceptance-summary.schema.json"
     }
   },
   "$defs": {

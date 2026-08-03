@@ -479,3 +479,113 @@ def test_guarded_run_requires_review_for_configured_critical_path(
     assert any(
         item["path"] == "app.py" for item in result.risk["findings"]
     )
+
+
+def test_evidence_report_and_replay_are_deterministic_after_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from claim_plane.evidence import (
+        build_evidence_replay,
+        build_evidence_report,
+        render_evidence_replay,
+    )
+
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value without exposing this text."
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(adapter, repo=repo, task=task),
+    )
+
+    first = build_evidence_report(repo, result.run_id)
+    second = build_evidence_report(repo, "latest")
+    replay = build_evidence_replay(repo, result.run_id)
+
+    assert first == second
+    assert first["evidence_digest"] == second["evidence_digest"]
+    assert first["integrity"]["valid"] is True
+    assert first["changes"]["file_count"] == 1
+    assert first["changes"]["files"][0]["path"] == "app.py"
+    assert first["changes"]["files"][0]["hunks"]
+    assert first["decisions"]["observed_count"] == 1
+    assert replay["event_count"] >= 1
+    assert render_evidence_replay(replay)[0].startswith("RUN ")
+    serialized = json.dumps(first, ensure_ascii=False)
+    assert task not in serialized
+    assert "Updated app.py and verified the change." not in serialized
+
+
+def test_cli_report_and_replay_support_latest_selector(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value."
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(adapter, repo=repo, task=task),
+    )
+
+    assert cli.main(["report", "latest", "--repo", str(repo), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["run_id"] == result.run_id
+    assert report["protocol"] == "claim-plane.evidence-report.v1"
+
+    assert cli.main(["replay", "latest", "--repo", str(repo), "--json"]) == 0
+    replay = json.loads(capsys.readouterr().out)
+    assert replay["run_id"] == result.run_id
+    assert replay["protocol"] == "claim-plane.evidence-replay.v1"
+
+
+def test_evidence_report_fails_closed_for_corrupt_lifecycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+
+    from claim_plane.evidence import EvidenceError, build_evidence_report
+
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value."
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(adapter, repo=repo, task=task),
+    )
+    database = repo / ".claim-plane/lifecycle/events.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE lifecycle_events SET digest='broken' WHERE sequence=1"
+        )
+        connection.commit()
+
+    with pytest.raises(EvidenceError):
+        build_evidence_report(repo, result.run_id)

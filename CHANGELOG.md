@@ -8,6 +8,21 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane report [run-id|latest]` for deterministic, secret-safe evidence reports reconstructed from durable controlled-run records and normalized lifecycle events.
+- Add `claim-plane replay [run-id|latest]` for provider-free reconstruction of admission, mutation, amendment, verification, stop, and session chronology.
+- Add final change summaries with file status, additions, deletions, binary classification, diff digests, and hunk coordinates without storing source content.
+- Add acceptance, evidence-report, evidence-replay, and change-summary JSON Schemas plus regression coverage for restart-safe reconstruction, latest-run selection, CLI exports, redaction, and corrupt-journal refusal.
+
+### Changed
+
+- Extend controlled-run records with configured acceptance commands and a deterministic final Git change summary.
+- Distinguish blocked, observed, amended, and post-verified activity in the public evidence view while preserving adapter guarantee provenance.
+- Fail closed when the lifecycle journal no longer matches the run-bound durable head.
+
 ## [0.33.0] — 2026-08-03
 
 ### Added

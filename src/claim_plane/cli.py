@@ -26,6 +26,12 @@ from claim_plane.controlled_run import (
     ControlledRunPreflightError,
     run_controlled_task,
 )
+from claim_plane.evidence import (
+    EvidenceError,
+    build_evidence_replay,
+    build_evidence_report,
+    render_evidence_replay,
+)
 from claim_plane.policy import POLICY_NAMES, EffectivePolicy, resolve_policy
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
@@ -659,6 +665,89 @@ def cmd_run(args: argparse.Namespace) -> int:
         _write_json(result.to_dict(), args.out)
     return result.exit_code
 
+
+
+def _print_evidence_report(payload: Mapping[str, Any]) -> None:
+    print(f"Claim Plane evidence — {payload['run_id']}")
+    print(f"Outcome: {payload['outcome']}")
+    print(f"Evidence digest: {payload['evidence_digest']}")
+    task = payload.get("task") or {}
+    print(f"Task: sha256:{task.get('sha256')} ({task.get('length')} chars)")
+    agent = payload.get("agent") or {}
+    print(f"Agent: {agent.get('adapter')} session={agent.get('session_id')}")
+    intent = payload.get("intent") or {}
+    print(f"Intent: {intent.get('id')}@{intent.get('version')}")
+    policy = payload.get("policy") or {}
+    risk = policy.get("risk") or {}
+    print(
+        f"Policy: {policy.get('name')} · risk={risk.get('highest_risk')} "
+        f"· action={risk.get('final_action')}"
+    )
+    changes = payload.get("changes") or {}
+    print(
+        "Changes: "
+        f"{changes.get('file_count', 0)} files, "
+        f"+{changes.get('total_additions', 0)} "
+        f"-{changes.get('total_deletions', 0)}, "
+        f"{changes.get('total_hunks', 0)} hunks"
+    )
+    for item in changes.get("files") or ():
+        additions = item.get("additions")
+        deletions = item.get("deletions")
+        stats = "binary" if item.get("binary") else f"+{additions} -{deletions}"
+        print(
+            f"  {item.get('status', '?')} {item.get('path')} "
+            f"({stats}, {len(item.get('hunks') or ())} hunks)"
+        )
+    decisions = payload.get("decisions") or {}
+    print(
+        "Decisions: "
+        f"{decisions.get('blocked_count', 0)} blocked, "
+        f"{decisions.get('observed_count', 0)} observed, "
+        f"{decisions.get('amendment_count', 0)} amendments"
+    )
+    acceptance = payload.get("acceptance") or {}
+    print(
+        f"Acceptance: {'PASS' if acceptance.get('passed') else 'NOT VERIFIED'} "
+        f"({acceptance.get('command_count', 0)} configured commands)"
+    )
+    execution = payload.get("execution") or {}
+    print(
+        f"Execution: {execution.get('duration_seconds')}s · "
+        f"runtime return={execution.get('runtime_returncode')}"
+    )
+    integrity = payload.get("integrity") or {}
+    print("Integrity: VALID" if integrity.get("valid") else "Integrity: INVALID")
+    for finding in integrity.get("findings") or ():
+        print(f"  [{finding.get('code')}] {finding.get('message')}")
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    try:
+        payload = build_evidence_report(args.repo, args.run)
+    except EvidenceError as exc:
+        print(f"Evidence report unavailable: {exc}", file=sys.stderr)
+        return 2
+    if args.json or args.out:
+        _write_json(payload, args.out)
+    else:
+        _print_evidence_report(payload)
+    integrity = payload.get("integrity") or {}
+    return 0 if integrity.get("valid") else 3
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    try:
+        payload = build_evidence_replay(args.repo, args.run)
+    except EvidenceError as exc:
+        print(f"Evidence replay unavailable: {exc}", file=sys.stderr)
+        return 2
+    if args.json or args.out:
+        _write_json(payload, args.out)
+    else:
+        for line in render_evidence_replay(payload):
+            print(line)
+    return 0
 
 def cmd_codex_hook(args: argparse.Namespace) -> int:
     del args
@@ -2337,6 +2426,31 @@ def build_parser() -> argparse.ArgumentParser:
     controlled_run.add_argument("--json", action="store_true")
     controlled_run.add_argument("--out", default=None)
     controlled_run.set_defaults(func=cmd_run)
+
+
+    report_parser = sub.add_parser(
+        "report",
+        help="Build a deterministic evidence report for a controlled run.",
+    )
+    report_parser.add_argument(
+        "run", nargs="?", default="latest", help="Run id or 'latest'."
+    )
+    report_parser.add_argument("--repo", default=".")
+    report_parser.add_argument("--json", action="store_true")
+    report_parser.add_argument("--out", default=None)
+    report_parser.set_defaults(func=cmd_report)
+
+    replay_parser = sub.add_parser(
+        "replay",
+        help="Replay normalized decisions without repeating provider calls.",
+    )
+    replay_parser.add_argument(
+        "run", nargs="?", default="latest", help="Run id or 'latest'."
+    )
+    replay_parser.add_argument("--repo", default=".")
+    replay_parser.add_argument("--json", action="store_true")
+    replay_parser.add_argument("--out", default=None)
+    replay_parser.set_defaults(func=cmd_replay)
 
     codex_hook = sub.add_parser(
         "codex-hook", help="Internal Codex lifecycle dispatcher."

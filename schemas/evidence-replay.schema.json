@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/evidence-replay.schema.json",
+  "title": "Claim Plane evidence replay",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "run_id", "adapter", "session_id", "outcome", "event_count", "head_digest", "entries", "replay_digest"],
+  "properties": {
+    "protocol": {"const": "claim-plane.evidence-replay.v1"},
+    "run_id": {"type": "string", "pattern": "^cpr_[0-9a-f]{24}$"},
+    "adapter": {"type": "string"},
+    "session_id": {"type": "string"},
+    "outcome": {"type": "string"},
+    "event_count": {"type": "integer", "minimum": 1},
+    "head_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "timestamp", "event_type", "message", "intent_id", "intent_version", "event_id"],
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 1},
+          "timestamp": {"type": "string", "format": "date-time"},
+          "event_type": {"type": "string"},
+          "message": {"type": "string"},
+          "intent_id": {"type": ["string", "null"]},
+          "intent_version": {"type": ["integer", "null"], "minimum": 0},
+          "event_id": {"type": "string"}
+        }
+      }
+    },
+    "replay_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -12,6 +12,17 @@ from claim_plane.controlled_run import (
     load_controlled_run,
     run_controlled_task,
 )
+from claim_plane.evidence import (
+    EVIDENCE_REPLAY_PROTOCOL,
+    EVIDENCE_REPORT_PROTOCOL,
+    EvidenceError,
+    ReplayEntry,
+    build_evidence_replay,
+    build_evidence_report,
+    list_controlled_runs,
+    render_evidence_replay,
+    resolve_controlled_run,
+)
 from claim_plane.core import (
     AcceptanceResult,
     AccessMode,
@@ -228,9 +239,18 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.33.0"
+__version__ = "0.34.0"
 
 __all__ = [
+    "EVIDENCE_REPLAY_PROTOCOL",
+    "EVIDENCE_REPORT_PROTOCOL",
+    "EvidenceError",
+    "ReplayEntry",
+    "build_evidence_replay",
+    "build_evidence_report",
+    "list_controlled_runs",
+    "render_evidence_replay",
+    "resolve_controlled_run",
     "CONTROLLED_RUN_PROTOCOL",
     "POLICY_NAMES",
     "POLICY_PROTOCOL",

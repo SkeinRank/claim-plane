@@ -203,7 +203,22 @@ claim-plane run "Add pagination to the audit API" --policy guarded
 
 The runner performs adapter negotiation and policy compatibility checks before execution, launches Codex in workspace-write mode, binds the runtime session to a stable run identity, and preserves the normal `ChangeIntent` admission and amendment path. `Ctrl-C` and wall-time expiry stop the process and revoke unfinished authority. A successful runtime exit is not sufficient for a green result: Claim Plane inspects the active intent, verifies completion against the current Git state, and returns `DELIVERY VERIFIED`, `REJECTED`, `REVIEW REQUIRED`, `CANCELLED`, `TIMED OUT`, or `FAILED`.
 
-The durable result is written under `.claim-plane/runs/<run-id>/run.json`. It contains task and final-message digests rather than raw text, the starting and resulting Git-state digests, adapter manifest and handshake identity, policy compatibility, lifecycle evidence, verification summary, and cancellation outcome. Use `--json` for automation, `--out result.json` for an additional export, `--timeout` for the wall-time ceiling, and `--model` for an explicit Codex model override.
+The durable result is written under `.claim-plane/runs/<run-id>/run.json`. It contains task and final-message digests rather than raw text, the starting and resulting Git-state digests, adapter manifest and handshake identity, policy compatibility, lifecycle evidence, verification summary, final file and hunk metadata, configured acceptance commands, and cancellation outcome. Use `--json` for automation, `--out result.json` for an additional export, `--timeout` for the wall-time ceiling, and `--model` for an explicit Codex model override.
+
+## Evidence report and replay
+
+A completed controlled run can be inspected without reopening Codex or repeating provider calls:
+
+```bash
+claim-plane report latest
+claim-plane replay latest
+claim-plane report <run-id> --json --out evidence-report.json
+claim-plane replay <run-id> --json --out evidence-replay.json
+```
+
+The report is rebuilt from the durable run record and normalized append-only lifecycle journal. It includes task digests, repository bindings, adapter and runtime identity, effective policy, risk findings, guarantee levels, final changed files, hunk coordinates, acceptance status, usage, elapsed time, blocked attempts, observed mutations, scope amendments, verification, and a canonical evidence digest. Source content, raw prompts, tool payloads, credentials, and the final agent message are not exported.
+
+Replay renders the same causal event stream as a stable decision chronology. It is a reconstruction of stored authority transitions, not a new model execution. A corrupt, out-of-order, or mismatched lifecycle stream cannot be replayed or represented as valid evidence.
 
 ## Policy presets and risk classes
 

@@ -179,6 +179,8 @@ class ControlledRunResult:
     risk: Mapping[str, Any]
     runtime: Mapping[str, Any]
     completion: Mapping[str, Any]
+    changes: Mapping[str, Any]
+    acceptance: Mapping[str, Any]
     lifecycle: Mapping[str, Any] | None
     cancellation: Mapping[str, Any] | None = None
     error: Mapping[str, Any] | None = None
@@ -215,6 +217,8 @@ class ControlledRunResult:
             "risk": dict(self.risk),
             "runtime": dict(self.runtime),
             "completion": dict(self.completion),
+            "changes": dict(self.changes),
+            "acceptance": dict(self.acceptance),
             "lifecycle": dict(self.lifecycle) if self.lifecycle is not None else None,
             "cancellation": (
                 dict(self.cancellation) if self.cancellation is not None else None
@@ -461,6 +465,200 @@ def _changed_paths(
         if item
     }
     return tuple(sorted(tracked | set(result_git.untracked)))
+
+
+
+
+_HUNK_RE = re.compile(
+    rb"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@",
+    re.MULTILINE,
+)
+
+
+def _change_summary(
+    root: Path, start_git: GitState, result_git: GitState
+) -> dict[str, Any]:
+    """Capture final file and hunk metadata without storing source content."""
+
+    base_commit = start_git.head_commit
+    status_process = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--name-status",
+            "--no-renames",
+            "-z",
+            base_commit,
+            "--",
+        ],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if status_process.returncode != 0:
+        detail = status_process.stderr.decode("utf-8", errors="replace").strip()
+        raise ControlledRunError(detail or "could not summarize changed files")
+    status_parts = status_process.stdout.split(b"\0")
+    statuses: dict[str, str] = {}
+    index = 0
+    while index + 1 < len(status_parts):
+        raw_status = status_parts[index]
+        raw_path = status_parts[index + 1]
+        index += 2
+        if not raw_status or not raw_path:
+            continue
+        path = raw_path.decode("utf-8", errors="surrogateescape").replace("\\", "/")
+        statuses[path] = raw_status.decode("ascii", errors="replace")[:1] or "M"
+
+    numstat_process = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--numstat",
+            "--no-renames",
+            "-z",
+            base_commit,
+            "--",
+        ],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if numstat_process.returncode != 0:
+        detail = numstat_process.stderr.decode("utf-8", errors="replace").strip()
+        raise ControlledRunError(detail or "could not summarize diff statistics")
+    stats: dict[str, tuple[int | None, int | None]] = {}
+    for raw in numstat_process.stdout.split(b"\0"):
+        if not raw:
+            continue
+        parts = raw.split(b"\t", 2)
+        if len(parts) != 3:
+            continue
+        added_raw, deleted_raw, path_raw = parts
+        path = path_raw.decode("utf-8", errors="surrogateescape").replace("\\", "/")
+        added = None if added_raw == b"-" else int(added_raw)
+        deleted = None if deleted_raw == b"-" else int(deleted_raw)
+        stats[path] = (added, deleted)
+
+    files: list[dict[str, Any]] = []
+    tracked_paths = sorted(set(statuses) | set(stats))
+    for relative in tracked_paths:
+        patch_process = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--binary",
+                "--no-ext-diff",
+                "--no-renames",
+                "--unified=0",
+                base_commit,
+                "--",
+                relative,
+            ],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+        if patch_process.returncode != 0:
+            detail = patch_process.stderr.decode("utf-8", errors="replace").strip()
+            raise ControlledRunError(detail or f"could not summarize {relative}")
+        hunks = []
+        for match in _HUNK_RE.finditer(patch_process.stdout):
+            hunks.append(
+                {
+                    "old_start": int(match.group(1)),
+                    "old_lines": int(match.group(2) or b"1"),
+                    "new_start": int(match.group(3)),
+                    "new_lines": int(match.group(4) or b"1"),
+                }
+            )
+        added, deleted = stats.get(relative, (0, 0))
+        files.append(
+            {
+                "path": relative,
+                "status": statuses.get(relative, "M"),
+                "additions": added,
+                "deletions": deleted,
+                "binary": added is None or deleted is None,
+                "patch_sha256": hashlib.sha256(patch_process.stdout).hexdigest(),
+                "hunks": hunks,
+            }
+        )
+
+    changed_untracked = {
+        path: descriptor
+        for path, descriptor in result_git.untracked.items()
+        if start_git.untracked.get(path) != descriptor
+    }
+    for relative, descriptor in sorted(changed_untracked.items()):
+        path = root / relative
+        additions: int | None = None
+        binary = True
+        if path.is_file():
+            try:
+                data = path.read_bytes()
+            except OSError:
+                data = b""
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                pass
+            else:
+                binary = False
+                additions = len(text.splitlines())
+        files.append(
+            {
+                "path": relative,
+                "status": "A",
+                "additions": additions,
+                "deletions": 0 if additions is not None else None,
+                "binary": binary,
+                "patch_sha256": descriptor.split(":", 1)[-1],
+                "hunks": [],
+            }
+        )
+    files.sort(key=lambda item: str(item["path"]))
+    total_additions = sum(
+        int(item["additions"]) for item in files if item["additions"] is not None
+    )
+    total_deletions = sum(
+        int(item["deletions"]) for item in files if item["deletions"] is not None
+    )
+    total_hunks = sum(len(item["hunks"]) for item in files)
+    unsigned = {
+        "protocol": "claim-plane.change-summary.v1",
+        "available": True,
+        "base_commit": base_commit,
+        "result_commit": result_git.head_commit,
+        "file_count": len(files),
+        "total_additions": total_additions,
+        "total_deletions": total_deletions,
+        "total_hunks": total_hunks,
+        "files": files,
+    }
+    return {
+        **unsigned,
+        "digest": hashlib.sha256(_canonical_json(unsigned).encode("utf-8")).hexdigest(),
+    }
+
+
+def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, Any]:
+    config = load_project_config(root)
+    acceptance = config.get("acceptance")
+    commands = acceptance.get("commands") if isinstance(acceptance, Mapping) else ()
+    safe_commands = [
+        str(item)
+        for item in commands or ()
+        if isinstance(item, str) and item.strip()
+    ]
+    return {
+        "protocol": "claim-plane.acceptance-summary.v1",
+        "commands": safe_commands,
+        "command_count": len(safe_commands),
+        "passed": bool(completion.get("acceptance_passed")),
+        "errors": int(completion.get("errors") or 0),
+        "warnings": int(completion.get("warnings") or 0),
+    }
 
 
 def _codex_command(
@@ -984,6 +1182,8 @@ def run_controlled_task(
         elif final_policy_action is PolicyAction.REVIEW_REQUIRED:
             outcome = ControlledRunOutcome.REVIEW_REQUIRED
     completion = _completion_summary(completion_payload)
+    changes = _change_summary(resolved_root, start_git, result_git)
+    acceptance = _acceptance_summary(resolved_root, completion)
     lifecycle = _lifecycle_summary(resolved_root, session_id)
     result = ControlledRunResult(
         run_id=run_id,
@@ -1013,6 +1213,8 @@ def run_controlled_task(
             "model_override": model,
         },
         completion=completion,
+        changes=changes,
+        acceptance=acceptance,
         lifecycle=lifecycle,
         cancellation=cancellation,
         error=error,
