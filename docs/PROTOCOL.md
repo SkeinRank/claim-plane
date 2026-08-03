@@ -1,5 +1,28 @@
 # Protocol
 
+## Agent Adapter Protocol
+
+`claim-plane.agent-adapter.v1` is the runtime-neutral boundary between Claim Plane and a coding-agent runtime. The protocol keeps runtime-specific hook or API payloads outside Claim Plane Core while carrying the identities required for deterministic authority decisions.
+
+Every request contains:
+
+- a stable `request_id` used for idempotency;
+- an `operation` from the public adapter lifecycle;
+- the adapter name and enrolled project root;
+- optional session, run, intent, and intent-version identities;
+- an explicit positive timeout;
+- a runtime-owned payload that cannot grant authority by itself.
+
+The lifecycle covers project enrollment and diagnostics, session start and stop, task submission, intent proposal, mutation requests, scope amendments, result observation, completion verification, cancellation, inspection, and crash resume. Responses return a portable status, the current intent binding when one exists, a replay marker, adapter result data, and structured failure information.
+
+Adapters must treat `request_id` as an idempotency key. Reusing the same identifier with identical input returns the stored result without repeating the state transition. Reusing it with different input fails closed with `idempotency_conflict`. Adapter caches persist only a request fingerprint and the adapter response; raw request payloads, including prompts and tool arguments, are not stored by the generic boundary.
+
+Authority-bearing calls may include the expected intent ID and content version. A mismatch is rejected before the runtime-specific mutation or amendment path is entered. Cancellation must release active authority. Resume may renew or re-admit previously known authority only through the existing deterministic lifecycle; an unknown resumed session starts without mutation authority.
+
+The public Python surface is `claim_plane.protocol.AgentAdapter`, `AdapterRequest`, and `AdapterResponse`. `CodexAdapter` is the first implementation. Additional runtimes implement the same interface without adding runtime-specific types to the protocol module. The request and response documents are described by [`schemas/agent-adapter-request.schema.json`](../schemas/agent-adapter-request.schema.json) and [`schemas/agent-adapter-response.schema.json`](../schemas/agent-adapter-response.schema.json).
+
+Claim Plane Core remains authoritative. An adapter translates lifecycle and observations; it never grants mutation authority directly.
+
 ## ChangeIntent
 
 A `ChangeIntent` declares planned work before implementation.

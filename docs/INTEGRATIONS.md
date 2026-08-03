@@ -1,5 +1,28 @@
 # Integration patterns
 
+## Agent adapter boundary
+
+Coding-agent runtimes integrate through the public `AgentAdapter` contract instead of calling runtime-specific control logic from product code. The adapter receives versioned `AdapterRequest` objects and returns portable `AdapterResponse` objects. The request envelope carries idempotency, timeout, session, run, intent, and expected intent-version data; the payload remains owned by the runtime implementation.
+
+```python
+from claim_plane.connectors import CodexAdapter
+from claim_plane.protocol import AdapterOperation, AdapterRequest
+
+adapter = CodexAdapter()
+response = adapter.enroll_project(
+    AdapterRequest.create(
+        AdapterOperation.ENROLL_PROJECT,
+        adapter="codex",
+        project_root=".",
+        request_id="enroll-local-codex",
+    )
+)
+```
+
+The same interface covers session lifecycle, task submission, intent admission, mutation requests, scope amendments, completion, cancellation, and resume. A caller that supplies an expected intent version receives a fail-closed `stale_intent_version` error before runtime-specific work begins when the authority has changed. Repeated requests with the same identifier replay the original adapter response; a conflicting reuse of that identifier is rejected.
+
+The CLI uses this boundary for Codex enrollment, lifecycle hooks, intent control, completion verification, and cancellation. Existing connector functions remain importable for compatibility, but new integrations should depend on `AgentAdapter`.
+
 ## Codex session bootstrap
 
 One enrollment applies to ordinary Codex sessions launched inside the Git worktree:

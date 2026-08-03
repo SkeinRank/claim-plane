@@ -27,8 +27,16 @@ from claim_plane.connectors.codex_amendment import (
 )
 from claim_plane.connectors.codex_guard import CODEX_GUARD_PROTOCOL
 from claim_plane.connectors.codex_completion import CODEX_COMPLETION_PROTOCOL
+from claim_plane.connectors.codex_adapter import (
+    CODEX_ADAPTER_NAME,
+    CODEX_ADAPTER_REVISION,
+    CodexAdapter,
+)
 
 __all__ = [
+    "CODEX_ADAPTER_NAME",
+    "CODEX_ADAPTER_REVISION",
+    "CodexAdapter",
     "CODEX_CONNECTOR_REVISION",
     "CODEX_ENROLLMENT_PROTOCOL",
     "CODEX_HOOK_COMMAND",

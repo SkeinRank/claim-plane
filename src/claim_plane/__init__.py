@@ -46,6 +46,17 @@ from claim_plane.core import (
     artifacts_to_claims,
     extract_artifacts,
 )
+from claim_plane.protocol import (
+    AGENT_ADAPTER_PROTOCOL,
+    AGENT_ADAPTER_PROTOCOL_VERSION,
+    AdapterErrorCode,
+    AdapterOperation,
+    AdapterProtocolError,
+    AdapterRequest,
+    AdapterResponse,
+    AdapterStatus,
+    AgentAdapter,
+)
 from claim_plane.runtime import (
     BrokerClient,
     BrokerCommand,
@@ -116,9 +127,18 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.25.0"
+__version__ = "0.26.0"
 
 __all__ = [
+    "AGENT_ADAPTER_PROTOCOL",
+    "AGENT_ADAPTER_PROTOCOL_VERSION",
+    "AdapterErrorCode",
+    "AdapterOperation",
+    "AdapterProtocolError",
+    "AdapterRequest",
+    "AdapterResponse",
+    "AdapterStatus",
+    "AgentAdapter",
     "AcceptanceResult",
     "AccessMode",
     "AdmissionConflict",

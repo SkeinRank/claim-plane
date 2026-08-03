@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -13,18 +14,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from claim_plane import __version__
-from claim_plane.connectors import (
-    admit_codex_intent,
-    abandon_codex_intent,
-    amend_codex_scope,
-    codex_intent_status,
-    verify_codex_completion,
-    connect_codex,
-    disconnect_codex,
-    doctor_codex,
-    handle_codex_hook,
-    init_project,
-)
+from claim_plane.connectors import CodexAdapter, init_project
+from claim_plane.protocol import AdapterOperation, AdapterRequest
 from claim_plane.core import (
     AccessMode,
     ChangeIntent,
@@ -89,6 +80,68 @@ from claim_plane.swarm import (
 
 DEFAULT_DB = ".claim-plane/plane.db"
 
+_CODEX_ADAPTER = CodexAdapter()
+
+
+def _adapter_request_id(
+    operation: AdapterOperation,
+    *,
+    session_id: str | None = None,
+    payload: Mapping[str, Any] | None = None,
+    stable: bool = False,
+) -> str:
+    if not stable:
+        return f"cli-{operation.value}-{secrets.token_hex(12)}"
+    canonical = json.dumps(
+        {
+            "operation": operation.value,
+            "session_id": session_id,
+            "payload": dict(payload or {}),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return f"cli-{operation.value}-{digest}"
+
+
+def _codex_request(
+    operation: AdapterOperation,
+    *,
+    repo: str,
+    session_id: str | None = None,
+    intent_id: str | None = None,
+    intent_version: int | None = None,
+    timeout_seconds: float = 30.0,
+    payload: Mapping[str, Any] | None = None,
+    stable: bool = False,
+) -> AdapterRequest:
+    return AdapterRequest.create(
+        operation,
+        adapter="codex",
+        project_root=repo,
+        request_id=_adapter_request_id(
+            operation, session_id=session_id, payload=payload, stable=stable
+        ),
+        session_id=session_id,
+        intent_id=intent_id,
+        intent_version=intent_version,
+        timeout_seconds=timeout_seconds,
+        payload=payload,
+    )
+
+
+def _codex_binding(repo: str, session_id: str) -> tuple[str | None, int | None]:
+    response = _CODEX_ADAPTER.inspect(
+        _codex_request(
+            AdapterOperation.INSPECT,
+            repo=repo,
+            session_id=session_id,
+        )
+    )
+    return response.intent_id, response.intent_version
+
 
 def _plane(args: argparse.Namespace) -> Plane:
     db = args.db or DEFAULT_DB
@@ -129,7 +182,12 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_connect_codex(args: argparse.Namespace) -> int:
-    result = connect_codex(args.repo)
+    response = _CODEX_ADAPTER.enroll_project(
+        _codex_request(
+            AdapterOperation.ENROLL_PROJECT, repo=args.repo
+        )
+    )
+    result = dict(response.payload)
     if args.json:
         _write_json(result)
     else:
@@ -147,7 +205,12 @@ def cmd_connect_codex(args: argparse.Namespace) -> int:
 
 
 def cmd_disconnect_codex(args: argparse.Namespace) -> int:
-    result = disconnect_codex(args.repo)
+    response = _CODEX_ADAPTER.unenroll_project(
+        _codex_request(
+            AdapterOperation.UNENROLL_PROJECT, repo=args.repo
+        )
+    )
+    result = dict(response.payload)
     if args.json:
         _write_json(result)
     else:
@@ -157,22 +220,25 @@ def cmd_disconnect_codex(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor_codex(args: argparse.Namespace) -> int:
-    report = doctor_codex(args.repo)
+    response = _CODEX_ADAPTER.doctor(
+        _codex_request(AdapterOperation.DOCTOR, repo=args.repo)
+    )
+    report = dict(response.payload)
     if args.json:
-        _write_json(report.to_dict())
+        _write_json(report)
     else:
-        print(f"Claim Plane Codex enrollment — {report.root}")
-        for item in report.checks:
+        print(f"Claim Plane Codex enrollment — {report['root']}")
+        for item in report["checks"]:
             status = str(item["status"]).upper()
             detail = str(item.get("detail") or "")
             print(f"[{status:7}] {item['name']}: {detail}")
             missing = item.get("missing_events")
             if missing:
                 print(f"          missing events: {', '.join(missing)}")
-        if report.codex_version:
-            print(f"Codex: {report.codex_version}")
-        print("Status: ready" if report.ready else "Status: action required")
-    return 0 if report.ready else 2
+        if report.get("codex_version"):
+            print(f"Codex: {report['codex_version']}")
+        print("Status: ready" if report["ready"] else "Status: action required")
+    return 0 if report["ready"] else 2
 
 
 def cmd_codex_hook(args: argparse.Namespace) -> int:
@@ -183,7 +249,7 @@ def cmd_codex_hook(args: argparse.Namespace) -> int:
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("Codex hook input must be a JSON object")
-    return handle_codex_hook(payload, output=sys.stdout)
+    return _CODEX_ADAPTER.dispatch_hook(payload, output=sys.stdout)
 
 
 def _read_stdin_json_object() -> dict[str, Any]:
@@ -205,44 +271,79 @@ def cmd_codex_intent_admit(args: argparse.Namespace) -> int:
         proposal = _read_json(args.proposal)
     else:
         proposal = _read_stdin_json_object()
-    result = admit_codex_intent(
-        args.repo,
-        session_id=args.session_id,
-        proposal=proposal,
+    response = _CODEX_ADAPTER.propose_intent(
+        _codex_request(
+            AdapterOperation.PROPOSE_INTENT,
+            repo=args.repo,
+            session_id=args.session_id,
+            payload={"proposal": proposal},
+        )
     )
+    result = dict(response.payload)
     _write_json(result)
     return 0 if result["allowed"] else 2
 
 
 def cmd_codex_intent_abandon(args: argparse.Namespace) -> int:
-    result = abandon_codex_intent(args.repo, session_id=args.session_id)
+    intent_id, intent_version = _codex_binding(args.repo, args.session_id)
+    response = _CODEX_ADAPTER.cancel(
+        _codex_request(
+            AdapterOperation.CANCEL,
+            repo=args.repo,
+            session_id=args.session_id,
+            intent_id=intent_id,
+            intent_version=intent_version,
+            stable=True,
+        )
+    )
+    result = dict(response.payload)
     _write_json(result)
     return 0
 
 
 def cmd_codex_intent_amend(args: argparse.Namespace) -> int:
-    result = amend_codex_scope(
-        args.repo,
-        session_id=args.session_id,
-        ticket_id=args.ticket,
-        reason=args.reason,
+    intent_id, intent_version = _codex_binding(args.repo, args.session_id)
+    payload = {"ticket_id": args.ticket, "reason": args.reason}
+    response = _CODEX_ADAPTER.request_amendment(
+        _codex_request(
+            AdapterOperation.REQUEST_AMENDMENT,
+            repo=args.repo,
+            session_id=args.session_id,
+            intent_id=intent_id,
+            intent_version=intent_version,
+            payload=payload,
+            stable=True,
+        )
     )
+    result = dict(response.payload)
     _write_json(result)
     return 0 if result["allowed"] else 2
 
 
 def cmd_codex_intent_verify(args: argparse.Namespace) -> int:
-    result = verify_codex_completion(
-        args.repo,
-        session_id=args.session_id,
-        acceptance_timeout=args.acceptance_timeout,
+    intent_id, intent_version = _codex_binding(args.repo, args.session_id)
+    response = _CODEX_ADAPTER.verify_completion(
+        _codex_request(
+            AdapterOperation.VERIFY_COMPLETION,
+            repo=args.repo,
+            session_id=args.session_id,
+            intent_id=intent_id,
+            intent_version=intent_version,
+            timeout_seconds=args.acceptance_timeout,
+        )
     )
+    result = dict(response.payload)
     _write_json(result)
     return 0 if result.get("verified") else 2
 
 
 def cmd_codex_intent_status(args: argparse.Namespace) -> int:
-    result = codex_intent_status(args.repo, session_id=args.session_id)
+    response = _CODEX_ADAPTER.inspect(
+        _codex_request(
+            AdapterOperation.INSPECT, repo=args.repo, session_id=args.session_id
+        )
+    )
+    result = dict(response.payload)
     if args.json:
         _write_json(result)
     else:

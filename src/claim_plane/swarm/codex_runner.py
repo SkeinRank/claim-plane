@@ -18,11 +18,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, TextIO
 
-from claim_plane.connectors.codex import (
-    codex_intent_status,
-    connect_codex,
-    init_project,
-)
+from claim_plane.connectors import CodexAdapter
+from claim_plane.connectors.codex import codex_intent_status, init_project
+from claim_plane.protocol import AdapterOperation, AdapterRequest
 from claim_plane.core import IntentOperation
 from claim_plane.swarm.admission import SharedAdmissionStatus
 from claim_plane.swarm.merge_queue import MergeEntryState
@@ -601,7 +599,15 @@ def run_codex_work_item(
     worktree = Path(record.worktree_path)
     try:
         init_project(worktree)
-        connect_codex(worktree)
+        CodexAdapter().enroll_project(
+            AdapterRequest.create(
+                AdapterOperation.ENROLL_PROJECT,
+                adapter="codex",
+                project_root=str(worktree),
+                request_id=f"swarm-connect-{record.run_id}",
+                run_id=record.run_id,
+            )
+        )
     except Exception as exc:
         failed_at = _utc_now()
         terminal = record.with_updates(

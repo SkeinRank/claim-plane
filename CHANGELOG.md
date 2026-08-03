@@ -8,6 +8,21 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-08-03
+
+### Added
+
+- Add the public `claim-plane.agent-adapter.v1` request and response contract with stable request, session, run, intent, and intent-version identities.
+- Add a runtime-neutral `AgentAdapter` interface covering project enrollment, diagnostics, session lifecycle, task submission, intent proposal, mutation admission, scope amendment, completion verification, cancellation, and resume.
+- Add structured adapter status and error taxonomies, persistent idempotency records, request-fingerprint conflict detection, and explicit timeout fields.
+- Add `CodexAdapter` as the first complete implementation, including native hook dispatch, stale intent-version rejection, safe cancellation, and fail-closed resume behavior.
+- Add JSON Schemas and regression coverage for the adapter boundary and guarded Codex delivery path.
+
+### Changed
+
+- Route the public Codex CLI lifecycle and headless swarm enrollment through `CodexAdapter` while preserving the existing Python connector functions for compatibility.
+- Keep adapter request caches free of raw prompts and tool inputs; only request fingerprints and adapter responses are persisted.
+
 ## [0.25.0] — 2026-08-01
 
 ### Added
