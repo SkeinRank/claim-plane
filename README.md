@@ -191,7 +191,7 @@ External adapter packages can publish a `claim_plane.adapters` Python entry poin
 
 ## Codex swarm operator
 
-Version 0.30.0 exposes the complete swarm lifecycle through one bounded operator command:
+Version 0.31.0 exposes the complete swarm lifecycle through one bounded operator command:
 
 ```bash
 claim-plane init
@@ -250,12 +250,14 @@ Claim Plane can register a project-local lifecycle bridge for Codex without repl
 cd my-project
 claim-plane init
 claim-plane connect codex
-claim-plane doctor codex
+claim-plane doctor
 
 codex
 ```
 
-`claim-plane init` creates local control-plane state and adds `.claim-plane/` to the repository's Git exclude file. `claim-plane connect codex` installs Claim Plane-owned handlers in `.codex/hooks.json` while preserving unrelated project hooks. Re-running either command is safe and does not duplicate the enrollment.
+`claim-plane init` creates a stable project identity, writes the versioned `.claim-plane/config.yaml`, discovers the default branch and likely acceptance commands, prepares local state, and keeps `.claim-plane/` out of Git status through the repository-local exclude file. Re-running initialization preserves the project identity and user-edited acceptance commands.
+
+`claim-plane connect codex` installs Claim Plane-owned handlers in `.codex/hooks.json` while preserving unrelated project hooks. It records the detected runtime and sandbox characteristics and creates an exact adapter pin when the runtime reports a version. Re-running enrollment is safe and does not duplicate handlers.
 
 The connector registers one stable dispatcher for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, and `SessionEnd`. Codex discovers these project-local hooks automatically for trusted projects. On the first Codex session, open `/hooks` to review and trust the command hooks; Codex records trust against the hook definition.
 
@@ -286,15 +288,23 @@ unprovable mutation -> deny before tool execution
 Stop -> collect evidence -> acceptance -> VERIFIED or bounded repair continuation
 ```
 
-`claim-plane doctor codex` also checks that the installed Codex version provides the hook surface required by the guard. Hook interception is an integration boundary, not a substitute for the brokered reference-monitor boundary: runtime hook coverage and timeout behavior remain properties of Codex itself. Claim Plane therefore keeps broker capabilities, repository identity, admission, and verification as the authoritative core primitives.
+`claim-plane doctor` checks Git and worktree state, project configuration, state-directory permissions, acceptance commands, credential hygiene, Codex runtime and authentication availability, sandbox characteristics, adapter negotiation, and the hook surface required by the guard. `claim-plane doctor codex` remains an equivalent explicit form. Hook interception is an integration boundary, not a substitute for the brokered reference-monitor boundary: runtime hook coverage and timeout behavior remain properties of Codex itself. Claim Plane therefore keeps broker capabilities, repository identity, admission, and verification as the authoritative core primitives.
 
 The session-bound proposal protocol is documented by [`schemas/codex-intent-proposal.schema.json`](schemas/codex-intent-proposal.schema.json), the amendment ticket by [`schemas/codex-scope-amendment.schema.json`](schemas/codex-scope-amendment.schema.json), and verified completion by [`schemas/codex-completion.schema.json`](schemas/codex-completion.schema.json). The lifecycle bridge does not depend on MCP; MCP remains an optional interaction surface for status, explanation, and evidence.
 
-To remove the integration without disturbing other Codex hooks:
+To remove only the Codex bridge without disturbing other hooks:
 
 ```bash
 claim-plane disconnect codex
 ```
+
+To clear Claim Plane-owned local state while preserving repository files, unrelated hooks, and `.claim-plane/config.yaml`:
+
+```bash
+claim-plane reset
+```
+
+Use `claim-plane reset --remove-config` only when the project enrollment itself should also be removed.
 
 If `.codex/config.toml` explicitly sets `[features] hooks = false`, enrollment fails rather than overriding the project's Codex policy. If inline Codex hooks already exist in that file, Claim Plane leaves them untouched and reports that Codex will merge both project-local hook sources.
 

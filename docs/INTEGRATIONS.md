@@ -1,5 +1,24 @@
 # Integration patterns
 
+## Project enrollment and diagnostics
+
+The normal single-agent setup is intentionally short:
+
+```bash
+cd my-project
+claim-plane init
+claim-plane connect codex
+claim-plane doctor
+```
+
+Initialization writes `.claim-plane/config.yaml` with protocol `claim-plane.project-config.v1`. The file contains only project identity, repository identity, default-branch metadata, acceptance commands, and adapter policy settings. Credentials, raw prompts, runtime tokens, and provider secrets are never copied into project configuration.
+
+Acceptance discovery prefers an existing `scripts/check.sh`, then recognized Make, Python, Node, Rust, Go, Maven, or Gradle test entry points. The detected list is a starting point and can be edited before a guarded run. Re-running `claim-plane init` preserves the stable project identity and configured commands.
+
+`claim-plane doctor` combines project, runtime, adapter, policy, and hook diagnostics. Errors make the report not ready; warnings explain limitations such as a dirty worktree, an unavailable optional command, or a project-local sandbox whose out-of-band host writes remain post-verified. JSON output is available through `claim-plane doctor --json`.
+
+`claim-plane reset` removes Claim Plane-owned databases, request caches, lifecycle state, session state, and hook handlers. It preserves repository files, foreign Codex hooks, and the project config unless `--remove-config` is supplied explicitly.
+
 ## Agent adapter boundary
 
 Coding-agent runtimes integrate through the public `AgentAdapter` contract instead of calling runtime-specific control logic from product code. The adapter receives versioned `AdapterRequest` objects and returns portable `AdapterResponse` objects. The request envelope carries idempotency, timeout, session, run, intent, and expected intent-version data; the payload remains owned by the runtime implementation.

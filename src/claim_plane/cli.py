@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from claim_plane import __version__
-from claim_plane.connectors import build_adapter_registry, init_project
+from claim_plane.connectors import (
+    build_adapter_registry,
+    disconnect_codex,
+    init_project,
+)
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
     AdapterHandshake,
@@ -87,6 +91,7 @@ from claim_plane.swarm import (
 )
 
 from claim_plane.testing.codex import CodexConformanceDriver
+from claim_plane.project import reset_project
 from claim_plane.testing.conformance import ReferenceConformanceDriver
 
 DEFAULT_DB = ".claim-plane/plane.db"
@@ -221,26 +226,52 @@ def cmd_init(args: argparse.Namespace) -> int:
     if args.json:
         _write_json(result)
     else:
-        print(f"Initialized Claim Plane for {result['root']}.")
+        action = "Initialized" if result.get("created") else "Verified"
+        print(f"{action} Claim Plane for {result['root']}.")
+        print(f"Project identity: {result['project_id']}")
+        print(f"Default branch: {result['default_branch']}")
+        print(f"Config: {result['config']}")
+        commands = result.get("acceptance_commands") or []
+        if commands:
+            print(f"Acceptance: {', '.join(commands)}")
+        else:
+            print("Acceptance: no command detected; configure it before a guarded run.")
         print("Local state is excluded through the repository Git exclude file.")
     return 0
 
 
 def cmd_connect_codex(args: argparse.Namespace) -> int:
-    _adapter_handshake("codex", repo=args.repo, require_compatible=True)
+    handshake = _adapter_handshake("codex", repo=args.repo, require_compatible=True)
     response = _CODEX_ADAPTER.enroll_project(
-        _codex_request(
-            AdapterOperation.ENROLL_PROJECT, repo=args.repo
-        )
+        _codex_request(AdapterOperation.ENROLL_PROJECT, repo=args.repo)
     )
     result = dict(response.payload)
+    result["registry_handshake"] = handshake.to_dict()
+    try:
+        pin, path = _ADAPTER_REGISTRY.pin("codex", project_root=args.repo)
+    except (RuntimeError, ValueError) as exc:
+        result["pin"] = None
+        result["pin_status"] = "not_available"
+        result["pin_detail"] = str(exc)
+    else:
+        result["pin"] = pin.to_dict()
+        result["pin_path"] = str(path)
+        result["pin_status"] = "created"
     if args.json:
         _write_json(result)
     else:
         print(f"Connected Codex to Claim Plane for {result['root']}.")
         print(f"Lifecycle hooks: {', '.join(result['events'])}")
+        runtime = result.get("runtime_version") or "version not detected"
+        print(f"Codex runtime: {runtime}")
+        print(f"Sandbox: {result.get('sandbox_detail')}")
+        if result.get("pin_status") == "created":
+            print(f"Adapter pin: {result['pin_path']}")
+        else:
+            print(f"Adapter pin: deferred ({result.get('pin_detail')})")
         print(
-            "Open /hooks in Codex once to review and trust the project-local command hooks."
+            "Open /hooks in Codex once to review and trust the project-local "
+            "command hooks."
         )
         if result["inline_hooks_present"]:
             print(
@@ -262,6 +293,28 @@ def cmd_disconnect_codex(args: argparse.Namespace) -> int:
     else:
         print(f"Disconnected Codex from Claim Plane for {result['root']}.")
         print(f"Removed {result['removed_handlers']} Claim Plane hook handler(s).")
+    return 0
+
+
+def cmd_reset(args: argparse.Namespace) -> int:
+    disconnect_result: dict[str, Any]
+    try:
+        disconnect_result = disconnect_codex(args.repo)
+    except ValueError as exc:
+        disconnect_result = {"connected": False, "warning": str(exc)}
+    result = reset_project(args.repo, remove_config=args.remove_config)
+    result["codex"] = disconnect_result
+    if args.json:
+        _write_json(result)
+    else:
+        print(f"Reset Claim Plane local state for {result['root']}.")
+        print(f"Removed entries: {len(result['removed'])}")
+        print(
+            "Project config removed."
+            if args.remove_config
+            else "Project config preserved."
+        )
+        print("Repository files and foreign Codex hooks were left unchanged.")
     return 0
 
 
@@ -1958,6 +2011,21 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--json", action="store_true")
     init.set_defaults(func=cmd_init)
 
+    reset = sub.add_parser(
+        "reset",
+        help=(
+            "Remove Claim Plane-owned local state without touching repository files."
+        ),
+    )
+    reset.add_argument("--repo", default=".")
+    reset.add_argument(
+        "--remove-config",
+        action="store_true",
+        help="Also remove .claim-plane/config.yaml.",
+    )
+    reset.add_argument("--json", action="store_true")
+    reset.set_defaults(func=cmd_reset)
+
     adapters = sub.add_parser(
         "adapters", help="Inspect coding-agent adapter capabilities and guarantees."
     )
@@ -2057,9 +2125,15 @@ def build_parser() -> argparse.ArgumentParser:
     disconnect_codex_parser.set_defaults(func=cmd_disconnect_codex)
 
     doctor = sub.add_parser(
-        "doctor", help="Inspect coding-agent runtime enrollment health."
+        "doctor", help="Inspect project and coding-agent enrollment health."
     )
-    doctor_sub = doctor.add_subparsers(dest="connector", required=True)
+    doctor.add_argument("--repo", default=".")
+    doctor.add_argument(
+        "--policy", choices=("observe", "guarded", "strict", "critical")
+    )
+    doctor.add_argument("--json", action="store_true")
+    doctor.set_defaults(func=cmd_doctor_codex, connector="codex")
+    doctor_sub = doctor.add_subparsers(dest="doctor_connector")
     doctor_codex_parser = doctor_sub.add_parser(
         "codex", help="Inspect the project-local Codex lifecycle bridge."
     )
@@ -2068,7 +2142,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy", choices=("observe", "guarded", "strict", "critical")
     )
     doctor_codex_parser.add_argument("--json", action="store_true")
-    doctor_codex_parser.set_defaults(func=cmd_doctor_codex)
+    doctor_codex_parser.set_defaults(func=cmd_doctor_codex, connector="codex")
+
 
     codex_hook = sub.add_parser(
         "codex-hook", help="Internal Codex lifecycle dispatcher."

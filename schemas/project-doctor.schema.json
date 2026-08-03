@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/project-doctor.schema.json",
+  "title": "Claim Plane project doctor report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "root", "ready", "checks", "config"],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.project-doctor.v1"
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ready": {
+      "type": "boolean"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "detail"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "enum": ["ok", "info", "warning", "error"]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "config": {
+      "oneOf": [
+        {
+          "$ref": "project-config.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

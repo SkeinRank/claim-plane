@@ -121,6 +121,17 @@ from claim_plane.protocol import (
     save_adapter_pin,
     validate_lifecycle_events,
 )
+from claim_plane.project import (
+    PROJECT_CONFIG_PROTOCOL,
+    PROJECT_DOCTOR_PROTOCOL,
+    PROJECT_STATE_PROTOCOL,
+    ProjectDoctorReport,
+    doctor_project,
+    dump_project_config,
+    init_project,
+    load_project_config,
+    reset_project,
+)
 from claim_plane.runtime import (
     BrokerClient,
     BrokerCommand,
@@ -191,7 +202,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.30.0"
+__version__ = "0.31.0"
 
 __all__ = [
     "ADAPTER_ENTRY_POINT_GROUP",
@@ -374,5 +385,14 @@ __all__ = [
     "get_swarm_operator_snapshot",
     "list_swarm_operator_logs",
     "start_swarm_session",
+    "PROJECT_CONFIG_PROTOCOL",
+    "PROJECT_DOCTOR_PROTOCOL",
+    "PROJECT_STATE_PROTOCOL",
+    "ProjectDoctorReport",
+    "doctor_project",
+    "dump_project_config",
+    "init_project",
+    "load_project_config",
+    "reset_project",
     "__version__",
 ]

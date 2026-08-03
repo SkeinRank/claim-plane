@@ -39,8 +39,15 @@ from claim_plane.connectors.codex_guard import (
     protected_control_path,
 )
 from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind
+from claim_plane.project import (
+    PROJECT_STATE_PROTOCOL,
+    doctor_project,
+    init_project as initialize_project,
+    resolve_project_root as resolve_enrolled_project_root,
+    set_adapter_enabled,
+)
 
-PROJECT_PROTOCOL = "claim-plane.project.v1"
+PROJECT_PROTOCOL = PROJECT_STATE_PROTOCOL
 CODEX_ENROLLMENT_PROTOCOL = "claim-plane.codex-enrollment.v1"
 CODEX_SESSION_PROTOCOL = "claim-plane.codex-session.v1"
 CODEX_INTENT_PROPOSAL_PROTOCOL = "claim-plane.codex-intent-proposal.v1"
@@ -148,8 +155,7 @@ def _worktree_status(root: Path) -> tuple[bool, str]:
 def resolve_project_root(root_or_child: str | Path = ".") -> Path:
     """Resolve the Git worktree root used by project-local enrollment."""
 
-    root = _git(root_or_child, "rev-parse", "--show-toplevel")
-    return Path(root).resolve()
+    return resolve_enrolled_project_root(root_or_child)
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -211,34 +217,9 @@ def _ensure_local_state_excluded(root: Path) -> Path:
 
 
 def init_project(root_or_child: str | Path = ".") -> dict[str, Any]:
-    """Initialize local Claim Plane state without adding tracked repository files."""
+    """Initialize project identity, versioned configuration, and local state."""
 
-    root = resolve_project_root(root_or_child)
-    state_path = root / _PROJECT_STATE
-    now = _utc_now()
-    if state_path.exists():
-        state = _read_json_object(state_path)
-        if state.get("protocol") != PROJECT_PROTOCOL:
-            raise ValueError(
-                f"{state_path} uses unsupported protocol {state.get('protocol')!r}"
-            )
-        initialized_at = str(state.get("initialized_at") or now)
-    else:
-        initialized_at = now
-
-    state = {
-        "protocol": PROJECT_PROTOCOL,
-        "initialized_at": initialized_at,
-        "updated_at": now,
-    }
-    _atomic_write_json(state_path, state)
-    exclude = _ensure_local_state_excluded(root)
-    return {
-        "root": str(root),
-        "state": str(state_path),
-        "exclude": str(exclude),
-        "initialized": True,
-    }
+    return initialize_project(root_or_child)
 
 
 def _require_initialized(root: Path) -> dict[str, Any]:
@@ -439,6 +420,8 @@ def connect_codex(root_or_child: str | Path = ".") -> dict[str, Any]:
         groups.append(_canonical_group(event))
     _atomic_write_json(hooks_path, payload)
 
+    executable, runtime_version = _codex_version()
+    sandbox_status, sandbox_detail = _codex_sandbox_status()
     state = {
         "protocol": CODEX_ENROLLMENT_PROTOCOL,
         "created_at": created_at,
@@ -447,14 +430,27 @@ def connect_codex(root_or_child: str | Path = ".") -> dict[str, Any]:
         "hook_command": CODEX_HOOK_COMMAND,
         "events": list(CODEX_HOOK_EVENTS),
         "connector_revision": CODEX_CONNECTOR_REVISION,
+        "runtime": {
+            "executable": executable,
+            "version": runtime_version,
+        },
+        "sandbox": {
+            "status": sandbox_status,
+            "detail": sandbox_detail,
+        },
     }
     _atomic_write_json(state_path, state)
+    set_adapter_enabled(root, "codex", enabled=True)
     return {
         "root": str(root),
         "hooks": str(hooks_path),
         "state": str(state_path),
         "events": list(CODEX_HOOK_EVENTS),
         "inline_hooks_present": _has_inline_hooks(config_path),
+        "runtime_executable": executable,
+        "runtime_version": runtime_version,
+        "sandbox_status": sandbox_status,
+        "sandbox_detail": sandbox_detail,
         "connected": True,
     }
 
@@ -483,6 +479,10 @@ def disconnect_codex(root_or_child: str | Path = ".") -> dict[str, Any]:
     try:
         state_path.unlink()
     except FileNotFoundError:
+        pass
+    try:
+        set_adapter_enabled(root, "codex", enabled=False)
+    except ValueError:
         pass
     return {
         "root": str(root),
@@ -519,26 +519,73 @@ def _codex_version() -> tuple[str | None, str | None]:
     return executable, version
 
 
+def _codex_auth_status(executable: str | None) -> tuple[str, str]:
+    if os.environ.get("OPENAI_API_KEY"):
+        return "ok", "authentication is available through the process environment"
+    if executable is None:
+        return (
+            "error",
+            "Codex runtime is unavailable, so authentication cannot be checked",
+        )
+    try:
+        completed = subprocess.run(
+            [executable, "login", "status"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "warning", "Codex authentication status could not be queried"
+    summary = (completed.stdout.strip() or completed.stderr.strip()).lower()
+    if completed.returncode == 0:
+        return "ok", "Codex reports an available authentication session"
+    if any(
+        item in summary
+        for item in ("not logged", "unauthenticated", "login required")
+    ):
+        return "error", "Codex is installed but no authentication session is available"
+    return (
+        "warning",
+        "Codex authentication status is not exposed by this runtime version",
+    )
+
+
+def _codex_sandbox_status() -> tuple[str, str]:
+    if os.name == "posix" and shutil.which("bwrap"):
+        return (
+            "ok",
+            "Linux Bubblewrap is available for a brokered non-bypassable boundary",
+        )
+    if shutil.which("sandbox-exec"):
+        return (
+            "warning",
+            "macOS sandbox-exec is available; project-local hooks remain "
+            "bypassable by host writes",
+        )
+    return (
+        "warning",
+        "project-local hook enforcement is available; out-of-band host writes "
+        "remain post-verified",
+    )
+
+
 def doctor_codex(root_or_child: str | Path = ".") -> CodexDoctorReport:
     """Inspect local enrollment without modifying project state."""
 
     root = resolve_project_root(root_or_child)
-    checks: list[dict[str, Any]] = []
-
-    project_state = root / _PROJECT_STATE
-    initialized = project_state.exists()
-    if initialized:
-        try:
-            initialized = (
-                _read_json_object(project_state).get("protocol") == PROJECT_PROTOCOL
-            )
-        except (json.JSONDecodeError, ValueError):
-            initialized = False
+    project_report = doctor_project(root)
+    checks: list[dict[str, Any]] = [dict(item) for item in project_report.checks]
+    project_checks = {str(item.get("name")): item for item in project_report.checks}
+    project_initialized = all(
+        str(project_checks.get(name, {}).get("status")) == "ok"
+        for name in ("project_config", "project_state", "state_directory")
+    )
     checks.append(
         {
             "name": "project_initialized",
-            "status": "ok" if initialized else "error",
-            "detail": str(project_state),
+            "status": "ok" if project_initialized else "error",
+            "detail": str(root / _PROJECT_STATE),
         }
     )
 
@@ -654,6 +701,22 @@ def doctor_codex(root_or_child: str | Path = ".") -> CodexDoctorReport:
             "name": "codex_cli",
             "status": "ok" if executable else "error",
             "detail": executable or "codex executable not found on PATH",
+        }
+    )
+    auth_status, auth_detail = _codex_auth_status(executable)
+    checks.append(
+        {
+            "name": "codex_authentication",
+            "status": auth_status,
+            "detail": auth_detail,
+        }
+    )
+    sandbox_status, sandbox_detail = _codex_sandbox_status()
+    checks.append(
+        {
+            "name": "sandbox_boundary",
+            "status": sandbox_status,
+            "detail": sandbox_detail,
         }
     )
 

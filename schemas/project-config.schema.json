@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/project-config.schema.json",
+  "title": "Claim Plane project configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "project", "repository", "acceptance", "adapters"],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.project-config.v1"
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^cp_[0-9a-f]{24}$"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "default_branch", "default_branch_source"],
+      "properties": {
+        "identity": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "default_branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default_branch_source": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "detected"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "detected": {
+          "type": "boolean"
+        }
+      }
+    },
+    "adapters": {
+      "type": "object",
+      "required": ["codex"],
+      "properties": {
+        "codex": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "policy"],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "policy": {
+              "enum": ["observe", "guarded", "strict", "critical"]
+            }
+          }
+        }
+      },
+      "additionalProperties": {
+        "type": "object"
+      }
+    }
+  }
+}

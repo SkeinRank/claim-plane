@@ -8,6 +8,20 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane.project-config.v1` with a stable project identity, repository identity, default-branch discovery, adapter settings, and automatically detected acceptance commands.
+- Add project-level diagnostics for Git state, local-state permissions, acceptance command availability, credential hygiene, Codex authentication availability, sandbox characteristics, and adapter compatibility.
+- Add `claim-plane reset` for removing only Claim Plane-owned state and hook handlers while preserving repository content, unrelated Codex hooks, and the project config by default.
+- Add project configuration and doctor JSON Schemas plus regression coverage for idempotent enrollment, runtime metadata, secret-safe diagnostics, default doctor routing, and safe reset.
+
+### Changed
+
+- Let `claim-plane doctor` use Codex as the default adapter while preserving `claim-plane doctor codex`.
+- Record detected Codex runtime and sandbox metadata during enrollment and create an exact adapter pin automatically when the runtime exposes a version.
+
 ## [0.30.0] — 2026-08-03
 
 ### Added
