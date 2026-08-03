@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-verification.schema.json",
+  "title": "Claim Plane Swarm Verification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol", "session_id", "repository_identity", "base_commit",
+    "graph_version", "graph_fingerprint", "budget_version",
+    "budget_fingerprint", "admission_fingerprint",
+    "merge_queue_fingerprint", "integration_head", "status", "verified",
+    "work_evidence", "root_changed_paths", "root_acceptance_results",
+    "root_report", "snapshot_integrity_ok", "acceptance_mutation_paths",
+    "findings", "created_at", "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-verification.v1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "repository_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "graph_version": {"type": "integer", "minimum": 1},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "budget_version": {"type": "integer", "minimum": 1},
+    "budget_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "admission_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "merge_queue_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "integration_head": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "status": {"enum": ["verified", "failed", "stale"]},
+    "verified": {"type": "boolean"},
+    "work_evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "work_id", "run_id", "source_commit", "integration_commit",
+          "changed_paths", "changed_regions", "acceptance_results",
+          "findings", "verified"
+        ],
+        "properties": {
+          "work_id": {"type": "string", "minLength": 1},
+          "run_id": {"type": ["string", "null"]},
+          "source_commit": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}]},
+          "integration_commit": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}]},
+          "changed_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "changed_regions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "start_line", "end_line", "old_start_line", "old_end_line"],
+              "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "start_line": {"type": "integer", "minimum": 1},
+                "end_line": {"type": "integer", "minimum": 1},
+                "old_start_line": {"type": "integer", "minimum": 0},
+                "old_end_line": {"type": "integer", "minimum": 0}
+              }
+            }
+          },
+          "acceptance_results": {"type": "array", "items": {"$ref": "#/$defs/acceptanceResult"}},
+          "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+          "verified": {"type": "boolean"}
+        }
+      }
+    },
+    "root_changed_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "root_acceptance_results": {"type": "array", "items": {"$ref": "#/$defs/acceptanceResult"}},
+    "root_report": {"type": "object"},
+    "snapshot_integrity_ok": {"type": "boolean"},
+    "acceptance_mutation_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "created_at": {"type": "string", "minLength": 1},
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "acceptanceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "returncode", "passed", "duration_ms", "stdout_tail", "stderr_tail", "sandbox_backend", "sandbox_enforced"],
+      "properties": {
+        "command": {"type": "string"},
+        "returncode": {"type": "integer"},
+        "passed": {"type": "boolean"},
+        "duration_ms": {"type": "integer", "minimum": 0},
+        "stdout_tail": {"type": "string"},
+        "stderr_tail": {"type": "string"},
+        "sandbox_backend": {"type": "string"},
+        "sandbox_enforced": {"type": "boolean"}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message", "work_id", "path"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["info", "warning", "error"]},
+        "message": {"type": "string"},
+        "work_id": {"type": ["string", "null"]},
+        "path": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

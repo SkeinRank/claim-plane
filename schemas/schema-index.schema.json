@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/schema-index.schema.json",
+  "title": "Claim Plane packaged schema index",
+  "$defs": {
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+\\.json$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size": {"type": "integer", "minimum": 1}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "count", "schemas"],
+  "properties": {
+    "protocol": {"const": "claim-plane.schema-index.v1"},
+    "count": {"type": "integer", "minimum": 1},
+    "schemas": {"type": "array", "items": {"$ref": "#/$defs/schema"}}
+  }
+}

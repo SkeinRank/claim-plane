@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, TextIO
 
+from claim_plane.exit_codes import ExitCode
 from claim_plane.policy import EffectivePolicy, PolicyAction, resolve_policy
 from claim_plane.project import load_project_config, resolve_project_root
 from claim_plane.protocol import (
@@ -983,14 +984,16 @@ def _classify_outcome(
 
 
 def _exit_code(outcome: ControlledRunOutcome) -> int:
-    return {
-        ControlledRunOutcome.VERIFIED: 0,
-        ControlledRunOutcome.REVIEW_REQUIRED: 2,
-        ControlledRunOutcome.REJECTED: 3,
-        ControlledRunOutcome.FAILED: 4,
-        ControlledRunOutcome.TIMED_OUT: 124,
-        ControlledRunOutcome.CANCELLED: 130,
-    }[outcome]
+    return int(
+        {
+            ControlledRunOutcome.VERIFIED: ExitCode.OK,
+            ControlledRunOutcome.REVIEW_REQUIRED: ExitCode.ACTION_REQUIRED,
+            ControlledRunOutcome.REJECTED: ExitCode.INCOMPLETE,
+            ControlledRunOutcome.FAILED: ExitCode.BLOCKED,
+            ControlledRunOutcome.TIMED_OUT: ExitCode.TIMED_OUT,
+            ControlledRunOutcome.CANCELLED: ExitCode.CANCELLED,
+        }[outcome]
+    )
 
 
 def run_controlled_task(

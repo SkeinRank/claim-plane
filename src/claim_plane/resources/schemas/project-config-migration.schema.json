@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/project-config-migration.schema.json",
+  "title": "Claim Plane project config migration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "root", "path", "source_protocol", "target_protocol", "changed", "dry_run", "backup", "config"],
+  "properties": {
+    "protocol": {"const": "claim-plane.project-config-migration.v1"},
+    "root": {"type": "string", "minLength": 1},
+    "path": {"type": "string", "minLength": 1},
+    "source_protocol": {"type": "string", "minLength": 1},
+    "target_protocol": {"const": "claim-plane.project-config.v1"},
+    "changed": {"type": "boolean"},
+    "dry_run": {"type": "boolean"},
+    "backup": {"type": ["string", "null"]},
+    "config": {"$ref": "project-config.schema.json"}
+  }
+}

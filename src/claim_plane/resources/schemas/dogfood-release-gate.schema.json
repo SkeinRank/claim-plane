@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/dogfood-release-gate.schema.json",
+  "title": "Claim Plane dogfood release gate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "summary_digest", "evaluated_at", "status", "release_allowed", "thresholds", "comparison", "findings", "digest"],
+  "properties": {
+    "protocol": {"const": "claim-plane.dogfood-release-gate.v1"},
+    "summary_digest": {"type": ["string", "null"]},
+    "evaluated_at": {"type": "string", "minLength": 1},
+    "status": {"enum": ["PASSED", "BLOCKED", "INCOMPLETE"]},
+    "release_allowed": {"type": "boolean"},
+    "thresholds": {"type": "object"},
+    "comparison": {"type": "object"},
+    "findings": {"type": "array", "items": {"type": "object"}},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

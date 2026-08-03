@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/adapter-conformance-report.schema.json",
+  "title": "Claim Plane Adapter Conformance Report",
+  "type": "object",
+  "required": [
+    "protocol",
+    "conformance_version",
+    "adapter",
+    "adapter_version",
+    "runtime",
+    "manifest_digest",
+    "compatible",
+    "scenarios",
+    "guarantees",
+    "summary",
+    "digest"
+  ],
+  "properties": {
+    "protocol": { "const": "claim-plane.adapter-conformance.v1" },
+    "conformance_version": { "const": "1.0" },
+    "adapter": { "type": "string", "minLength": 1 },
+    "adapter_version": { "type": "string", "minLength": 1 },
+    "runtime": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "manifest_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "compatible": { "type": "boolean" },
+    "scenarios": {
+      "type": "array",
+      "minItems": 13,
+      "items": {
+        "type": "object",
+        "required": ["scenario", "status", "detail", "duration_ms", "evidence"],
+        "properties": {
+          "scenario": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "failed", "skipped"] },
+          "detail": { "type": "string", "minLength": 1 },
+          "duration_ms": { "type": "integer", "minimum": 0 },
+          "evidence": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["guarantee", "declared_level", "scenarios", "verified", "detail"],
+        "properties": {
+          "guarantee": { "type": "string", "minLength": 1 },
+          "declared_level": {
+            "enum": ["HARD_BLOCKED", "OBSERVED", "POST_VERIFIED", "UNAVAILABLE"]
+          },
+          "scenarios": { "type": "array", "items": { "type": "string" } },
+          "verified": { "type": "boolean" },
+          "detail": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["passed", "failed", "skipped", "total", "claims_verified"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 13 },
+        "claims_verified": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}

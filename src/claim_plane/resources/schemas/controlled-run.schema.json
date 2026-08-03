@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/controlled-run.schema.json",
+  "title": "Claim Plane controlled run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "run_id",
+    "adapter",
+    "policy",
+    "root",
+    "started_at",
+    "finished_at",
+    "outcome",
+    "verified",
+    "exit_code",
+    "runtime_returncode",
+    "task_sha256",
+    "task_length",
+    "session_id",
+    "intent_id",
+    "intent_version",
+    "start_git",
+    "result_git",
+    "manifest_digest",
+    "handshake",
+    "policy_compatibility",
+    "effective_policy",
+    "risk",
+    "runtime",
+    "completion",
+    "changes",
+    "acceptance",
+    "lifecycle",
+    "cancellation",
+    "error"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.controlled-run.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^cpr_[0-9a-f]{24}$"
+    },
+    "adapter": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy": {
+      "enum": [
+        "observe",
+        "guarded",
+        "strict",
+        "critical"
+      ]
+    },
+    "root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "outcome": {
+      "enum": [
+        "VERIFIED",
+        "REJECTED",
+        "REVIEW_REQUIRED",
+        "CANCELLED",
+        "TIMED_OUT",
+        "FAILED"
+      ]
+    },
+    "verified": {
+      "type": "boolean"
+    },
+    "exit_code": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "runtime_returncode": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "task_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "task_length": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "session_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "intent_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "intent_version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "start_git": {
+      "$ref": "#/$defs/gitState"
+    },
+    "result_git": {
+      "$ref": "#/$defs/gitState"
+    },
+    "manifest_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "handshake": {
+      "type": "object"
+    },
+    "policy_compatibility": {
+      "type": "object"
+    },
+    "runtime": {
+      "type": "object"
+    },
+    "completion": {
+      "type": "object"
+    },
+    "lifecycle": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "cancellation": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "error": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "effective_policy": {
+      "$ref": "policy.schema.json"
+    },
+    "risk": {
+      "$ref": "risk-classification.schema.json"
+    },
+    "changes": {
+      "$ref": "change-summary.schema.json"
+    },
+    "acceptance": {
+      "$ref": "acceptance-summary.schema.json"
+    }
+  },
+  "$defs": {
+    "gitState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "head_commit",
+        "head_tree",
+        "branch",
+        "status_sha256",
+        "diff_sha256",
+        "untracked",
+        "digest"
+      ],
+      "properties": {
+        "head_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "head_tree": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "diff_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "untracked": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

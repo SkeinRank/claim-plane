@@ -10,6 +10,7 @@ def test_issue_forms_and_chooser_are_present() -> None:
         "feature.yml",
         "research.yml",
         "reproducibility.yml",
+        "technical-preview.yml",
         "config.yml",
     }
     assert expected <= {path.name for path in ISSUE_DIR.iterdir() if path.is_file()}
@@ -27,6 +28,11 @@ def test_issue_forms_use_public_taxonomy() -> None:
         "reproducibility.yml": [
             '"type: research"',
             '"area: cooperbench"',
+            '"status: needs-triage"',
+        ],
+        "technical-preview.yml": [
+            '"type: bug"',
+            '"area: cli"',
             '"status: needs-triage"',
         ],
     }

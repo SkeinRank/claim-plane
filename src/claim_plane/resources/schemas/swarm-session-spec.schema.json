@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-session-spec.schema.json",
+  "title": "Claim Plane Swarm Session Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "root_task",
+    "work_graph"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.swarm-session-spec.v1"
+    },
+    "root_task": {
+      "$ref": "#/$defs/rootTask"
+    },
+    "integration_target": {
+      "$ref": "#/$defs/integrationTarget"
+    },
+    "work_graph": {
+      "$ref": "swarm-work-graph.schema.json"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "budget_policy": {
+      "$ref": "swarm-budget-policy.schema.json"
+    }
+  },
+  "$defs": {
+    "rootTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "goal"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "acceptance": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "integrationTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch"
+      ],
+      "properties": {
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metadata": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

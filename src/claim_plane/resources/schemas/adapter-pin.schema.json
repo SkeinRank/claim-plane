@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/adapter-pin.schema.json",
+  "title": "Claim Plane Adapter Pin",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "adapter",
+    "adapter_version",
+    "adapter_version_normalized",
+    "protocol_version",
+    "protocol_range",
+    "runtime",
+    "source",
+    "distribution",
+    "manifest_digest",
+    "created_at",
+    "digest"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.adapter-pin.v1"},
+    "adapter": {"type": "string", "minLength": 1},
+    "adapter_version": {"type": "string", "minLength": 1},
+    "adapter_version_normalized": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "protocol_version": {"type": "string", "minLength": 1},
+    "protocol_range": {"type": "string", "minLength": 1},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": ["string", "null"]}
+      }
+    },
+    "source": {"enum": ["builtin", "entry_point", "programmatic"]},
+    "distribution": {"type": ["string", "null"]},
+    "manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

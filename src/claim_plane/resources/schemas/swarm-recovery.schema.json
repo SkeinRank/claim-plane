@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-recovery.schema.json",
+  "title": "Claim Plane Swarm Recovery Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "event_id",
+    "session_id",
+    "action",
+    "run_id",
+    "work_id",
+    "detail",
+    "created_at",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-recovery.v1"},
+    "event_id": {"type": "string", "pattern": "^recovery-[0-9a-f]{24}$"},
+    "session_id": {"type": "string", "minLength": 1},
+    "action": {"type": "string", "minLength": 1},
+    "run_id": {"type": ["string", "null"]},
+    "work_id": {"type": ["string", "null"]},
+    "detail": {"type": ["string", "null"]},
+    "created_at": {"type": "string", "minLength": 1},
+    "metadata": {"type": "object"}
+  }
+}

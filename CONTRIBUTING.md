@@ -1,6 +1,6 @@
 # Contributing to Claim Plane
 
-Claim Plane is an early Research Preview. Contributions should preserve its central
+Claim Plane is an early Technical Preview. Contributions should preserve its central
 property: deterministic checks fail closed at the governed boundary and return structured
 guidance instead of silently guessing.
 

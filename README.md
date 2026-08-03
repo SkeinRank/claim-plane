@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.32.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.36.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -59,6 +59,37 @@ Maxim Nikolaev · Software Engineering (`cs.SE`) · 2026
 - [Published six-pair CooperBench reproduction](experiments/cooperbench/paper_6pair/)
 
 Repository-level software citation metadata is available in [`CITATION.cff`](CITATION.cff), and the paper-specific BibTeX entry is available in [`papers/claim-plane-2026/citation.bib`](papers/claim-plane-2026/citation.bib).
+
+## Start here
+
+Install the isolated CLI, enroll a feature branch, and run one bounded Codex task:
+
+```bash
+uv tool install claim-plane
+# or: pipx install claim-plane
+
+cd my-project
+git switch -c agent/audit-pagination
+claim-plane init
+claim-plane connect codex
+claim-plane doctor
+claim-plane run "Add pagination to the audit API and extend its tests" --policy guarded
+claim-plane report latest
+```
+
+The five-minute walkthrough is in [`docs/QUICKSTART.md`](docs/QUICKSTART.md). Before using
+the preview on important repositories, read the explicit
+[guarantees and trust boundaries](docs/GUARANTEES.md),
+[troubleshooting guide](docs/TROUBLESHOOTING.md), and
+[upgrade/uninstall behavior](docs/UPGRADING.md).
+
+Inspect the installed product contract and packaged schemas with:
+
+```bash
+claim-plane preview
+claim-plane exit-codes
+claim-plane schemas list
+```
 
 ## Current capabilities
 
@@ -138,6 +169,14 @@ uv tool install "claim-plane[semantic,signing]"
 ```
 
 `pipx install claim-plane` is also supported when `pipx` is the preferred tool manager.
+
+Verify the installation and public CLI contract:
+
+```bash
+claim-plane --version
+claim-plane preview
+claim-plane exit-codes
+```
 
 For development from a checkout:
 

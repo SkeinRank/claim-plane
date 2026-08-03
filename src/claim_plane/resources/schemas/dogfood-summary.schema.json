@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/dogfood-summary.schema.json",
+  "title": "Claim Plane dogfood summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "suite_id", "suite_digest", "plan_digest", "generated_at", "task_count", "repository_count", "coder_seeds", "arms", "completeness", "digest"],
+  "properties": {
+    "protocol": {"const": "claim-plane.dogfood-summary.v1"},
+    "suite_id": {"type": "string", "minLength": 1},
+    "suite_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "generated_at": {"type": "string", "minLength": 1},
+    "task_count": {"type": "integer", "minimum": 1},
+    "repository_count": {"type": "integer", "minimum": 1},
+    "coder_seeds": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+    "arms": {
+      "type": "object",
+      "required": ["bare-codex", "claim-plane-observe", "claim-plane-guarded"],
+      "additionalProperties": {"type": "object"}
+    },
+    "completeness": {
+      "type": "object",
+      "required": ["expected", "observed", "matched", "missing", "unexpected", "duplicates", "mismatched", "complete"],
+      "properties": {
+        "expected": {"type": "integer", "minimum": 0},
+        "observed": {"type": "integer", "minimum": 0},
+        "matched": {"type": "integer", "minimum": 0},
+        "missing": {"type": "array", "items": {"type": "string"}},
+        "unexpected": {"type": "array", "items": {"type": "string"}},
+        "duplicates": {"type": "array", "items": {"type": "string"}},
+        "mismatched": {"type": "array", "items": {"type": "string"}},
+        "complete": {"type": "boolean"}
+      }
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

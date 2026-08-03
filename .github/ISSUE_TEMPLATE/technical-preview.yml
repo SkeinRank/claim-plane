@@ -1,0 +1,76 @@
+name: Technical preview problem
+description: Report an onboarding, controlled-run, evidence, packaging, or upgrade problem.
+title: "[Preview]: "
+labels:
+  - "type: bug"
+  - "area: cli"
+  - "status: needs-triage"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for the single-agent Codex technical preview. Remove credentials, private source, raw prompts, and sensitive evidence before submitting.
+
+  - type: input
+    id: version
+    attributes:
+      label: Claim Plane version
+      placeholder: "claim-plane 0.36.0"
+    validations:
+      required: true
+
+  - type: input
+    id: install
+    attributes:
+      label: Installation and environment
+      description: Tool manager, OS, architecture, Python, and Codex runtime version.
+      placeholder: "uv tool, macOS arm64, Python 3.12, Codex ..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Preview stage
+      options:
+        - install / upgrade
+        - init / config migration
+        - connect / doctor
+        - controlled run
+        - report / replay
+        - reset / uninstall
+        - packaged schemas
+    validations:
+      required: true
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands and result
+      description: Include exact commands, exit codes, and concise redacted output.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe identifiers
+      description: Run ID, evidence digest, reason codes, or adapter manifest digest. Do not paste private evidence or source content.
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I ran `claim-plane --version`, `claim-plane preview`, and the relevant command with `--json` when available.
+          required: true
+        - label: I removed credentials, tokens, private source, prompts, and sensitive evidence.
+          required: true

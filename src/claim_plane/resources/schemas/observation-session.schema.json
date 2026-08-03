@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/observation-session.schema.json",
+  "title": "Claim Plane Trusted Observation Session v0.9",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "intent_id",
+    "monitor_id",
+    "key_id",
+    "coverage",
+    "state",
+    "complete",
+    "event_count",
+    "head_hash"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intent_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "monitor_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "key_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "coverage": {
+      "enum": [
+        "brokered_proxy",
+        "tool_proxy",
+        "os_monitor",
+        "declared"
+      ]
+    },
+    "required_tools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "state": {
+      "enum": [
+        "open",
+        "sealed"
+      ]
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "event_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "head_hash": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": "string"
+    },
+    "sealed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "attestation": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "broker_instance_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "broker_attestation": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  }
+}

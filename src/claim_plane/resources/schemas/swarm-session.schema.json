@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-session.schema.json",
+  "title": "Claim Plane Swarm Session v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "session_id",
+    "repository_root",
+    "repository_identity",
+    "base_commit",
+    "base_branch",
+    "root_task",
+    "integration_target",
+    "state",
+    "graph_version",
+    "graph_fingerprint",
+    "work_graph",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.swarm-session.v1"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"
+    },
+    "repository_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "base_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "base_branch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "root_task": {
+      "$ref": "swarm-session-spec.schema.json#/$defs/rootTask"
+    },
+    "integration_target": {
+      "$ref": "swarm-session-spec.schema.json#/$defs/integrationTarget"
+    },
+    "state": {
+      "enum": [
+        "planned",
+        "running",
+        "paused",
+        "verifying",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "graph_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "graph_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "work_graph": {
+      "$ref": "swarm-work-graph.schema.json"
+    },
+    "budget_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "budget_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "budget_policy": {
+      "$ref": "swarm-budget-policy.schema.json"
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

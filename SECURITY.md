@@ -2,7 +2,7 @@
 
 ## Project status
 
-Claim Plane is a Research Preview. The broker, evidence pipeline, and sandbox adapters
+Claim Plane is a Technical Preview. The broker, evidence pipeline, and sandbox adapters
 are designed to make trust boundaries explicit, but the project is not yet presented as
 a complete production security boundary.
 

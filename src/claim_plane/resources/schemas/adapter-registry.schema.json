@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/adapter-registry.schema.json",
+  "title": "Claim Plane Adapter Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "registry_version",
+    "entry_point_group",
+    "core_protocol_versions",
+    "adapters",
+    "discovery_findings",
+    "digest"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.adapter-registry.v1"},
+    "registry_version": {"const": "1.0"},
+    "entry_point_group": {"const": "claim_plane.adapters"},
+    "core_protocol_versions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "adapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "protocol_range",
+          "source",
+          "distribution",
+          "entry_point",
+          "metadata",
+          "pinned"
+        ],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "protocol_range": {"type": "string", "minLength": 1},
+          "source": {"enum": ["builtin", "entry_point", "programmatic"]},
+          "distribution": {"type": ["string", "null"]},
+          "entry_point": {"type": ["string", "null"]},
+          "metadata": {"type": "object"},
+          "pinned": {"type": "boolean"},
+          "pin": {"$ref": "adapter-pin.schema.json"},
+          "handshake": {"$ref": "adapter-handshake.schema.json"},
+          "handshake_error": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "discovery_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "severity", "message", "expected", "actual", "remediation"],
+        "properties": {
+          "code": {"type": "string"},
+          "severity": {"enum": ["info", "warning", "error"]},
+          "message": {"type": "string"},
+          "expected": {"type": ["string", "null"]},
+          "actual": {"type": ["string", "null"]},
+          "remediation": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/risk-classification.schema.json",
+  "title": "Claim Plane risk classification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol", "policy", "policy_digest", "highest_risk", "final_action",
+    "human_gate", "findings", "reason_codes"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.risk-classification.v1"},
+    "policy": {"enum": ["observe", "guarded", "strict", "critical"]},
+    "policy_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "highest_risk": {"enum": ["low", "medium", "high", "critical"]},
+    "final_action": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+    "human_gate": {"type": "boolean"},
+    "reason_codes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "level", "action", "matched_rules", "explanation"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "level": {"enum": ["low", "medium", "high", "critical"]},
+          "action": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+          "matched_rules": {"type": "array"},
+          "explanation": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

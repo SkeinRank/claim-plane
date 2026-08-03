@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/agent-adapter-request.schema.json",
+  "title": "Claim Plane Agent Adapter Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "request_id",
+    "operation",
+    "adapter",
+    "project_root",
+    "timeout_seconds",
+    "payload"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.agent-adapter.v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "operation": {
+      "enum": [
+        "enroll_project",
+        "unenroll_project",
+        "doctor",
+        "start_session",
+        "stop_session",
+        "submit_task",
+        "propose_intent",
+        "request_mutation",
+        "request_amendment",
+        "observe_result",
+        "verify_completion",
+        "inspect",
+        "cancel",
+        "resume"
+      ]
+    },
+    "adapter": {"type": "string", "minLength": 1},
+    "project_root": {"type": "string", "minLength": 1},
+    "session_id": {"type": ["string", "null"], "minLength": 1},
+    "run_id": {"type": ["string", "null"], "minLength": 1},
+    "intent_id": {"type": ["string", "null"], "minLength": 1},
+    "intent_version": {"type": ["integer", "null"], "minimum": 0},
+    "timeout_seconds": {"type": "number", "exclusiveMinimum": 0},
+    "payload": {"type": "object"}
+  }
+}

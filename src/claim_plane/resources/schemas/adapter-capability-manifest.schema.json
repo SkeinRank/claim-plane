@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/adapter-capability-manifest.schema.json",
+  "title": "Claim Plane Adapter Capability Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "manifest_version",
+    "adapter",
+    "adapter_version",
+    "adapter_protocol_version",
+    "runtime",
+    "capabilities",
+    "guarantees",
+    "metadata",
+    "digest"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.adapter-capabilities.v1"},
+    "manifest_version": {"const": "1.0"},
+    "adapter": {"type": "string", "minLength": 1},
+    "adapter_version": {"type": "string", "minLength": 1},
+    "adapter_protocol_version": {"type": "string", "minLength": 1},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "detected"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": ["string", "null"], "minLength": 1},
+        "detected": {"type": "boolean"}
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": ["complete", "partial", "managed", "external", "unavailable"]
+      }
+    },
+    "guarantees": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "level",
+          "provided_by",
+          "evidence",
+          "required_capability",
+          "detail"
+        ],
+        "properties": {
+          "level": {
+            "enum": ["HARD_BLOCKED", "OBSERVED", "POST_VERIFIED", "UNAVAILABLE"]
+          },
+          "provided_by": {
+            "enum": ["claim_plane", "adapter", "runtime", "composite"]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "required_capability": {
+            "type": ["string", "null"],
+            "minLength": 1
+          },
+          "detail": {"type": ["string", "null"], "minLength": 1}
+        }
+      }
+    },
+    "metadata": {"type": "object"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

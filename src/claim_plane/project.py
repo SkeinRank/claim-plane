@@ -19,6 +19,9 @@ from claim_plane.policy import POLICY_NAMES, RiskPolicy
 
 PROJECT_STATE_PROTOCOL = "claim-plane.project.v1"
 PROJECT_CONFIG_PROTOCOL = "claim-plane.project-config.v1"
+LEGACY_PROJECT_CONFIG_PROTOCOL = "claim-plane.project-config.v0"
+PROJECT_CONFIG_MIGRATION_PROTOCOL = "claim-plane.project-config-migration.v1"
+PROJECT_CONFIG_STATUS_PROTOCOL = "claim-plane.project-config-status.v1"
 PROJECT_DOCTOR_PROTOCOL = "claim-plane.project-doctor.v1"
 
 PROJECT_STATE_PATH = Path(".claim-plane/project.json")
@@ -174,12 +177,7 @@ def _parse_yaml_scalar(value: str) -> Any:
         return text
 
 
-def load_project_config(root_or_child: str | Path = ".") -> dict[str, Any]:
-    root = resolve_project_root(root_or_child)
-    path = root / PROJECT_CONFIG_PATH
-    if not path.exists():
-        raise ValueError(f"project config is missing: {path}")
-
+def _read_project_config_payload(path: Path) -> dict[str, Any]:
     root_payload: dict[str, Any] = {}
     stack: list[tuple[int, dict[str, Any]]] = [(-1, root_payload)]
     for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -207,12 +205,148 @@ def load_project_config(root_or_child: str | Path = ".") -> dict[str, Any]:
             stack.append((indentation, child))
         else:
             parent[key] = value
+    return root_payload
 
+
+def load_project_config(root_or_child: str | Path = ".") -> dict[str, Any]:
+    root = resolve_project_root(root_or_child)
+    path = root / PROJECT_CONFIG_PATH
+    if not path.exists():
+        raise ValueError(f"project config is missing: {path}")
+    root_payload = _read_project_config_payload(path)
     if root_payload.get("protocol") != PROJECT_CONFIG_PROTOCOL:
+        protocol = root_payload.get("protocol")
+        remediation = (
+            " Run `claim-plane config migrate` first."
+            if protocol == LEGACY_PROJECT_CONFIG_PROTOCOL
+            else ""
+        )
         raise ValueError(
-            f"{path} uses unsupported protocol {root_payload.get('protocol')!r}"
+            f"{path} uses unsupported protocol {protocol!r}.{remediation}"
         )
     return root_payload
+
+
+def project_config_status(root_or_child: str | Path = ".") -> dict[str, Any]:
+    """Inspect config compatibility without mutating repository state."""
+
+    root = resolve_project_root(root_or_child)
+    path = root / PROJECT_CONFIG_PATH
+    if not path.exists():
+        return {
+            "protocol": PROJECT_CONFIG_STATUS_PROTOCOL,
+            "root": str(root),
+            "path": str(path),
+            "present": False,
+            "source_protocol": None,
+            "target_protocol": PROJECT_CONFIG_PROTOCOL,
+            "status": "missing",
+            "migration_available": False,
+        }
+    payload = _read_project_config_payload(path)
+    source = payload.get("protocol")
+    if source == PROJECT_CONFIG_PROTOCOL:
+        status = "current"
+        migration_available = False
+    elif source == LEGACY_PROJECT_CONFIG_PROTOCOL:
+        status = "migration_required"
+        migration_available = True
+    else:
+        status = "unsupported"
+        migration_available = False
+    return {
+        "protocol": PROJECT_CONFIG_STATUS_PROTOCOL,
+        "root": str(root),
+        "path": str(path),
+        "present": True,
+        "source_protocol": source,
+        "target_protocol": PROJECT_CONFIG_PROTOCOL,
+        "status": status,
+        "migration_available": migration_available,
+    }
+
+
+def _legacy_config_to_current(root: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
+    project = dict(payload.get("project") or {})
+    repository = dict(payload.get("repository") or {})
+    acceptance = dict(payload.get("acceptance") or {})
+    codex = dict(payload.get("codex") or {})
+    risk = dict(payload.get("risk") or {})
+    return _project_config(
+        root,
+        {
+            "project": project,
+            "repository": repository,
+            "acceptance": acceptance,
+            "adapters": {"codex": codex},
+            "risk": risk,
+        },
+    )
+
+
+def migrate_project_config(
+    root_or_child: str | Path = ".",
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Atomically migrate a supported legacy config and preserve one backup."""
+
+    root = resolve_project_root(root_or_child)
+    path = root / PROJECT_CONFIG_PATH
+    if not path.exists():
+        raise ValueError(f"project config is missing: {path}")
+    payload = _read_project_config_payload(path)
+    source = payload.get("protocol")
+    if source == PROJECT_CONFIG_PROTOCOL:
+        current = load_project_config(root)
+        return {
+            "protocol": PROJECT_CONFIG_MIGRATION_PROTOCOL,
+            "root": str(root),
+            "path": str(path),
+            "source_protocol": source,
+            "target_protocol": PROJECT_CONFIG_PROTOCOL,
+            "changed": False,
+            "dry_run": dry_run,
+            "backup": None,
+            "config": current,
+        }
+    if source != LEGACY_PROJECT_CONFIG_PROTOCOL:
+        raise ValueError(f"no migration is available for config protocol {source!r}")
+
+    migrated = _legacy_config_to_current(root, payload)
+    rendered = dump_project_config(migrated)
+    backup = path.with_name(f"{path.name}.v0.bak")
+    if not dry_run:
+        original = path.read_bytes()
+        if backup.exists() and backup.read_bytes() != original:
+            raise ValueError(
+                "migration backup already exists with different content: "
+                f"{backup}"
+            )
+        if not backup.exists():
+            _atomic_write_text(backup, original.decode("utf-8"))
+        _atomic_write_text(path, rendered)
+        state_path = root / PROJECT_STATE_PATH
+        if state_path.exists():
+            state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+            if isinstance(state_payload, dict):
+                state_payload["updated_at"] = _utc_now()
+                state_payload["config_protocol"] = PROJECT_CONFIG_PROTOCOL
+                state_payload["config_digest"] = hashlib.sha256(
+                    rendered.encode("utf-8")
+                ).hexdigest()
+                _atomic_write_json(state_path, state_payload)
+    return {
+        "protocol": PROJECT_CONFIG_MIGRATION_PROTOCOL,
+        "root": str(root),
+        "path": str(path),
+        "source_protocol": source,
+        "target_protocol": PROJECT_CONFIG_PROTOCOL,
+        "changed": True,
+        "dry_run": dry_run,
+        "backup": str(backup),
+        "config": migrated,
+    }
 
 
 def _default_branch(root: Path) -> tuple[str, str]:
@@ -434,7 +568,11 @@ def init_project(root_or_child: str | Path = ".") -> dict[str, Any]:
         existing_state = payload
 
     existing_config: dict[str, Any] | None = None
+    migration: dict[str, Any] | None = None
     if config_path.exists():
+        status = project_config_status(root)
+        if status["status"] == "migration_required":
+            migration = migrate_project_config(root)
         existing_config = load_project_config(root)
     config = _project_config(root, existing_config)
     rendered = dump_project_config(config)
@@ -473,7 +611,8 @@ def init_project(root_or_child: str | Path = ".") -> dict[str, Any]:
         "acceptance_commands": list(config["acceptance"]["commands"]),
         "initialized": True,
         "created": config_created,
-        "changed": config_changed or state_changed,
+        "changed": config_changed or state_changed or migration is not None,
+        "migration": migration,
     }
 
 
@@ -785,6 +924,9 @@ def reset_project(
         if config_path.exists():
             config_path.unlink()
             removed.append(PROJECT_CONFIG_PATH.as_posix())
+        for backup in sorted(config_path.parent.glob(f"{config_path.name}.*.bak")):
+            backup.unlink()
+            removed.append(backup.relative_to(root).as_posix())
 
     state_dir = root / ".claim-plane"
     try:

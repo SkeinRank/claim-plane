@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/observation-trace.schema.json",
+  "title": "Claim Plane Observation Trace v0.9",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "accesses"
+  ],
+  "properties": {
+    "accesses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mode",
+          "resource"
+        ],
+        "properties": {
+          "mode": {
+            "enum": [
+              "read",
+              "write",
+              "extend",
+              "delete",
+              "rename",
+              "document",
+              "test"
+            ]
+          },
+          "resource": {
+            "$ref": "change-intent.schema.json#/$defs/resource"
+          },
+          "tool": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

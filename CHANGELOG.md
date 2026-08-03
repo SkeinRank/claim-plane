@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-08-03
+
+### Added
+
+- Add the single-agent technical-preview packaging contract, public exit-code manifest, `claim-plane preview`, and machine-readable schema index.
+- Bundle every public JSON Schema inside the wheel and add `claim-plane schemas list` and `schemas export` for exact release-matched schema distribution.
+- Add `claim-plane config status` and atomic `config migrate` support for the documented legacy preview config, including dry-run, fail-closed unknown protocols, and a preserved backup.
+- Add a five-minute Codex quickstart, CLI reference, guarantee model, troubleshooting guide, upgrade/uninstall guide, offline demo repository, preview issue form, and pull-request checklist.
+- Add `scripts/check-technical-preview.sh` for version consistency, CLI/resource validation, offline demo execution, and optional clean wheel inspection.
+
+### Changed
+
+- Promote the public single-agent Codex path from research-only packaging to a clearly bounded technical preview while retaining explicit `0.x` limitations.
+- Use the shared public exit-code constants for controlled-run terminal outcomes.
+- Include packaged schemas and user documentation in source distributions, validate the preview contract in the repository quality gate and PyPI publish workflow, and require honest dogfood-gate status in release preparation.
+- Make `claim-plane init` perform only supported config migrations during explicit re-enrollment and preserve a migration backup; full reset removes backups only with `--remove-config`.
+
 ## [0.35.0] — 2026-08-03
 
 ### Added

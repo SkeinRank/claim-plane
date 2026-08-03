@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/exit-codes.schema.json",
+  "title": "Claim Plane public exit-code contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "codes"],
+  "properties": {
+    "protocol": {"const": "claim-plane.exit-codes.v1"},
+    "codes": {
+      "type": "array",
+      "minItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "name", "meaning"],
+        "properties": {
+          "code": {"type": "integer", "minimum": 0, "maximum": 255},
+          "name": {"type": "string", "minLength": 1},
+          "meaning": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

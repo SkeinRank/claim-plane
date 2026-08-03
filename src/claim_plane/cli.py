@@ -26,6 +26,9 @@ from claim_plane.controlled_run import (
     ControlledRunPreflightError,
     run_controlled_task,
 )
+from claim_plane.exit_codes import ExitCode, exit_code_manifest
+from claim_plane.preview import technical_preview_manifest
+from claim_plane.resources import export_schemas, list_schemas
 from claim_plane.evidence import (
     EvidenceError,
     build_evidence_replay,
@@ -118,7 +121,12 @@ from claim_plane.swarm import (
 )
 
 from claim_plane.testing.codex import CodexConformanceDriver
-from claim_plane.project import load_project_config, reset_project
+from claim_plane.project import (
+    load_project_config,
+    migrate_project_config,
+    project_config_status,
+    reset_project,
+)
 from claim_plane.testing.conformance import ReferenceConformanceDriver
 
 DEFAULT_DB = ".claim-plane/plane.db"
@@ -248,6 +256,97 @@ def _write_json(payload: Any, out: str | None = None) -> None:
         print(text)
 
 
+def cmd_preview(args: argparse.Namespace) -> int:
+    payload = technical_preview_manifest(args.repo if args.repo else None)
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Claim Plane {payload['version']} — {payload['channel']}")
+        python = payload["python"]
+        print(
+            f"Python: {python['version']} ({python['implementation']}) · "
+            f"requires {python['requires']}"
+        )
+        print(f"Packaged schemas: {payload['schemas']['count']}")
+        print("Stable single-agent commands:")
+        for command in payload["stable_commands"]:
+            print(f"  {command}")
+        print("Guarantee boundary:")
+        for limitation in payload["limitations"]:
+            print(f"  - {limitation}")
+    return int(ExitCode.OK)
+
+
+def cmd_exit_codes(args: argparse.Namespace) -> int:
+    payload = exit_code_manifest()
+    if args.json:
+        _write_json(payload)
+    else:
+        print("Claim Plane public exit codes")
+        for item in payload["codes"]:
+            print(f"  {item['code']:>3}  {item['name']:<15} {item['meaning']}")
+    return int(ExitCode.OK)
+
+
+def cmd_config_status(args: argparse.Namespace) -> int:
+    payload = project_config_status(args.repo)
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Project config: {payload['status']}")
+        print(f"Path: {payload['path']}")
+        print(f"Protocol: {payload['source_protocol'] or 'none'}")
+        if payload["migration_available"]:
+            print(
+                "Run `claim-plane config migrate` to create an atomic "
+                "backup and upgrade it."
+            )
+    return (
+        int(ExitCode.OK)
+        if payload["status"] == "current"
+        else int(ExitCode.ACTION_REQUIRED)
+    )
+
+
+def cmd_config_migrate(args: argparse.Namespace) -> int:
+    payload = migrate_project_config(args.repo, dry_run=args.dry_run)
+    if args.json:
+        _write_json(payload)
+    else:
+        action = "Would migrate" if args.dry_run and payload["changed"] else (
+            "Migrated" if payload["changed"] else "Already current"
+        )
+        print(f"{action}: {payload['source_protocol']} → {payload['target_protocol']}")
+        if payload.get("backup"):
+            print(f"Backup: {payload['backup']}")
+    return int(ExitCode.OK)
+
+
+def cmd_schemas_list(args: argparse.Namespace) -> int:
+    items = list_schemas()
+    payload = {
+        "protocol": "claim-plane.schema-index.v1",
+        "count": len(items),
+        "schemas": list(items),
+    }
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Packaged Claim Plane schemas: {len(items)}")
+        for item in items:
+            print(f"  {item['name']}  sha256:{item['sha256']}")
+    return int(ExitCode.OK)
+
+
+def cmd_schemas_export(args: argparse.Namespace) -> int:
+    payload = export_schemas(args.directory)
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Exported {payload['count']} schemas to {payload['destination']}")
+    return int(ExitCode.OK)
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     result = init_project(args.repo)
     if args.json:
@@ -263,8 +362,15 @@ def cmd_init(args: argparse.Namespace) -> int:
             print(f"Acceptance: {', '.join(commands)}")
         else:
             print("Acceptance: no command detected; configure it before a guarded run.")
+        migration = result.get("migration")
+        if migration:
+            print(
+                "Configuration migrated: "
+                f"{migration['source_protocol']} → {migration['target_protocol']}"
+            )
+            print(f"Migration backup: {migration['backup']}")
         print("Local state is excluded through the repository Git exclude file.")
-    return 0
+    return int(ExitCode.OK)
 
 
 def cmd_connect_codex(args: argparse.Namespace) -> int:
@@ -2378,6 +2484,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow unpinned intents for local experiments. Governed admission is the default.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    preview = sub.add_parser(
+        "preview", help="Show the installed single-agent technical-preview contract."
+    )
+    preview.add_argument("--repo", default=None)
+    preview.add_argument("--json", action="store_true")
+    preview.set_defaults(func=cmd_preview)
+
+    exit_codes = sub.add_parser(
+        "exit-codes", help="Show the stable public process exit-code contract."
+    )
+    exit_codes.add_argument("--json", action="store_true")
+    exit_codes.set_defaults(func=cmd_exit_codes)
+
+    config_parser = sub.add_parser(
+        "config", help="Inspect and migrate the versioned project configuration."
+    )
+    config_sub = config_parser.add_subparsers(dest="config_command", required=True)
+    config_status = config_sub.add_parser(
+        "status", help="Inspect config protocol compatibility without mutation."
+    )
+    config_status.add_argument("--repo", default=".")
+    config_status.add_argument("--json", action="store_true")
+    config_status.set_defaults(func=cmd_config_status)
+    config_migrate = config_sub.add_parser(
+        "migrate", help="Atomically migrate a supported legacy project config."
+    )
+    config_migrate.add_argument("--repo", default=".")
+    config_migrate.add_argument("--dry-run", action="store_true")
+    config_migrate.add_argument("--json", action="store_true")
+    config_migrate.set_defaults(func=cmd_config_migrate)
+
+    schemas_parser = sub.add_parser(
+        "schemas", help="List or export public JSON Schemas bundled in the wheel."
+    )
+    schemas_sub = schemas_parser.add_subparsers(dest="schemas_command", required=True)
+    schemas_list = schemas_sub.add_parser(
+        "list", help="List packaged schemas and digests."
+    )
+    schemas_list.add_argument("--json", action="store_true")
+    schemas_list.set_defaults(func=cmd_schemas_list)
+    schemas_export = schemas_sub.add_parser(
+        "export", help="Export the exact packaged schemas to a directory."
+    )
+    schemas_export.add_argument("directory")
+    schemas_export.add_argument("--json", action="store_true")
+    schemas_export.set_defaults(func=cmd_schemas_export)
 
     init = sub.add_parser(
         "init", help="Initialize local Claim Plane state for a Git project."

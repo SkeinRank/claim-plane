@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/adapter-handshake.schema.json",
+  "title": "Claim Plane Adapter Handshake",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "handshake_version",
+    "adapter",
+    "adapter_version",
+    "adapter_version_normalized",
+    "adapter_protocol_range",
+    "core_protocol_versions",
+    "negotiated_protocol_version",
+    "runtime",
+    "manifest_digest",
+    "capabilities",
+    "guarantees",
+    "source",
+    "distribution",
+    "pin",
+    "compatible",
+    "findings",
+    "digest"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.adapter-handshake.v1"},
+    "handshake_version": {"const": "1.0"},
+    "adapter": {"type": "string", "minLength": 1},
+    "adapter_version": {"type": "string", "minLength": 1},
+    "adapter_version_normalized": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "adapter_protocol_range": {"type": "string", "minLength": 1},
+    "core_protocol_versions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "negotiated_protocol_version": {"type": ["string", "null"]},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "detected"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": ["string", "null"]},
+        "detected": {"type": "boolean"}
+      }
+    },
+    "manifest_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "capabilities": {"type": "object", "additionalProperties": {"type": "string"}},
+    "guarantees": {"type": "object", "additionalProperties": {"type": "string"}},
+    "source": {"enum": ["builtin", "entry_point", "programmatic"]},
+    "distribution": {"type": ["string", "null"]},
+    "pin": {"oneOf": [{"type": "null"}, {"$ref": "adapter-pin.schema.json"}]},
+    "compatible": {"type": "boolean"},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "message", "expected", "actual", "remediation"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["info", "warning", "error"]},
+          "message": {"type": "string", "minLength": 1},
+          "expected": {"type": ["string", "null"]},
+          "actual": {"type": ["string", "null"]},
+          "remediation": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

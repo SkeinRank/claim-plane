@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/agent-adapter-response.schema.json",
+  "title": "Claim Plane Agent Adapter Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "request_id",
+    "operation",
+    "adapter",
+    "status",
+    "replayed",
+    "payload",
+    "error"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.agent-adapter.v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "operation": {"type": "string", "minLength": 1},
+    "adapter": {"type": "string", "minLength": 1},
+    "status": {"enum": ["succeeded", "denied", "cancelled", "failed"]},
+    "session_id": {"type": ["string", "null"], "minLength": 1},
+    "run_id": {"type": ["string", "null"], "minLength": 1},
+    "intent_id": {"type": ["string", "null"], "minLength": 1},
+    "intent_version": {"type": ["integer", "null"], "minimum": 0},
+    "replayed": {"type": "boolean"},
+    "payload": {"type": "object"},
+    "error": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "retryable", "details"],
+          "properties": {
+            "code": {
+              "enum": [
+                "invalid_request",
+                "protocol_mismatch",
+                "adapter_mismatch",
+                "unsupported_operation",
+                "idempotency_conflict",
+                "stale_intent_version",
+                "unknown_session",
+                "unknown_intent",
+                "timeout",
+                "cancelled",
+                "corrupt_state",
+                "runtime_failure"
+              ]
+            },
+            "message": {"type": "string"},
+            "retryable": {"type": "boolean"},
+            "details": {"type": "object"}
+          }
+        }
+      ]
+    }
+  }
+}

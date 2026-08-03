@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-shared-admission.schema.json",
+  "title": "Claim Plane Swarm Shared Admission v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "session_id",
+    "repository_identity",
+    "graph_version",
+    "graph_fingerprint",
+    "budget_version",
+    "budget_fingerprint",
+    "concurrency_plan_fingerprint",
+    "status",
+    "admissions",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-shared-admission.v1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "repository_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "graph_version": {"type": "integer", "minimum": 1},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "budget_version": {"type": "integer", "minimum": 1},
+    "budget_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "concurrency_plan_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"enum": ["ready", "replan_required"]},
+    "admissions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "work_id",
+          "intent",
+          "allowed",
+          "kind",
+          "effective_dependencies",
+          "conflicts",
+          "constraints",
+          "notifications",
+          "guidance"
+        ],
+        "properties": {
+          "work_id": {"type": "string", "minLength": 1},
+          "intent": {"$ref": "change-intent.schema.json"},
+          "allowed": {"type": "boolean"},
+          "kind": {
+            "enum": [
+              "independent",
+              "compatible_overlap",
+              "contract_dependency",
+              "parallel_with_constraint",
+              "requires_stub",
+              "notify_on_change",
+              "serialize",
+              "replan",
+              "reject"
+            ]
+          },
+          "effective_dependencies": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "conflicts": {"type": "array", "items": {"type": "object"}},
+          "constraints": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "notifications": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "guidance": {"type": "string"}
+        }
+      }
+    },
+    "metadata": {"type": "object"}
+  }
+}

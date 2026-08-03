@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-merge-queue.schema.json",
+  "title": "Claim Plane Swarm Merge Queue v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "session_id",
+    "repository_identity",
+    "base_commit",
+    "graph_version",
+    "graph_fingerprint",
+    "budget_version",
+    "budget_fingerprint",
+    "admission_fingerprint",
+    "integration_target_branch",
+    "integration_branch",
+    "integration_worktree_path",
+    "integration_head",
+    "status",
+    "entries",
+    "created_at",
+    "updated_at",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.swarm-merge-queue.v1"},
+    "session_id": {"type": "string", "minLength": 1},
+    "repository_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "graph_version": {"type": "integer", "minimum": 1},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "budget_version": {"type": "integer", "minimum": 1},
+    "budget_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "admission_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "integration_target_branch": {"type": "string", "minLength": 1},
+    "integration_branch": {
+      "type": "string",
+      "pattern": "^claim-plane/swarm/.+/integration$"
+    },
+    "integration_worktree_path": {"type": "string", "minLength": 1},
+    "integration_head": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "status": {
+      "enum": ["waiting", "ready", "integrating", "conflict", "completed", "stale"]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "work_id",
+          "order",
+          "effective_dependencies",
+          "source_branch",
+          "state",
+          "run_id",
+          "source_commit",
+          "integration_commit",
+          "conflict_paths",
+          "detail"
+        ],
+        "properties": {
+          "work_id": {"type": "string", "minLength": 1},
+          "order": {"type": "integer", "minimum": 0},
+          "effective_dependencies": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "source_branch": {"type": "string", "minLength": 1},
+          "state": {
+            "enum": ["pending", "blocked", "ready", "integrating", "integrated", "conflict"]
+          },
+          "run_id": {"type": ["string", "null"]},
+          "source_commit": {
+            "anyOf": [
+              {"type": "null"},
+              {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}
+            ]
+          },
+          "integration_commit": {
+            "anyOf": [
+              {"type": "null"},
+              {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}
+            ]
+          },
+          "conflict_paths": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "created_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1},
+    "metadata": {"type": "object"}
+  }
+}

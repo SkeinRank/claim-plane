@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/swarm-budget-policy.schema.json",
+  "title": "Claim Plane Swarm Budget Policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol"],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.swarm-budget-policy.v1"
+    },
+    "workers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_active": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "default": 4
+        },
+        "max_active_per_work_item": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 1
+        },
+        "max_work_items": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096,
+          "default": 32
+        },
+        "max_total_launches": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65536,
+          "default": 64
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_total_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000000,
+          "default": 500000
+        },
+        "max_cost_usd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000000,
+              "multipleOf": 0.000001
+            },
+            {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,5})(?:\\.[0-9]{1,6})?$"
+            }
+          ],
+          "default": "25"
+        },
+        "max_wall_time_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 31536000,
+          "default": 7200
+        }
+      }
+    },
+    "retries": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_replans": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 2
+        },
+        "max_repairs_per_work_item": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 2
+        },
+        "max_agent_restarts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 1
+        }
+      }
+    },
+    "concurrency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "same_file": {
+          "enum": ["region_safe", "serialize", "deny"],
+          "default": "region_safe"
+        },
+        "unknown_overlap": {
+          "enum": ["serialize", "deny"],
+          "default": "serialize"
+        },
+        "shared_contract": {
+          "enum": ["serialize", "deny"],
+          "default": "serialize"
+        },
+        "schema_change": {
+          "enum": ["serialize", "deny"],
+          "default": "serialize"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/project-config-status.schema.json",
+  "title": "Claim Plane project config status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "root", "path", "present", "source_protocol", "target_protocol", "status", "migration_available"],
+  "properties": {
+    "protocol": {"const": "claim-plane.project-config-status.v1"},
+    "root": {"type": "string", "minLength": 1},
+    "path": {"type": "string", "minLength": 1},
+    "present": {"type": "boolean"},
+    "source_protocol": {"type": ["string", "null"]},
+    "target_protocol": {"const": "claim-plane.project-config.v1"},
+    "status": {"enum": ["missing", "current", "migration_required", "unsupported"]},
+    "migration_available": {"type": "boolean"}
+  }
+}

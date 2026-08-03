@@ -4,7 +4,7 @@ message: >-
   research paper is listed in the references below.
 title: Claim Plane
 type: software
-version: 0.19.0
+version: 0.36.0
 date-released: 2026-08-01
 authors:
   - family-names: Nikolaev
