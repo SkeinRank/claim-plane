@@ -23,6 +23,25 @@ The same interface covers session lifecycle, task submission, intent admission, 
 
 The CLI uses this boundary for Codex enrollment, lifecycle hooks, intent control, completion verification, and cancellation. Existing connector functions remain importable for compatibility, but new integrations should depend on `AgentAdapter`.
 
+Every session-bearing Codex request also emits normalized events through the shared lifecycle store at `.claim-plane/lifecycle/events.sqlite3`. The Codex adapter records only redacted summaries and stable digests. Adapter request replay does not duplicate lifecycle decisions, and resume validates the existing event stream before new state can be appended.
+
+The same APIs read events from Codex or another adapter:
+
+```python
+from claim_plane.protocol import LifecycleEventStore
+
+with LifecycleEventStore.for_project(".") as events:
+    report = events.report(adapter="codex", session_id="session-id")
+    chronology = events.replay(adapter="codex", session_id="session-id")
+    events.export_ndjson(
+        adapter="codex",
+        session_id="session-id",
+        destination="events.ndjson",
+    )
+```
+
+The report refuses to treat an invalid order, broken causal chain, or altered digest as verified. Export is similarly fail-closed so later evidence layers cannot seal a corrupt lifecycle stream.
+
 ## Codex session bootstrap
 
 One enrollment applies to ordinary Codex sessions launched inside the Git worktree:

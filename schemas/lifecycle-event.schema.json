@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/lifecycle-event.schema.json",
+  "title": "Claim Plane Normalized Lifecycle Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "protocol_version",
+    "event_id",
+    "event_type",
+    "adapter",
+    "session_id",
+    "run_id",
+    "intent_id",
+    "intent_version",
+    "sequence",
+    "caused_by",
+    "timestamp",
+    "payload",
+    "digest"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.lifecycle-event.v1"
+    },
+    "protocol_version": {
+      "const": "1.0"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "enum": [
+        "SessionStarted",
+        "TaskSubmitted",
+        "IntentProposed",
+        "AdmissionRequested",
+        "AdmissionGranted",
+        "AdmissionDenied",
+        "MutationRequested",
+        "MutationAllowed",
+        "MutationDenied",
+        "MutationObserved",
+        "ScopeExpansionRequested",
+        "ScopeExpansionGranted",
+        "ScopeExpansionDenied",
+        "VerificationStarted",
+        "VerificationCompleted",
+        "AgentStopped",
+        "SessionEnded"
+      ]
+    },
+    "adapter": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": ["string", "null"]
+    },
+    "intent_id": {
+      "type": ["string", "null"]
+    },
+    "intent_version": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "caused_by": {
+      "type": ["string", "null"]
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

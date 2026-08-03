@@ -24,6 +24,8 @@ SQLite is the reference local registry. Atomic admission uses a write transactio
 - verification reports;
 - append-only events and audit records.
 
+Coding-agent adapters emit one normalized lifecycle stream per session. The store assigns monotonic sequence numbers, links every event to the previous durable event, suppresses duplicate request events, validates state transitions, and exposes the same projection to report, replay, recovery, and evidence export. Runtime transcripts remain outside this stream; only redacted decision summaries and canonical digests are retained.
+
 ### Admission engine
 
 The admission engine compares an incoming `ChangeIntent` against active intents. It reasons about exact resources, broad scopes, line regions, concepts, concept-bound contracts, base revisions, destructive operations, and explicit dependencies.

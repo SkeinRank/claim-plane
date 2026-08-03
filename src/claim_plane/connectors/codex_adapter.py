@@ -21,12 +21,16 @@ from claim_plane.protocol import (
     AdapterRequest,
     AdapterResponse,
     AdapterStatus,
+    LifecycleEventStore,
+    LifecycleStoreError,
+    record_adapter_lifecycle,
 )
 
 CODEX_ADAPTER_NAME = "codex"
-CODEX_ADAPTER_REVISION = 1
+CODEX_ADAPTER_REVISION = 2
 _REQUEST_CACHE = Path(".claim-plane/adapters/codex/requests")
 _PLANE_DB = Path(".claim-plane/plane.db")
+_LIFECYCLE_DB = Path(".claim-plane/lifecycle/events.sqlite3")
 
 
 def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -260,6 +264,70 @@ class CodexAdapter:
             },
         )
 
+    @staticmethod
+    def _validate_lifecycle_state(root: Path, request: AdapterRequest) -> None:
+        if request.session_id is None or not (root / _LIFECYCLE_DB).exists():
+            return
+        try:
+            with LifecycleEventStore.for_project(root) as store:
+                events = store.list_events(
+                    adapter=request.adapter,
+                    session_id=request.session_id,
+                )
+                if not events:
+                    return
+                report = store.report(
+                    adapter=request.adapter,
+                    session_id=request.session_id,
+                )
+        except Exception as exc:  # noqa: BLE001
+            raise AdapterProtocolError(
+                AdapterErrorCode.CORRUPT_STATE,
+                f"normalized lifecycle state is unavailable: {exc}",
+                details={
+                    "request_id": request.request_id,
+                    "operation": request.operation.value,
+                    "session_id": request.session_id,
+                },
+            ) from exc
+        if not report.valid:
+            raise AdapterProtocolError(
+                AdapterErrorCode.CORRUPT_STATE,
+                "normalized lifecycle stream is invalid",
+                details={
+                    "request_id": request.request_id,
+                    "operation": request.operation.value,
+                    "session_id": request.session_id,
+                    "findings": [item.to_dict() for item in report.findings],
+                },
+            )
+
+    @staticmethod
+    def _record_lifecycle(
+        root: Path,
+        request: AdapterRequest,
+        *,
+        response: AdapterResponse | None = None,
+        error: AdapterProtocolError | None = None,
+    ) -> None:
+        try:
+            record_adapter_lifecycle(
+                project_root=root,
+                request=request,
+                response=response,
+                error=error,
+            )
+        except LifecycleStoreError as exc:
+            raise AdapterProtocolError(
+                AdapterErrorCode.CORRUPT_STATE,
+                f"normalized lifecycle state is unavailable: {exc}",
+                details={
+                    "request_id": request.request_id,
+                    "operation": request.operation.value,
+                    "session_id": request.session_id,
+                },
+            ) from exc
+
     def _perform(
         self,
         request: AdapterRequest,
@@ -271,22 +339,27 @@ class CodexAdapter:
         status: AdapterStatus | None = None,
     ) -> AdapterResponse:
         root = self._validate(request, operation)
+        self._validate_lifecycle_state(root, request)
         cacheable = bool(request.payload.get("_adapter_cacheable", True))
         cached = self._cached_response(root, request) if cacheable else None
         if cached is not None:
+            self._record_lifecycle(root, request, response=cached)
             return cached
-        if check_binding:
-            self._assert_expected_binding(
-                root,
-                request,
-                allow_missing_version_zero=allow_missing_version_zero,
-            )
         try:
+            if check_binding:
+                self._assert_expected_binding(
+                    root,
+                    request,
+                    allow_missing_version_zero=allow_missing_version_zero,
+                )
             payload = dict(action(root))
-        except AdapterProtocolError:
+        except AdapterProtocolError as error:
+            self._record_lifecycle(root, request, error=error)
             raise
         except Exception as exc:  # noqa: BLE001
-            raise _map_runtime_error(exc, request) from exc
+            error = _map_runtime_error(exc, request)
+            self._record_lifecycle(root, request, error=error)
+            raise error from exc
 
         intent_id, intent_version = self._binding(root, request.session_id)
         resolved_status = status or AdapterStatus.SUCCEEDED
@@ -305,6 +378,7 @@ class CodexAdapter:
             intent_version=intent_version,
             payload=payload,
         )
+        self._record_lifecycle(root, request, response=response)
         if cacheable:
             self._store_response(root, request, response)
         return response

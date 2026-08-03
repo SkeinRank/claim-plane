@@ -23,6 +23,35 @@ The public Python surface is `claim_plane.protocol.AgentAdapter`, `AdapterReques
 
 Claim Plane Core remains authoritative. An adapter translates lifecycle and observations; it never grants mutation authority directly.
 
+## Normalized lifecycle events
+
+`claim-plane.lifecycle-event.v1` is the runtime-neutral, append-only chronology for an agent session. Native runtime callbacks are reduced to a stable vocabulary:
+
+```text
+SessionStarted
+TaskSubmitted
+IntentProposed
+AdmissionRequested
+AdmissionGranted / AdmissionDenied
+MutationRequested
+MutationAllowed / MutationDenied
+MutationObserved
+ScopeExpansionRequested
+ScopeExpansionGranted / ScopeExpansionDenied
+VerificationStarted
+VerificationCompleted
+AgentStopped
+SessionEnded
+```
+
+Each event carries a stable event identity, adapter and session identity, optional run and intent binding, a monotonically increasing session-local sequence, a causal link to the previous durable event, a UTC timestamp, a normalized payload, and a canonical SHA-256 digest. The JSON envelope is described by [`schemas/lifecycle-event.schema.json`](../schemas/lifecycle-event.schema.json).
+
+The event store appends one request batch atomically. A repeated adapter request resolves to the already stored events without advancing the sequence. Reusing the same event identity with different normalized data fails closed. Gaps, mixed sessions, broken causal links, invalid transitions, and digest mismatches make the stream invalid; an invalid stream can never project to a verified report or be exported as evidence.
+
+Lifecycle payloads are summaries rather than runtime transcripts. Prompts, credentials, authorization values, raw commands, tool input, and hook output are excluded. Safe fields include request digests, operation counts, decision status, affected paths when known, intent identity and version, and verification outcome.
+
+`LifecycleEventStore`, `build_lifecycle_report`, and `render_lifecycle_replay` are shared by all adapters. Reports and recovery reconstruct state from the same validated stream, while replay renders chronology without repeating provider calls. Durable streams may be exported as canonical NDJSON for later evidence sealing.
+
 ## ChangeIntent
 
 A `ChangeIntent` declares planned work before implementation.

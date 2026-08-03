@@ -56,6 +56,24 @@ from claim_plane.protocol import (
     AdapterResponse,
     AdapterStatus,
     AgentAdapter,
+    LIFECYCLE_EVENT_PROTOCOL,
+    LIFECYCLE_EVENT_PROTOCOL_VERSION,
+    LifecycleConflictError,
+    LifecycleCorruptError,
+    LifecycleEvent,
+    LifecycleEventDraft,
+    LifecycleEventStore,
+    LifecycleEventType,
+    LifecycleFinding,
+    LifecycleReport,
+    LifecycleStoreError,
+    LifecycleValidationCode,
+    build_lifecycle_report,
+    lifecycle_event_drafts,
+    load_lifecycle_ndjson,
+    record_adapter_lifecycle,
+    render_lifecycle_replay,
+    validate_lifecycle_events,
 )
 from claim_plane.runtime import (
     BrokerClient,
@@ -127,7 +145,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.26.0"
+__version__ = "0.27.0"
 
 __all__ = [
     "AGENT_ADAPTER_PROTOCOL",
@@ -139,6 +157,24 @@ __all__ = [
     "AdapterResponse",
     "AdapterStatus",
     "AgentAdapter",
+    "LIFECYCLE_EVENT_PROTOCOL",
+    "LIFECYCLE_EVENT_PROTOCOL_VERSION",
+    "LifecycleConflictError",
+    "LifecycleCorruptError",
+    "LifecycleEvent",
+    "LifecycleEventDraft",
+    "LifecycleEventStore",
+    "LifecycleEventType",
+    "LifecycleFinding",
+    "LifecycleReport",
+    "LifecycleStoreError",
+    "LifecycleValidationCode",
+    "build_lifecycle_report",
+    "lifecycle_event_drafts",
+    "load_lifecycle_ndjson",
+    "record_adapter_lifecycle",
+    "render_lifecycle_replay",
+    "validate_lifecycle_events",
     "AcceptanceResult",
     "AccessMode",
     "AdmissionConflict",
