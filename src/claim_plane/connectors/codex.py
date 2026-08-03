@@ -15,7 +15,7 @@ import tempfile
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Mapping, TextIO
 
 from claim_plane.connectors.codex_amendment import (
     CODEX_SCOPE_AMENDMENT_PROTOCOL,
@@ -39,10 +39,17 @@ from claim_plane.connectors.codex_guard import (
     protected_control_path,
 )
 from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind
+from claim_plane.policy import (
+    EffectivePolicy,
+    PolicyAction,
+    PreWriteMode,
+    resolve_policy,
+)
 from claim_plane.project import (
     PROJECT_STATE_PROTOCOL,
     doctor_project,
     init_project as initialize_project,
+    load_project_config,
     resolve_project_root as resolve_enrolled_project_root,
     set_adapter_enabled,
 )
@@ -994,6 +1001,10 @@ def _record_session_handshake(
             controlled_policy = payload.get("_claim_plane_policy")
             if isinstance(controlled_policy, str) and controlled_policy:
                 session["controlled_policy"] = controlled_policy
+            policy_manifest = payload.get("_claim_plane_policy_manifest")
+            if isinstance(policy_manifest, Mapping):
+                effective = EffectivePolicy.from_dict(policy_manifest)
+                session["controlled_policy_manifest"] = effective.to_dict()
         session["last_event"] = "SessionStart"
         session["last_seen_at"] = now
         session.pop("ended_at", None)
@@ -1027,6 +1038,13 @@ def _record_session_handshake(
             str(payload.get("_claim_plane_policy"))
             if isinstance(payload.get("_claim_plane_policy"), str)
             and payload.get("_claim_plane_policy")
+            else None
+        ),
+        "controlled_policy_manifest": (
+            EffectivePolicy.from_dict(
+                payload["_claim_plane_policy_manifest"]
+            ).to_dict()
+            if isinstance(payload.get("_claim_plane_policy_manifest"), Mapping)
             else None
         ),
         "task_id": None,
@@ -1986,6 +2004,98 @@ def _attach_scope_amendment_ticket(
     return replace(evaluation, reason=evaluation.reason + guidance)
 
 
+_OBSERVE_INVARIANT_DENIALS = frozenset(
+    {
+        "guard_error",
+        "protected_control_path",
+        "branch_changed",
+        "preexisting_dirty_path",
+    }
+)
+
+
+def _session_effective_policy(
+    root: Path, session: Mapping[str, Any]
+) -> EffectivePolicy:
+    pinned = session.get("controlled_policy_manifest")
+    if isinstance(pinned, Mapping):
+        return EffectivePolicy.from_dict(pinned)
+    config = load_project_config(root)
+    adapters = config.get("adapters")
+    settings = adapters.get("codex") if isinstance(adapters, Mapping) else None
+    configured = (
+        str(settings.get("policy") or "guarded")
+        if isinstance(settings, Mapping)
+        else "guarded"
+    )
+    selected = str(session.get("controlled_policy") or configured)
+    risk = config.get("risk")
+    return resolve_policy(
+        selected,
+        risk=risk if isinstance(risk, Mapping) else None,
+        source=(
+            "controlled_run"
+            if session.get("controlled_policy")
+            else "project_config"
+        ),
+        metadata={"adapter": "codex"},
+    )
+
+
+def _apply_guard_policy(
+    root: Path,
+    session: dict[str, Any],
+    evaluation: GuardEvaluation,
+) -> GuardEvaluation:
+    effective = _session_effective_policy(root, session)
+    risk = effective.classify_many(evaluation.paths)
+    session["effective_policy"] = effective.name
+    session["effective_policy_digest"] = effective.digest()
+    session["guard_last_risk"] = risk
+    if risk["final_action"] == PolicyAction.REVIEW_REQUIRED.value:
+        session["policy_review_required"] = True
+        session["policy_review_reason_codes"] = list(risk["reason_codes"])
+    if evaluation.allowed and risk["final_action"] == PolicyAction.DENY.value:
+        return replace(
+            evaluation,
+            allowed=False,
+            reason_code="risk_policy_denied",
+            reason=(
+                f"Policy {effective.name} denies this {risk['highest_risk']} risk "
+                "mutation before execution. "
+                + " ".join(
+                    str(item.get("explanation") or "")
+                    for item in risk.get("findings") or ()
+                    if isinstance(item, Mapping)
+                )
+            ).strip(),
+            promotion=None,
+        )
+    if (
+        not evaluation.allowed
+        and effective.preset.pre_write_mode is PreWriteMode.OBSERVE
+        and evaluation.reason_code not in _OBSERVE_INVARIANT_DENIALS
+    ):
+        original_code = evaluation.reason_code
+        session["observe_would_deny_calls"] = (
+            int(session.get("observe_would_deny_calls") or 0) + 1
+        )
+        session["observe_last_reason_code"] = original_code
+        return replace(
+            evaluation,
+            allowed=True,
+            classification=f"observe:{evaluation.classification}",
+            reason_code=f"observe_would_{original_code}",
+            reason=(
+                f"Observe policy recorded a would-deny decision ({original_code}) "
+                "but did not block the runtime call. Final Git verification remains "
+                "required and may reject the delivery."
+            ),
+            promotion=None,
+        )
+    return evaluation
+
+
 def _record_guard_evaluation(
     root: Path,
     session: dict[str, Any],
@@ -2256,6 +2366,7 @@ def handle_codex_hook(payload: dict[str, Any], *, output: TextIO | None = None) 
         _heartbeat_session_intent(root, session)
         try:
             evaluation = _pre_tool_use_guard(root, payload, session)
+            evaluation = _apply_guard_policy(root, session, evaluation)
             evaluation = _attach_scope_amendment_ticket(root, session, evaluation)
         except Exception as exc:  # fail closed at the runtime integration boundary
             evaluation = _guard_error(

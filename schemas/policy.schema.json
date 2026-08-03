@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/policy.schema.json",
+  "title": "Claim Plane effective policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "preset", "risk", "source", "metadata", "digest"],
+  "properties": {
+    "protocol": {"const": "claim-plane.policy.v1"},
+    "source": {"type": "string", "minLength": 1},
+    "metadata": {"type": "object"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name", "pre_write_mode", "unknown_action", "destructive_action",
+        "network_action", "secret_action", "scope_expansion_action",
+        "completion_verification_required", "human_gate", "auto_merge_allowed",
+        "risk_actions", "summary"
+      ],
+      "properties": {
+        "name": {"enum": ["observe", "guarded", "strict", "critical"]},
+        "pre_write_mode": {"enum": ["observe", "enforce"]},
+        "unknown_action": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+        "destructive_action": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+        "network_action": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+        "secret_action": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+        "scope_expansion_action": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+        "completion_verification_required": {"type": "boolean"},
+        "human_gate": {"type": "boolean"},
+        "auto_merge_allowed": {"type": "boolean"},
+        "summary": {"type": "string", "minLength": 1},
+        "risk_actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["low", "medium", "high", "critical"],
+          "properties": {
+            "low": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+            "medium": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+            "high": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]},
+            "critical": {"enum": ["ALLOW", "REPORT", "REVIEW_REQUIRED", "DENY"]}
+          }
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "required": ["default", "include_builtin_rules", "rules", "effective_rules"],
+      "properties": {
+        "default": {"enum": ["low", "medium", "high", "critical"]},
+        "include_builtin_rules": {"type": "boolean"},
+        "rules": {"type": "array"},
+        "effective_rules": {"type": "array"}
+      }
+    }
+  }
+}

@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, TextIO
 
+from claim_plane.policy import EffectivePolicy, PolicyAction, resolve_policy
 from claim_plane.project import load_project_config, resolve_project_root
 from claim_plane.protocol import (
     AdapterHandshake,
@@ -37,6 +38,7 @@ from claim_plane.protocol import (
 CONTROLLED_RUN_PROTOCOL = "claim-plane.controlled-run.v1"
 CONTROLLED_RUN_ENV = "CLAIM_PLANE_CONTROLLED_RUN_ID"
 CONTROLLED_POLICY_ENV = "CLAIM_PLANE_CONTROLLED_POLICY"
+CONTROLLED_POLICY_MANIFEST_ENV = "CLAIM_PLANE_CONTROLLED_POLICY_MANIFEST"
 CONTROLLED_RUNS_PATH = Path(".claim-plane/runs")
 
 
@@ -173,6 +175,8 @@ class ControlledRunResult:
     manifest_digest: str
     handshake: Mapping[str, Any]
     policy_compatibility: Mapping[str, Any]
+    effective_policy: Mapping[str, Any]
+    risk: Mapping[str, Any]
     runtime: Mapping[str, Any]
     completion: Mapping[str, Any]
     lifecycle: Mapping[str, Any] | None
@@ -207,6 +211,8 @@ class ControlledRunResult:
             "manifest_digest": self.manifest_digest,
             "handshake": dict(self.handshake),
             "policy_compatibility": dict(self.policy_compatibility),
+            "effective_policy": dict(self.effective_policy),
+            "risk": dict(self.risk),
             "runtime": dict(self.runtime),
             "completion": dict(self.completion),
             "lifecycle": dict(self.lifecycle) if self.lifecycle is not None else None,
@@ -414,9 +420,9 @@ def _doctor_ready(
     return payload
 
 
-def _configured_policy(root: Path, adapter: str, explicit: str | None) -> str:
-    if explicit is not None:
-        return explicit
+def _configured_policy(
+    root: Path, adapter: str, explicit: str | None
+) -> EffectivePolicy:
     config = load_project_config(root)
     adapters = config.get("adapters")
     settings = adapters.get(adapter) if isinstance(adapters, Mapping) else None
@@ -424,7 +430,37 @@ def _configured_policy(root: Path, adapter: str, explicit: str | None) -> str:
         raise ControlledRunPreflightError(
             f"adapter {adapter!r} is not enrolled; run 'claim-plane connect {adapter}'"
         )
-    return str(settings.get("policy") or "guarded")
+    selected = str(explicit or settings.get("policy") or "guarded")
+    risk = config.get("risk")
+    try:
+        return resolve_policy(
+            selected,
+            risk=risk if isinstance(risk, Mapping) else None,
+            source="command_line" if explicit is not None else "project_config",
+            metadata={"adapter": adapter},
+        )
+    except (TypeError, ValueError) as exc:
+        raise ControlledRunPreflightError(f"invalid effective policy: {exc}") from exc
+
+
+def _changed_paths(
+    root: Path, start_commit: str, result_git: GitState
+) -> tuple[str, ...]:
+    completed = subprocess.run(
+        ["git", "diff", "--name-only", "-z", start_commit, "--"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise ControlledRunError(detail or "could not classify changed paths")
+    tracked = {
+        item.decode("utf-8", errors="surrogateescape")
+        for item in completed.stdout.split(b"\0")
+        if item
+    }
+    return tuple(sorted(tracked | set(result_git.untracked)))
 
 
 def _codex_command(
@@ -789,7 +825,8 @@ def run_controlled_task(
     resolved_root = resolve_project_root(root)
     run_id = "cpr_" + os.urandom(12).hex()
     started_at = _utc_now()
-    selected_policy = _configured_policy(resolved_root, adapter.name, policy)
+    effective_policy = _configured_policy(resolved_root, adapter.name, policy)
+    selected_policy = effective_policy.name
     if not handshake.compatible:
         handshake.require_compatible()
     doctor = _doctor_ready(adapter, root=resolved_root, run_id=run_id)
@@ -809,6 +846,9 @@ def run_controlled_task(
     environment = dict(os.environ)
     environment[CONTROLLED_RUN_ENV] = run_id
     environment[CONTROLLED_POLICY_ENV] = selected_policy
+    environment[CONTROLLED_POLICY_MANIFEST_ENV] = _canonical_json(
+        effective_policy.to_dict()
+    )
     environment["PYTHONUNBUFFERED"] = "1"
 
     if not quiet:
@@ -935,6 +975,14 @@ def run_controlled_task(
             pass
 
     result_git = capture_git_state(resolved_root)
+    changed_paths = _changed_paths(resolved_root, start_git.head_commit, result_git)
+    risk = effective_policy.classify_many(changed_paths)
+    final_policy_action = PolicyAction(str(risk["final_action"]))
+    if outcome is ControlledRunOutcome.VERIFIED:
+        if final_policy_action is PolicyAction.DENY:
+            outcome = ControlledRunOutcome.REJECTED
+        elif final_policy_action is PolicyAction.REVIEW_REQUIRED:
+            outcome = ControlledRunOutcome.REVIEW_REQUIRED
     completion = _completion_summary(completion_payload)
     lifecycle = _lifecycle_summary(resolved_root, session_id)
     result = ControlledRunResult(
@@ -957,6 +1005,8 @@ def run_controlled_task(
         manifest_digest=manifest.digest(),
         handshake=handshake.evidence_summary(),
         policy_compatibility=compatibility.to_dict(),
+        effective_policy=effective_policy.to_dict(),
+        risk=risk,
         runtime={
             **runtime.to_dict(),
             "doctor_ready": bool(doctor.get("ready")),
@@ -980,6 +1030,10 @@ def run_controlled_task(
             "  acceptance: "
             + ("PASS" if completion.get("acceptance_passed") else "NOT VERIFIED")
             + "\n"
+        )
+        stdout.write(
+            f"  risk: {risk['highest_risk'].upper()} "
+            f"({risk['final_action']})\n"
         )
         stdout.write(f"DELIVERY {outcome.value.replace('_', ' ')}\n")
         stdout.write(f"Evidence: {controlled_run_path(resolved_root, run_id)}\n")

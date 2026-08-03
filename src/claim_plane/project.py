@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from claim_plane.policy import POLICY_NAMES, RiskPolicy
+
 PROJECT_STATE_PROTOCOL = "claim-plane.project.v1"
 PROJECT_CONFIG_PROTOCOL = "claim-plane.project-config.v1"
 PROJECT_DOCTOR_PROTOCOL = "claim-plane.project-doctor.v1"
@@ -354,6 +356,7 @@ def _project_config(
     acceptance = dict(existing.get("acceptance") or {})
     adapters = dict(existing.get("adapters") or {})
     codex = dict(adapters.get("codex") or {})
+    risk = dict(existing.get("risk") or {})
 
     default_branch, source = _default_branch(root)
     commands = acceptance.get("commands")
@@ -367,6 +370,21 @@ def _project_config(
         r"cp_[0-9a-f]{24}", project_id
     ):
         project_id = "cp_" + os.urandom(12).hex()
+
+    selected_policy = str(codex.get("policy") or "guarded").casefold()
+    if selected_policy not in POLICY_NAMES:
+        raise ValueError(
+            "adapters.codex.policy must be observe, guarded, strict, or critical"
+        )
+    risk_policy = RiskPolicy.from_config(risk)
+    normalized_rules = [
+        {
+            "match": rule.match,
+            "level": rule.level.value,
+            "reason": rule.reason,
+        }
+        for rule in risk_policy.rules
+    ]
 
     return {
         "protocol": PROJECT_CONFIG_PROTOCOL,
@@ -386,8 +404,13 @@ def _project_config(
             **{key: value for key, value in adapters.items() if key != "codex"},
             "codex": {
                 "enabled": bool(codex.get("enabled", False)),
-                "policy": str(codex.get("policy") or "guarded"),
+                "policy": selected_policy,
             },
+        },
+        "risk": {
+            "default": risk_policy.default.value,
+            "include_builtin_rules": risk_policy.include_builtin_rules,
+            "rules": normalized_rules,
         },
     }
 
@@ -555,6 +578,49 @@ def doctor_project(root_or_child: str | Path = ".") -> ProjectDoctorReport:
                 "detail": str(root / PROJECT_CONFIG_PATH),
             }
         )
+        try:
+            from claim_plane.policy import resolve_policy
+
+            adapters = config.get("adapters")
+            codex_settings = (
+                adapters.get("codex") if isinstance(adapters, Mapping) else None
+            )
+            selected_policy = (
+                str(codex_settings.get("policy") or "guarded")
+                if isinstance(codex_settings, Mapping)
+                else "guarded"
+            )
+            effective = resolve_policy(
+                selected_policy,
+                risk=(
+                    config.get("risk")
+                    if isinstance(config.get("risk"), Mapping)
+                    else None
+                ),
+                source="project_config",
+            )
+            checks.append(
+                {
+                    "name": "policy_config",
+                    "status": "ok",
+                    "detail": (
+                        f"{effective.name} · risk default "
+                        f"{effective.risk.default.value} · {effective.digest()[:12]}"
+                    ),
+                }
+            )
+        except (TypeError, ValueError) as exc:
+            checks.append(
+                {
+                    "name": "policy_config",
+                    "status": "error",
+                    "detail": str(exc),
+                    "remediation": (
+                        "Use a documented policy preset and valid risk rules in "
+                        ".claim-plane/config.yaml."
+                    ),
+                }
+            )
     except ValueError as exc:
         checks.append(
             {

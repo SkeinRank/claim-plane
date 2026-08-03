@@ -133,6 +133,20 @@ from claim_plane.protocol import (
     save_adapter_pin,
     validate_lifecycle_events,
 )
+from claim_plane.policy import (
+    POLICY_NAMES,
+    POLICY_PROTOCOL,
+    RISK_CLASSIFICATION_PROTOCOL,
+    EffectivePolicy,
+    PolicyAction,
+    PolicyPreset,
+    PreWriteMode,
+    RiskFinding,
+    RiskLevel,
+    RiskPolicy,
+    RiskRule,
+    resolve_policy,
+)
 from claim_plane.project import (
     PROJECT_CONFIG_PROTOCOL,
     PROJECT_DOCTOR_PROTOCOL,
@@ -214,10 +228,22 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.32.0"
+__version__ = "0.33.0"
 
 __all__ = [
     "CONTROLLED_RUN_PROTOCOL",
+    "POLICY_NAMES",
+    "POLICY_PROTOCOL",
+    "RISK_CLASSIFICATION_PROTOCOL",
+    "EffectivePolicy",
+    "PolicyAction",
+    "PolicyPreset",
+    "PreWriteMode",
+    "RiskFinding",
+    "RiskLevel",
+    "RiskPolicy",
+    "RiskRule",
+    "resolve_policy",
     "ControlledRunError",
     "ControlledRunOutcome",
     "ControlledRunPreflightError",

@@ -205,6 +205,34 @@ The runner performs adapter negotiation and policy compatibility checks before e
 
 The durable result is written under `.claim-plane/runs/<run-id>/run.json`. It contains task and final-message digests rather than raw text, the starting and resulting Git-state digests, adapter manifest and handshake identity, policy compatibility, lifecycle evidence, verification summary, and cancellation outcome. Use `--json` for automation, `--out result.json` for an additional export, `--timeout` for the wall-time ceiling, and `--model` for an explicit Codex model override.
 
+## Policy presets and risk classes
+
+Inspect the effective policy before running an agent and classify sensitive paths without starting Codex:
+
+```bash
+claim-plane policy inspect --repo .
+claim-plane policy inspect --policy strict --repo .
+claim-plane policy classify src/auth/session.py migrations/0042_tokens.sql --repo .
+```
+
+The public presets have stable semantics:
+
+- `observe` records supported would-deny decisions but lets the runtime continue; final Git verification remains mandatory. Control-plane files, corrupt state, branch drift, and pre-existing user changes are never weakened by shadow mode.
+- `guarded` blocks supported undeclared mutations, routes scope growth through atomic re-admission, and marks high- or critical-risk delivery for review.
+- `strict` fails closed for unknown, destructive, network, secret, and critical-resource actions. It starts only when the adapter manifest proves the required guarantees.
+- `critical` requires a human gate for every delivery and denies critical-resource mutation without stronger authority. It never represents an automatic merge decision.
+
+Repository risk is deterministic and path based. The default is `medium`; built-in rules identify CI workflows, migrations, secret material, review authority, package contracts, and runtime topology. Projects can add rules in `.claim-plane/config.yaml`:
+
+```yaml
+risk:
+  default: medium
+  include_builtin_rules: true
+  rules: [{"match": "src/auth/**", "level": "critical", "reason": "authentication boundary"}]
+```
+
+When several rules match, the highest risk wins. The run evidence stores the full effective policy, its digest, every changed-path classification, reason codes, and the final policy action. A runtime and acceptance result that would otherwise be `VERIFIED` becomes `REVIEW_REQUIRED` or `REJECTED` when the effective risk policy requires it.
+
 ## Codex swarm operator
 
 Version 0.31.0 exposes the complete swarm lifecycle through one bounded operator command:

@@ -11,7 +11,7 @@ claim-plane connect codex
 claim-plane doctor
 ```
 
-Initialization writes `.claim-plane/config.yaml` with protocol `claim-plane.project-config.v1`. The file contains only project identity, repository identity, default-branch metadata, acceptance commands, and adapter policy settings. Credentials, raw prompts, runtime tokens, and provider secrets are never copied into project configuration.
+Initialization writes `.claim-plane/config.yaml` with protocol `claim-plane.project-config.v1`. The file contains only project identity, repository identity, default-branch metadata, acceptance commands, adapter policy settings, and deterministic risk rules. Credentials, raw prompts, runtime tokens, and provider secrets are never copied into project configuration.
 
 Acceptance discovery prefers an existing `scripts/check.sh`, then recognized Make, Python, Node, Rust, Go, Maven, or Gradle test entry points. The detected list is a starting point and can be edited before a guarded run. Re-running `claim-plane init` preserves the stable project identity and configured commands.
 
@@ -40,6 +40,30 @@ claim-plane run "Implement refresh-token rotation" --json
 claim-plane run "Implement refresh-token rotation" --out controlled-run.json
 claim-plane run "Implement refresh-token rotation" --timeout 1800
 ```
+
+## Policy and risk evaluation
+
+`claim-plane.policy.v1` resolves one of four public presets together with repository risk configuration. The resolved object is canonical and digest-bound, so local reports, lifecycle evidence, and later CI verification can refer to the same effective semantics.
+
+```bash
+claim-plane policy inspect --repo .
+claim-plane policy classify src/auth/token.py pyproject.toml --repo .
+```
+
+`observe` is a shadow deployment mode: supported scope denials are recorded as would-deny decisions and final Git verification still runs. It does not weaken control-plane protection, corrupt-state handling, branch binding, or preservation of user-owned dirty paths. `guarded` is the default daily mode. `strict` and `critical` are rejected before session start when the adapter cannot provide their minimum hard guarantees.
+
+Risk levels are `low`, `medium`, `high`, and `critical`. Each changed path receives an explanation containing the matched rules and selected action. Multiple matches resolve to the highest level. `guarded` permits low and medium changes but requires review for high and critical resources. `strict` denies critical resources, while `critical` requires human review for every otherwise admissible delivery.
+
+Project-specific rules live under `risk` in `.claim-plane/config.yaml`:
+
+```yaml
+risk:
+  default: medium
+  include_builtin_rules: true
+  rules: [{"match": "src/auth/**", "level": "critical", "reason": "authentication boundary"}]
+```
+
+The controlled-run record includes both `effective_policy` and `risk`. These fields contain the preset, risk defaults, effective rules, digest, changed-path findings, reason codes, and final action. Policy classification can therefore explain why a technically verified run still requires review.
 
 ## Agent adapter boundary
 

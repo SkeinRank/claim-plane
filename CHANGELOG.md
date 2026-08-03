@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane.policy.v1` with stable `observe`, `guarded`, `strict`, and `critical` semantics, canonical digests, and explicit behavior for unknown, destructive, network, secret, scope-expansion, and human-gated decisions.
+- Add deterministic `low`, `medium`, `high`, and `critical` repository risk classes with built-in protected-resource rules and project-defined path rules.
+- Add `claim-plane policy inspect` and `claim-plane policy classify` for machine-readable policy inspection, adapter compatibility, path classification, reason codes, and explanations.
+- Add policy and risk JSON Schemas plus regression coverage for stable preset semantics, shadow-mode enforcement boundaries, critical-path review, deterministic digests, and run evidence.
+
+### Changed
+
+- Include the complete effective policy, policy digest, changed-path risk findings, and final policy action in every controlled-run record.
+- Pin the canonical policy manifest into the controlled Codex session so project-config drift during execution cannot silently change mutation semantics.
+- Make `claim-plane doctor` evaluate the configured policy even when `--policy` is omitted and fail readiness when the selected adapter cannot provide the required guarantees.
+- Let `observe` continue supported would-deny mutations while preserving fail-closed control invariants and final Git verification.
+- Convert otherwise verified high-risk deliveries to `REVIEW_REQUIRED` and policy-denied deliveries to `REJECTED`.
+
 ## [0.32.0] — 2026-08-03
 
 ### Added

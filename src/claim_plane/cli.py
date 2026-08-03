@@ -21,10 +21,12 @@ from claim_plane.connectors import (
 )
 from claim_plane.controlled_run import (
     CONTROLLED_POLICY_ENV,
+    CONTROLLED_POLICY_MANIFEST_ENV,
     CONTROLLED_RUN_ENV,
     ControlledRunPreflightError,
     run_controlled_task,
 )
+from claim_plane.policy import POLICY_NAMES, EffectivePolicy, resolve_policy
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
     AdapterHandshake,
@@ -97,7 +99,7 @@ from claim_plane.swarm import (
 )
 
 from claim_plane.testing.codex import CodexConformanceDriver
-from claim_plane.project import reset_project
+from claim_plane.project import load_project_config, reset_project
 from claim_plane.testing.conformance import ReferenceConformanceDriver
 
 DEFAULT_DB = ".claim-plane/plane.db"
@@ -324,6 +326,81 @@ def cmd_reset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _effective_policy_for_cli(
+    repo: str, explicit: str | None, *, adapter: str = "codex"
+) -> EffectivePolicy:
+    config = load_project_config(repo)
+    adapters = config.get("adapters")
+    settings = adapters.get(adapter) if isinstance(adapters, Mapping) else None
+    configured = (
+        str(settings.get("policy") or "guarded")
+        if isinstance(settings, Mapping)
+        else "guarded"
+    )
+    risk = config.get("risk")
+    return resolve_policy(
+        str(explicit or configured),
+        risk=risk if isinstance(risk, Mapping) else None,
+        source="command_line" if explicit is not None else "project_config",
+        metadata={"adapter": adapter},
+    )
+
+
+def _print_effective_policy(payload: Mapping[str, Any]) -> None:
+    preset = payload.get("preset") or {}
+    risk = payload.get("risk") or {}
+    print(f"Policy: {preset.get('name')} ({payload.get('source')})")
+    print(str(preset.get("summary") or ""))
+    print(f"Pre-write mode: {preset.get('pre_write_mode')}")
+    print(f"Unknown actions: {preset.get('unknown_action')}")
+    print(f"Scope expansion: {preset.get('scope_expansion_action')}")
+    print(f"Human gate: {'required' if preset.get('human_gate') else 'not required'}")
+    print(f"Risk default: {risk.get('default')}")
+    for level, action in dict(preset.get("risk_actions") or {}).items():
+        print(f"  {level}: {action}")
+    print(f"Digest: {payload.get('digest')}")
+
+
+def cmd_policy_inspect(args: argparse.Namespace) -> int:
+    effective = _effective_policy_for_cli(args.repo, args.policy)
+    payload = effective.to_dict()
+    adapter = _ADAPTER_REGISTRY.create(args.adapter)
+    compatibility = evaluate_adapter_policy(
+        adapter.capability_manifest(args.repo), effective.name
+    )
+    payload["adapter"] = args.adapter
+    payload["adapter_compatibility"] = compatibility.to_dict()
+    if args.json:
+        _write_json(payload)
+    else:
+        _print_effective_policy(payload)
+        status = "compatible" if compatibility.compatible else "unavailable"
+        print(f"Adapter {args.adapter}: {status}")
+        for finding in compatibility.findings:
+            print(f"  - {finding.message}")
+    return 0 if compatibility.compatible else 2
+
+
+def cmd_policy_classify(args: argparse.Namespace) -> int:
+    effective = _effective_policy_for_cli(args.repo, args.policy)
+    payload = effective.classify_many(args.paths)
+    payload["effective_policy"] = effective.to_dict()
+    if args.json:
+        _write_json(payload)
+    else:
+        print(
+            f"Policy {effective.name}: {payload['highest_risk']} risk → "
+            f"{payload['final_action']}"
+        )
+        for finding in payload["findings"]:
+            print(
+                f"  {finding['path']}: {finding['level']} → "
+                f"{finding['action']}"
+            )
+            print(f"    {finding['explanation']}")
+    return 3 if payload["final_action"] == "DENY" else 0
+
+
 def _manifest_with_policy(
     manifest: AdapterCapabilityManifest, policy: str | None
 ) -> tuple[dict[str, Any], bool]:
@@ -508,18 +585,19 @@ def cmd_doctor_codex(args: argparse.Namespace) -> int:
         _codex_request(AdapterOperation.DOCTOR, repo=args.repo)
     )
     report = dict(response.payload)
+    effective_policy = _effective_policy_for_cli(args.repo, args.policy)
+    report["effective_policy"] = effective_policy.to_dict()
     manifest_data = report.get("adapter_manifest")
     policy_compatible = True
     if isinstance(manifest_data, Mapping):
         manifest = AdapterCapabilityManifest.from_dict(manifest_data)
         manifest_payload, policy_compatible = _manifest_with_policy(
-            manifest, args.policy
+            manifest, effective_policy.name
         )
         report["adapter_manifest"] = manifest_payload
-        if args.policy is not None:
-            report["policy_compatibility"] = manifest_payload[
-                "policy_compatibility"
-            ]
+        report["policy_compatibility"] = manifest_payload[
+            "policy_compatibility"
+        ]
     report["registry_handshake"] = handshake.to_dict()
     report["ready"] = (
         bool(report.get("ready")) and policy_compatible and handshake.compatible
@@ -537,6 +615,8 @@ def cmd_doctor_codex(args: argparse.Namespace) -> int:
                 print(f"          missing events: {', '.join(missing)}")
         if report.get("codex_version"):
             print(f"Codex: {report['codex_version']}")
+        if isinstance(report.get("effective_policy"), Mapping):
+            _print_effective_policy(report["effective_policy"])
         if isinstance(report.get("adapter_manifest"), Mapping):
             _print_adapter_manifest(report["adapter_manifest"])
         _print_adapter_handshake(report["registry_handshake"])
@@ -594,6 +674,15 @@ def cmd_codex_hook(args: argparse.Namespace) -> int:
     controlled_policy = os.environ.get(CONTROLLED_POLICY_ENV)
     if controlled_policy:
         payload["_claim_plane_policy"] = controlled_policy
+    controlled_policy_manifest = os.environ.get(CONTROLLED_POLICY_MANIFEST_ENV)
+    if controlled_policy_manifest:
+        manifest_payload = json.loads(controlled_policy_manifest)
+        if not isinstance(manifest_payload, Mapping):
+            raise ValueError("controlled policy manifest must be a JSON object")
+        effective = EffectivePolicy.from_dict(manifest_payload)
+        if controlled_policy and effective.name != controlled_policy:
+            raise ValueError("controlled policy name and manifest do not match")
+        payload["_claim_plane_policy_manifest"] = effective.to_dict()
     if payload.get("hook_event_name") == "SessionStart":
         repo = str(payload.get("cwd") or ".")
         _adapter_handshake("codex", repo=repo, require_compatible=True)
@@ -2101,7 +2190,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     adapters_inspect.add_argument("--repo", default=".")
     adapters_inspect.add_argument(
-        "--policy", choices=("observe", "guarded", "strict", "critical")
+        "--policy", choices=POLICY_NAMES
     )
     adapters_inspect.add_argument("--json", action="store_true")
     adapters_inspect.set_defaults(func=cmd_adapters_inspect)
@@ -2131,7 +2220,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     adapters_doctor.add_argument("--repo", default=".")
     adapters_doctor.add_argument(
-        "--policy", choices=("observe", "guarded", "strict", "critical")
+        "--policy", choices=POLICY_NAMES
     )
     adapters_doctor.add_argument("--json", action="store_true")
     adapters_doctor.set_defaults(func=cmd_adapters_doctor)
@@ -2177,7 +2266,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--repo", default=".")
     doctor.add_argument(
-        "--policy", choices=("observe", "guarded", "strict", "critical")
+        "--policy", choices=POLICY_NAMES
     )
     doctor.add_argument("--json", action="store_true")
     doctor.set_defaults(func=cmd_doctor_codex, connector="codex")
@@ -2187,10 +2276,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor_codex_parser.add_argument("--repo", default=".")
     doctor_codex_parser.add_argument(
-        "--policy", choices=("observe", "guarded", "strict", "critical")
+        "--policy", choices=POLICY_NAMES
     )
     doctor_codex_parser.add_argument("--json", action="store_true")
     doctor_codex_parser.set_defaults(func=cmd_doctor_codex, connector="codex")
+
+
+    policy_parser = sub.add_parser(
+        "policy", help="Inspect policy presets and classify repository risk."
+    )
+    policy_sub = policy_parser.add_subparsers(
+        dest="policy_command", required=True
+    )
+    policy_inspect = policy_sub.add_parser(
+        "inspect", help="Show effective policy semantics and adapter compatibility."
+    )
+    policy_inspect.add_argument("--repo", default=".")
+    policy_inspect.add_argument("--adapter", default="codex")
+    policy_inspect.add_argument("--policy", choices=POLICY_NAMES)
+    policy_inspect.add_argument("--json", action="store_true")
+    policy_inspect.set_defaults(func=cmd_policy_inspect)
+
+    policy_classify = policy_sub.add_parser(
+        "classify", help="Classify repository-relative paths under a policy."
+    )
+    policy_classify.add_argument("paths", nargs="+")
+    policy_classify.add_argument("--repo", default=".")
+    policy_classify.add_argument("--policy", choices=POLICY_NAMES)
+    policy_classify.add_argument("--json", action="store_true")
+    policy_classify.set_defaults(func=cmd_policy_classify)
 
 
     controlled_run = sub.add_parser(
@@ -2205,7 +2319,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
     )
     controlled_run.add_argument(
-        "--policy", choices=("observe", "guarded", "strict", "critical")
+        "--policy", choices=POLICY_NAMES
     )
     controlled_run.add_argument(
         "--timeout",

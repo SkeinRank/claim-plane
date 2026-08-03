@@ -4,7 +4,14 @@
   "title": "Claim Plane project configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol", "project", "repository", "acceptance", "adapters"],
+  "required": [
+    "protocol",
+    "project",
+    "repository",
+    "acceptance",
+    "adapters",
+    "risk"
+  ],
   "properties": {
     "protocol": {
       "const": "claim-plane.project-config.v1"
@@ -12,7 +19,9 @@
     "project": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -23,7 +32,11 @@
     "repository": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["identity", "default_branch", "default_branch_source"],
+      "required": [
+        "identity",
+        "default_branch",
+        "default_branch_source"
+      ],
       "properties": {
         "identity": {
           "type": "string",
@@ -42,7 +55,10 @@
     "acceptance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["commands", "detected"],
+      "required": [
+        "commands",
+        "detected"
+      ],
       "properties": {
         "commands": {
           "type": "array",
@@ -59,24 +75,85 @@
     },
     "adapters": {
       "type": "object",
-      "required": ["codex"],
+      "required": [
+        "codex"
+      ],
       "properties": {
         "codex": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled", "policy"],
+          "required": [
+            "enabled",
+            "policy"
+          ],
           "properties": {
             "enabled": {
               "type": "boolean"
             },
             "policy": {
-              "enum": ["observe", "guarded", "strict", "critical"]
+              "enum": [
+                "observe",
+                "guarded",
+                "strict",
+                "critical"
+              ]
             }
           }
         }
       },
       "additionalProperties": {
         "type": "object"
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default",
+        "include_builtin_rules",
+        "rules"
+      ],
+      "properties": {
+        "default": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "include_builtin_rules": {
+          "type": "boolean"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "match",
+              "level"
+            ],
+            "properties": {
+              "match": {
+                "type": "string",
+                "minLength": 1
+              },
+              "level": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "critical"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
       }
     }
   }

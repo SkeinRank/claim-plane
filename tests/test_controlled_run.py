@@ -18,6 +18,7 @@ from claim_plane.controlled_run import (
     load_controlled_run,
     run_controlled_task,
 )
+from claim_plane.project import dump_project_config, load_project_config
 from claim_plane.protocol import AdapterOperation, AdapterRequest, LifecycleEventStore
 
 
@@ -115,6 +116,11 @@ def _successful_process_factory(
         assert command[-1] == task
         assert root == repo
         run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        policy_manifest = json.loads(
+            env["CLAIM_PLANE_CONTROLLED_POLICY_MANIFEST"]
+        )
+        assert policy_manifest["preset"]["name"] == "guarded"
+        assert policy_manifest["digest"]
         session_id = "thread_controlled_success"
         adapter.start_session(
             _request(
@@ -425,3 +431,51 @@ def test_timeout_revokes_active_authority(
     assert result.cancellation["status"] == "cancelled"
     status = codex.codex_intent_status(repo, session_id=session_id)
     assert status["state"] == "abandoned"
+
+
+def test_guarded_run_requires_review_for_configured_critical_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    config = load_project_config(repo)
+    config["risk"] = {
+        "default": "medium",
+        "include_builtin_rules": True,
+        "rules": [
+            {
+                "match": "app.py",
+                "level": "critical",
+                "reason": "fixture policy boundary",
+            }
+        ],
+    }
+    (repo / ".claim-plane/config.yaml").write_text(
+        dump_project_config(config), encoding="utf-8"
+    )
+    task = "Update the fixture value."
+
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        quiet=True,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(
+            adapter, repo=repo, task=task
+        ),
+    )
+
+    assert result.outcome is ControlledRunOutcome.REVIEW_REQUIRED
+    assert result.exit_code == 2
+    assert result.effective_policy["preset"]["name"] == "guarded"
+    assert result.risk["highest_risk"] == "critical"
+    assert result.risk["final_action"] == "REVIEW_REQUIRED"
+    assert any(
+        item["path"] == "app.py" for item in result.risk["findings"]
+    )
