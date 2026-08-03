@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/dogfood-suite.schema.json",
+  "title": "Claim Plane dogfood suite",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "suite_id", "description", "frozen_at", "selection_seed", "coder_seeds", "arms", "repositories", "tasks", "digest"],
+  "properties": {
+    "protocol": {"const": "claim-plane.dogfood-suite.v1"},
+    "suite_id": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "frozen_at": {"type": "string", "minLength": 1},
+    "selection_seed": {"type": "integer", "minimum": 0},
+    "coder_seeds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 0}},
+    "arms": {"const": ["bare-codex", "claim-plane-observe", "claim-plane-guarded"]},
+    "repositories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository_id", "clone_url", "base_commit", "language"],
+        "properties": {
+          "repository_id": {"type": "string", "minLength": 1},
+          "clone_url": {"type": "string", "minLength": 1},
+          "base_commit": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
+          "language": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "repository_id", "prompt", "prompt_sha256", "source_ref", "task_class", "risk_class", "acceptance", "split"],
+        "properties": {
+          "task_id": {"type": "string", "minLength": 1},
+          "repository_id": {"type": "string", "minLength": 1},
+          "prompt": {"type": "string", "minLength": 1},
+          "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "source_ref": {"type": "string", "minLength": 1},
+          "task_class": {"type": "string", "minLength": 1},
+          "risk_class": {"enum": ["low", "medium", "high", "critical"]},
+          "acceptance": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "split": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

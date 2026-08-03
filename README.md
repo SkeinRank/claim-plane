@@ -248,6 +248,50 @@ risk:
 
 When several rules match, the highest risk wins. The run evidence stores the full effective policy, its digest, every changed-path classification, reason codes, and the final policy action. A runtime and acceptance result that would otherwise be `VERIFIED` becomes `REVIEW_REQUIRED` or `REJECTED` when the effective risk policy requires it.
 
+## Dogfood and golden task suite
+
+The single-agent technical preview is evaluated on one frozen task corpus rather than changing examples between runs. The suite binds repository commits, task prompts, source references, acceptance commands, task classes, risk classes, coder seeds, and the fixed three-arm comparison:
+
+```text
+Bare Codex
+Claim Plane Observe
+Claim Plane Guarded
+```
+
+Freeze and validate the reviewed corpus before any provider calls, then expand it into a deterministic run matrix:
+
+```bash
+claim-plane dogfood freeze candidate.json --release-grade --out golden-suite.json
+claim-plane dogfood validate golden-suite.json --release-grade
+claim-plane dogfood plan golden-suite.json \
+  --release-grade \
+  --model <model> \
+  --out run-plan.json
+```
+
+A release-grade suite requires 20–30 tasks, 5–10 repositories, at least two coder seeds, multiple task and risk classes, full repository commit SHAs, and explicit acceptance commands. Each task/seed/arm cell has a stable execution identity. The same frozen task and acceptance contract are reused across all arms.
+
+Execution and evaluation produce `claim-plane.dogfood-result.v1` documents. Bind each measured evaluator output to its immutable plan cell before aggregation:
+
+```bash
+claim-plane dogfood record \
+  run-plan.json <execution-id> evaluation.json \
+  --out results/<execution-id>.json
+```
+
+Aggregation never fabricates missing measurements and fails completeness when a cell is absent, duplicated, unexpected, or bound to the wrong suite or plan:
+
+```bash
+claim-plane dogfood aggregate \
+  golden-suite.json run-plan.json results/*.json \
+  --release-grade \
+  --out release-summary.json
+
+claim-plane dogfood gate release-summary.json
+```
+
+The summary reports task success, accepted delivery, undeclared and missed mutations, scope amendments, false blocks, human repairs, retries, wall time, token and cost fields when available, changed files and lines, public API drift, and dependency drift. The release gate returns `INCOMPLETE` for a partial matrix and `BLOCKED` when guarded mode materially reduces task success without the configured accepted-delivery improvement. It does not present example values as measured results. See `benchmark/golden-suite/README.md` for the full artifact flow.
+
 ## Codex swarm operator
 
 Version 0.31.0 exposes the complete swarm lifecycle through one bounded operator command:

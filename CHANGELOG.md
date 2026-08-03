@@ -8,6 +8,21 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane.dogfood-suite.v1` for freezing repository commits, task prompts, source references, acceptance contracts, task/risk classes, coder seeds, and the fixed Bare/Observe/Guarded arms before execution.
+- Add deterministic task × seed × arm planning with stable execution identities and a canonical plan digest.
+- Add structured dogfood result, summary, and release-gate protocols covering task success, accepted delivery, scope and mutation findings, human repair, time, usage, cost, diff size, API drift, and dependency drift.
+- Add `claim-plane dogfood freeze`, `validate`, `plan`, `record`, `aggregate`, and `gate` commands plus five JSON Schemas and a release-readiness helper.
+- Add regression coverage for frozen-input tamper detection, release-grade corpus constraints, complete and incomplete matrices, deterministic planning, uncompensated success regressions, and CLI artifact flow.
+
+### Changed
+
+- Require the technical-preview gate to remain incomplete until every frozen task, seed, and arm has one measured result; missing cells are never imputed or represented as benchmark outcomes.
+- Block preview readiness when guarded mode materially reduces task success without a configured accepted-delivery improvement.
+
 ## [0.34.0] — 2026-08-03
 
 ### Added

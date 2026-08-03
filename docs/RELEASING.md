@@ -14,6 +14,7 @@ Claim Plane uses the distribution name `claim-plane`, the import package
 
    ```bash
    ./scripts/check.sh
+   ./scripts/check-dogfood-release.sh benchmark/golden-suite/release-summary.json
    python -m pip install --upgrade build twine
    python -m build
    python -m twine check dist/*

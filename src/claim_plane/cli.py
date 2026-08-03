@@ -32,6 +32,19 @@ from claim_plane.evidence import (
     build_evidence_report,
     render_evidence_replay,
 )
+from claim_plane.dogfood import (
+    DOGFOOD_ARMS,
+    DogfoodGateStatus,
+    aggregate_dogfood_results,
+    build_dogfood_plan,
+    build_dogfood_result,
+    evaluate_dogfood_release_gate,
+    freeze_golden_suite,
+    load_dogfood_plan,
+    load_dogfood_results,
+    load_dogfood_summary,
+    load_golden_suite,
+)
 from claim_plane.policy import POLICY_NAMES, EffectivePolicy, resolve_policy
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
@@ -748,6 +761,142 @@ def cmd_replay(args: argparse.Namespace) -> int:
         for line in render_evidence_replay(payload):
             print(line)
     return 0
+
+
+def _print_dogfood_suite(payload: Mapping[str, Any]) -> None:
+    print(f"Claim Plane dogfood suite — {payload['suite_id']}")
+    print(f"Digest: {payload['digest']}")
+    print(
+        f"Corpus: {len(payload.get('tasks') or ())} tasks · "
+        f"{len(payload.get('repositories') or ())} repositories · "
+        f"{len(payload.get('coder_seeds') or ())} coder seeds"
+    )
+    print("Arms: " + ", ".join(payload.get("arms") or ()))
+
+
+def cmd_dogfood_freeze(args: argparse.Namespace) -> int:
+    candidate = json.loads(Path(args.candidate).read_text(encoding="utf-8"))
+    if not isinstance(candidate, Mapping):
+        raise ValueError("dogfood candidate must be a JSON object")
+    suite = freeze_golden_suite(
+        candidate,
+        frozen_at=args.frozen_at,
+        require_release_grade=args.release_grade,
+    )
+    payload = suite.to_dict()
+    _write_json(payload, args.out)
+    if not args.json:
+        _print_dogfood_suite(payload)
+        print(f"Wrote frozen suite to {args.out}")
+    return 0
+
+
+def cmd_dogfood_validate(args: argparse.Namespace) -> int:
+    suite = load_golden_suite(
+        args.suite, require_release_grade=args.release_grade
+    )
+    payload = suite.to_dict()
+    if args.json:
+        _write_json(payload)
+    else:
+        _print_dogfood_suite(payload)
+        print(
+            "Validation: release-grade"
+            if args.release_grade
+            else "Validation: valid"
+        )
+    return 0
+
+
+def cmd_dogfood_plan(args: argparse.Namespace) -> int:
+    suite = load_golden_suite(
+        args.suite, require_release_grade=args.release_grade
+    )
+    plan = build_dogfood_plan(suite, model=args.model, created_at=args.created_at)
+    payload = plan.to_dict()
+    _write_json(payload, args.out)
+    if not args.json:
+        print(f"Claim Plane dogfood plan — {plan.suite_id}")
+        print(f"Executions: {len(plan.entries)}")
+        print(f"Digest: {plan.digest}")
+        print(f"Wrote plan to {args.out}")
+    return 0
+
+
+def cmd_dogfood_record(args: argparse.Namespace) -> int:
+    plan = load_dogfood_plan(args.plan)
+    evaluation = json.loads(Path(args.evaluation).read_text(encoding="utf-8"))
+    if not isinstance(evaluation, Mapping):
+        raise ValueError("dogfood evaluation must be a JSON object")
+    result = build_dogfood_result(plan, args.execution_id, evaluation)
+    _write_json(result.to_dict(), args.out)
+    if not args.json:
+        print(f"Recorded {result.execution_id} → {args.out}")
+    return 0
+
+
+def _print_dogfood_summary(payload: Mapping[str, Any]) -> None:
+    completeness = payload.get("completeness") or {}
+    print(f"Claim Plane dogfood summary — {payload.get('suite_id')}")
+    print(
+        f"Coverage: {completeness.get('matched', 0)}/"
+        f"{completeness.get('expected', 0)} "
+        f"({'complete' if completeness.get('complete') else 'incomplete'})"
+    )
+    for arm in DOGFOOD_ARMS:
+        metrics = (payload.get("arms") or {}).get(arm) or {}
+        success = metrics.get("task_success_rate")
+        accepted = metrics.get("accepted_delivery_rate")
+        success_text = "n/a" if success is None else f"{float(success):.3f}"
+        accepted_text = "n/a" if accepted is None else f"{float(accepted):.3f}"
+        print(
+            f"  {arm}: task_success={success_text} "
+            f"accepted_delivery={accepted_text} "
+            f"evaluated={metrics.get('evaluated_count', 0)}"
+        )
+    print(f"Digest: {payload.get('digest')}")
+
+
+def cmd_dogfood_aggregate(args: argparse.Namespace) -> int:
+    suite = load_golden_suite(
+        args.suite, require_release_grade=args.release_grade
+    )
+    plan = load_dogfood_plan(args.plan)
+    results = load_dogfood_results(args.results)
+    payload = aggregate_dogfood_results(
+        suite, plan, results, generated_at=args.generated_at
+    )
+    _write_json(payload, args.out)
+    if not args.json:
+        _print_dogfood_summary(payload)
+        print(f"Wrote summary to {args.out}")
+    return 0 if (payload.get("completeness") or {}).get("complete") else 3
+
+
+def cmd_dogfood_gate(args: argparse.Namespace) -> int:
+    summary = load_dogfood_summary(args.summary)
+    payload = evaluate_dogfood_release_gate(
+        summary,
+        max_task_success_drop=args.max_task_success_drop,
+        min_accepted_delivery_gain=args.min_accepted_delivery_gain,
+        evaluated_at=args.evaluated_at,
+    )
+    if args.json or args.out:
+        _write_json(payload, args.out)
+    else:
+        print(f"Claim Plane dogfood release gate — {payload['status']}")
+        comparison = payload.get("comparison") or {}
+        print(f"Task-success drop: {comparison.get('task_success_drop')}")
+        print(f"Accepted-delivery gain: {comparison.get('accepted_delivery_gain')}")
+        for finding in payload.get("findings") or ():
+            print(f"  [{finding.get('code')}] {finding.get('message')}")
+    status = DogfoodGateStatus(str(payload["status"]))
+    if status is DogfoodGateStatus.PASSED:
+        return 0
+    if status is DogfoodGateStatus.INCOMPLETE:
+        return 3
+    return 4
+
 
 def cmd_codex_hook(args: argparse.Namespace) -> int:
     del args
@@ -2394,6 +2543,77 @@ def build_parser() -> argparse.ArgumentParser:
     policy_classify.add_argument("--policy", choices=POLICY_NAMES)
     policy_classify.add_argument("--json", action="store_true")
     policy_classify.set_defaults(func=cmd_policy_classify)
+
+
+    dogfood = sub.add_parser(
+        "dogfood",
+        help="Freeze, plan, record, aggregate, and gate the single-agent golden task suite.",
+    )
+    dogfood_sub = dogfood.add_subparsers(dest="dogfood_command", required=True)
+
+    dogfood_freeze = dogfood_sub.add_parser(
+        "freeze", help="Freeze a candidate task corpus into an immutable suite."
+    )
+    dogfood_freeze.add_argument("candidate")
+    dogfood_freeze.add_argument("--out", required=True)
+    dogfood_freeze.add_argument("--frozen-at", default=None)
+    dogfood_freeze.add_argument("--release-grade", action="store_true")
+    dogfood_freeze.add_argument("--json", action="store_true")
+    dogfood_freeze.set_defaults(func=cmd_dogfood_freeze)
+
+    dogfood_validate = dogfood_sub.add_parser(
+        "validate", help="Validate a frozen suite and its canonical digest."
+    )
+    dogfood_validate.add_argument("suite")
+    dogfood_validate.add_argument("--release-grade", action="store_true")
+    dogfood_validate.add_argument("--json", action="store_true")
+    dogfood_validate.set_defaults(func=cmd_dogfood_validate)
+
+    dogfood_plan = dogfood_sub.add_parser(
+        "plan", help="Expand the frozen suite into task, seed, and arm executions."
+    )
+    dogfood_plan.add_argument("suite")
+    dogfood_plan.add_argument("--out", required=True)
+    dogfood_plan.add_argument("--model", default=None)
+    dogfood_plan.add_argument("--created-at", default=None)
+    dogfood_plan.add_argument("--release-grade", action="store_true")
+    dogfood_plan.add_argument("--json", action="store_true")
+    dogfood_plan.set_defaults(func=cmd_dogfood_plan)
+
+    dogfood_record = dogfood_sub.add_parser(
+        "record", help="Bind one measured evaluation to an immutable plan cell."
+    )
+    dogfood_record.add_argument("plan")
+    dogfood_record.add_argument("execution_id")
+    dogfood_record.add_argument("evaluation")
+    dogfood_record.add_argument("--out", required=True)
+    dogfood_record.add_argument("--json", action="store_true")
+    dogfood_record.set_defaults(func=cmd_dogfood_record)
+
+    dogfood_aggregate = dogfood_sub.add_parser(
+        "aggregate", help="Aggregate measured execution records without filling gaps."
+    )
+    dogfood_aggregate.add_argument("suite")
+    dogfood_aggregate.add_argument("plan")
+    dogfood_aggregate.add_argument("results", nargs="+")
+    dogfood_aggregate.add_argument("--out", required=True)
+    dogfood_aggregate.add_argument("--generated-at", default=None)
+    dogfood_aggregate.add_argument("--release-grade", action="store_true")
+    dogfood_aggregate.add_argument("--json", action="store_true")
+    dogfood_aggregate.set_defaults(func=cmd_dogfood_aggregate)
+
+    dogfood_gate = dogfood_sub.add_parser(
+        "gate", help="Evaluate technical-preview readiness from a complete summary."
+    )
+    dogfood_gate.add_argument("summary")
+    dogfood_gate.add_argument("--out", default=None)
+    dogfood_gate.add_argument("--max-task-success-drop", type=float, default=0.05)
+    dogfood_gate.add_argument(
+        "--min-accepted-delivery-gain", type=float, default=0.02
+    )
+    dogfood_gate.add_argument("--evaluated-at", default=None)
+    dogfood_gate.add_argument("--json", action="store_true")
+    dogfood_gate.set_defaults(func=cmd_dogfood_gate)
 
 
     controlled_run = sub.add_parser(

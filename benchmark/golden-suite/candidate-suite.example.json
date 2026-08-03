@@ -1,0 +1,22 @@
+{
+  "suite_id": "replace-with-reviewed-suite-id",
+  "description": "Candidate only. Replace every example value before freezing.",
+  "selection_seed": 42,
+  "coder_seeds": [101, 202],
+  "repositories": [
+    {"repository_id": "repo-a", "clone_url": "https://example.invalid/repo-a.git", "base_commit": "0000000000000000000000000000000000000001", "language": "python"},
+    {"repository_id": "repo-b", "clone_url": "https://example.invalid/repo-b.git", "base_commit": "0000000000000000000000000000000000000002", "language": "python"},
+    {"repository_id": "repo-c", "clone_url": "https://example.invalid/repo-c.git", "base_commit": "0000000000000000000000000000000000000003", "language": "python"},
+    {"repository_id": "repo-d", "clone_url": "https://example.invalid/repo-d.git", "base_commit": "0000000000000000000000000000000000000004", "language": "typescript"},
+    {"repository_id": "repo-e", "clone_url": "https://example.invalid/repo-e.git", "base_commit": "0000000000000000000000000000000000000005", "language": "rust"},
+    {"repository_id": "repo-f", "clone_url": "https://example.invalid/repo-f.git", "base_commit": "0000000000000000000000000000000000000006", "language": "go"}
+  ],
+  "tasks": [
+    {"task_id": "replace-task-01", "repository_id": "repo-a", "prompt": "Replace with a reviewed real task.", "source_ref": "replace-with-issue-or-corpus-reference", "task_class": "bugfix", "risk_class": "medium", "acceptance": ["replace-with-acceptance-command"], "split": "dogfood"},
+    {"task_id": "replace-task-02", "repository_id": "repo-b", "prompt": "Replace with a reviewed real task.", "source_ref": "replace-with-issue-or-corpus-reference", "task_class": "feature", "risk_class": "high", "acceptance": ["replace-with-acceptance-command"], "split": "dogfood"},
+    {"task_id": "replace-task-03", "repository_id": "repo-c", "prompt": "Replace with a reviewed real task.", "source_ref": "replace-with-issue-or-corpus-reference", "task_class": "test", "risk_class": "low", "acceptance": ["replace-with-acceptance-command"], "split": "dogfood"},
+    {"task_id": "replace-task-04", "repository_id": "repo-d", "prompt": "Replace with a reviewed real task.", "source_ref": "replace-with-issue-or-corpus-reference", "task_class": "bugfix", "risk_class": "critical", "acceptance": ["replace-with-acceptance-command"], "split": "dogfood"},
+    {"task_id": "replace-task-05", "repository_id": "repo-e", "prompt": "Replace with a reviewed real task.", "source_ref": "replace-with-issue-or-corpus-reference", "task_class": "feature", "risk_class": "medium", "acceptance": ["replace-with-acceptance-command"], "split": "dogfood"},
+    {"task_id": "replace-task-06", "repository_id": "repo-f", "prompt": "Replace with a reviewed real task.", "source_ref": "replace-with-issue-or-corpus-reference", "task_class": "test", "risk_class": "high", "acceptance": ["replace-with-acceptance-command"], "split": "dogfood"}
+  ]
+}

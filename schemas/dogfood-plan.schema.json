@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/dogfood-plan.schema.json",
+  "title": "Claim Plane dogfood plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "suite_id", "suite_digest", "created_at", "model", "entries", "digest"],
+  "properties": {
+    "protocol": {"const": "claim-plane.dogfood-plan.v1"},
+    "suite_id": {"type": "string", "minLength": 1},
+    "suite_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "created_at": {"type": "string", "minLength": 1},
+    "model": {"type": ["string", "null"]},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["execution_id", "task_id", "repository_id", "base_commit", "prompt", "prompt_sha256", "acceptance", "task_class", "risk_class", "seed", "arm", "policy"],
+        "properties": {
+          "execution_id": {"type": "string", "pattern": "^dogfood-[0-9a-f]{24}$"},
+          "task_id": {"type": "string", "minLength": 1},
+          "repository_id": {"type": "string", "minLength": 1},
+          "base_commit": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
+          "prompt": {"type": "string", "minLength": 1},
+          "prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "acceptance": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "task_class": {"type": "string", "minLength": 1},
+          "risk_class": {"enum": ["low", "medium", "high", "critical"]},
+          "seed": {"type": "integer", "minimum": 0},
+          "arm": {"enum": ["bare-codex", "claim-plane-observe", "claim-plane-guarded"]},
+          "policy": {"type": ["string", "null"], "enum": [null, "observe", "guarded"]}
+        }
+      }
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
