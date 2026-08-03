@@ -23,6 +23,55 @@ The public Python surface is `claim_plane.protocol.AgentAdapter`, `AdapterReques
 
 Claim Plane Core remains authoritative. An adapter translates lifecycle and observations; it never grants mutation authority directly.
 
+## Capability and Guarantee Manifest
+
+`claim-plane.adapter-capabilities.v1` records what an adapter and its detected runtime can observe, enforce, and verify. The document separates implementation capabilities from effective guarantees so that runtime limitations cannot be presented as Claim Plane guarantees.
+
+Capabilities use explicit levels:
+
+```text
+complete
+partial
+managed
+external
+unavailable
+```
+
+Guarantees use the enforcement vocabulary:
+
+```text
+HARD_BLOCKED
+OBSERVED
+POST_VERIFIED
+UNAVAILABLE
+```
+
+Every guarantee also names its provider: `claim_plane`, `adapter`, `runtime`, or `composite`. Available guarantees cite the mechanism that establishes them. A hard-blocked adapter or runtime guarantee must bind to a complete or managed capability; a partial capability cannot be serialized as a hard guarantee. The canonical document and its SHA-256 digest are described by [`schemas/adapter-capability-manifest.schema.json`](../schemas/adapter-capability-manifest.schema.json).
+
+The Codex manifest is inspected with:
+
+```bash
+claim-plane adapters inspect codex
+claim-plane adapters inspect codex --policy guarded
+claim-plane adapters inspect codex --policy strict --json
+```
+
+Policy compatibility is deterministic. `observe`, `guarded`, `strict`, and `critical` declare minimum guarantee levels. An incompatible policy fails before a controlled session starts. For the project-local Codex connector, supported intercepted tool writes may be `HARD_BLOCKED`, while a write that bypasses runtime hooks remains `POST_VERIFIED`; therefore a policy that requires non-bypassable host-write blocking is unavailable on that boundary. The brokered Linux execution path remains the reference-monitor option for that requirement.
+
+Session-start lifecycle evidence includes the manifest digest, adapter and runtime versions, effective capabilities, guarantee levels, and guarantee providers. Reports project the same immutable summary, allowing later evidence sealing to distinguish Claim Plane proof from runtime enforcement.
+
+## Adapter conformance
+
+`claim-plane.adapter-conformance.v1` is the executable compatibility report for the adapter boundary. The canonical suite contains thirteen scenarios: declared mutation success, undeclared mutation denial, atomic amendment admission, rejected-amendment preservation, stale intent denial, expired lease denial, duplicate-event idempotency, invalid-order failure, safe crash resume, cancellation revocation, uncovered-mutation detection, corrupt-state refusal, and secret redaction.
+
+The shared runner accepts an `AdapterConformanceDriver`, executes the same scenario identities for every runtime, and binds the result to the effective capability-manifest digest. Each available guarantee must have an explicit scenario mapping and every mapped scenario must pass. A declaration without coverage is incompatible even when unrelated scenarios succeed. The machine-readable document is described by [`schemas/adapter-conformance-report.schema.json`](../schemas/adapter-conformance-report.schema.json).
+
+The dependency-free `ReferenceAdapter` is intended for Claim Plane Core tests and third-party adapter development. Codex uses the same runner and produces a compatibility report through:
+
+```bash
+claim-plane adapters conformance codex --json
+```
+
 ## Normalized lifecycle events
 
 `claim-plane.lifecycle-event.v1` is the runtime-neutral, append-only chronology for an agent session. Native runtime callbacks are reduced to a stable vocabulary:

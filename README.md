@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.27.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.29.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -107,6 +107,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - SHA-256 evidence binding worker patches, manifests, result trees, result commits, and reproducible result patches;
 - transparent economy/standard/frontier worker-tier recommendations;
 - a public runtime-neutral Agent Adapter Protocol with stable request/session/run/intent identities, persistent idempotency, stale intent-version rejection, structured failures, explicit cancellation and resume semantics, and Codex as the first complete implementation;
+- machine-readable adapter capability and guarantee manifests with explicit enforcement levels, guarantee providers, adapter/runtime version binding, policy compatibility checks, lifecycle evidence projection, and executable conformance coverage;
 - project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, session-bound task bootstrap, pinned Git bases, atomic ChangeIntent admission, pre-mutation authorization, ticketed scope amendment, and verified completion for autonomous Codex work;
 - repository-bound swarm sessions with exact Git bases, planner-proposed work items, deterministic DAG validation, graph fingerprints, dependency layers, and optimistic graph-version replacement;
 - versioned swarm budget policies with hard worker, graph-size, launch, token, cost, wall-time, retry, and concurrency ceilings that the planner cannot widen silently;
@@ -152,9 +153,30 @@ Run the complete checks and example:
 ./scripts/demo.sh
 ```
 
+## Adapter guarantees
+
+Inspect the effective Codex capabilities before selecting an enforcement policy:
+
+```bash
+claim-plane adapters inspect codex --repo .
+claim-plane adapters inspect codex --repo . --policy guarded
+claim-plane doctor codex --repo . --policy strict
+```
+
+The manifest distinguishes `HARD_BLOCKED`, `OBSERVED`, `POST_VERIFIED`, and `UNAVAILABLE` behavior and identifies whether each guarantee comes from Claim Plane, the adapter, the runtime, or their composition. Policy compatibility fails closed when the selected level requires a guarantee that the current runtime boundary cannot provide. The manifest digest and effective adapter/runtime identity are included in normalized session evidence.
+
+Run the shared compatibility suite without invoking a model provider:
+
+```bash
+claim-plane adapters conformance codex
+claim-plane adapters conformance reference --out conformance.json
+```
+
+The same thirteen scenarios are applied to the dependency-free reference adapter and Codex. The report covers declared and undeclared mutations, atomic amendments, stale authority, lease expiry, idempotency, invalid event order, crash resume, cancellation, completion coverage, corrupt state, and secret redaction. Every available guarantee must map to passing scenarios; an uncovered or failed claim makes the report incompatible and returns a non-zero exit code.
+
 ## Codex swarm operator
 
-Version 0.27.0 exposes the complete swarm lifecycle through one bounded operator command:
+Version 0.29.0 exposes the complete swarm lifecycle through one bounded operator command:
 
 ```bash
 claim-plane init

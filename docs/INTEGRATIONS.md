@@ -23,7 +23,19 @@ The same interface covers session lifecycle, task submission, intent admission, 
 
 The CLI uses this boundary for Codex enrollment, lifecycle hooks, intent control, completion verification, and cancellation. Existing connector functions remain importable for compatibility, but new integrations should depend on `AgentAdapter`.
 
+Each adapter exposes a canonical capability and guarantee manifest. Inspect the effective Codex boundary before choosing a policy:
+
+```bash
+claim-plane adapters inspect codex --repo .
+claim-plane adapters inspect codex --repo . --policy guarded
+claim-plane doctor codex --repo . --policy strict
+```
+
+The manifest records adapter and runtime versions, capability levels, guarantee levels, and the component responsible for each guarantee. Policy checks fail closed when the selected level requires enforcement that the runtime does not provide. In particular, project-local Codex hooks can hard-block supported intercepted tool writes, while out-of-band host writes remain subject to final Git verification.
+
 Every session-bearing Codex request also emits normalized events through the shared lifecycle store at `.claim-plane/lifecycle/events.sqlite3`. The Codex adapter records only redacted summaries and stable digests. Adapter request replay does not duplicate lifecycle decisions, and resume validates the existing event stream before new state can be appended.
+
+Adapter authors can validate the same behavior contract through `claim_plane.protocol.run_adapter_conformance`. A driver translates the canonical scenarios into runtime-specific requests while the shared runner owns result semantics, report digests, and guarantee-to-scenario coverage. `claim_plane.testing.ReferenceAdapter` provides a dependency-free implementation for core tests, and `claim-plane adapters conformance codex` produces the Codex compatibility report in isolated Git fixtures.
 
 The same APIs read events from Codex or another adapter:
 

@@ -15,7 +15,15 @@ from typing import Any, Mapping
 
 from claim_plane import __version__
 from claim_plane.connectors import CodexAdapter, init_project
-from claim_plane.protocol import AdapterOperation, AdapterRequest
+from claim_plane.testing.codex import CodexConformanceDriver
+from claim_plane.testing.conformance import ReferenceConformanceDriver
+from claim_plane.protocol import (
+    AdapterCapabilityManifest,
+    AdapterOperation,
+    AdapterRequest,
+    evaluate_adapter_policy,
+    run_adapter_conformance,
+)
 from claim_plane.core import (
     AccessMode,
     ChangeIntent,
@@ -219,11 +227,116 @@ def cmd_disconnect_codex(args: argparse.Namespace) -> int:
     return 0
 
 
+def _manifest_with_policy(
+    manifest: AdapterCapabilityManifest, policy: str | None
+) -> tuple[dict[str, Any], bool]:
+    payload = manifest.to_dict()
+    compatible = True
+    if policy is not None:
+        compatibility = evaluate_adapter_policy(manifest, policy)
+        payload["policy_compatibility"] = compatibility.to_dict()
+        compatible = compatibility.compatible
+    return payload, compatible
+
+
+def _print_adapter_manifest(payload: Mapping[str, Any]) -> None:
+    runtime = payload.get("runtime") or {}
+    print(
+        f"Adapter: {payload['adapter']} {payload['adapter_version']} "
+        f"(protocol {payload['adapter_protocol_version']})"
+    )
+    runtime_version = runtime.get("version") or "not detected"
+    print(f"Runtime: {runtime.get('name', 'unknown')} {runtime_version}")
+    print(f"Manifest: {payload['digest']}")
+    print("Capabilities:")
+    for name, level in sorted(dict(payload.get("capabilities") or {}).items()):
+        print(f"  {name}: {level}")
+    print("Guarantees:")
+    for name, declaration in sorted(
+        dict(payload.get("guarantees") or {}).items()
+    ):
+        print(
+            f"  {name}: {declaration['level']} "
+            f"({declaration['provided_by']})"
+        )
+    compatibility = payload.get("policy_compatibility")
+    if isinstance(compatibility, Mapping):
+        status = "compatible" if compatibility.get("compatible") else "unavailable"
+        print(f"Policy {compatibility.get('policy')}: {status}")
+        for finding in compatibility.get("findings") or []:
+            print(f"  - {finding['message']}")
+
+
+def cmd_adapters_inspect(args: argparse.Namespace) -> int:
+    manifest = _CODEX_ADAPTER.capability_manifest(args.repo)
+    payload, compatible = _manifest_with_policy(manifest, args.policy)
+    if args.json:
+        _write_json(payload)
+    else:
+        _print_adapter_manifest(payload)
+    return 0 if compatible else 2
+
+
+def _print_conformance_report(payload: Mapping[str, Any]) -> None:
+    runtime = payload.get("runtime") or {}
+    print(
+        f"Adapter conformance: {payload['adapter']} {payload['adapter_version']} "
+        f"({runtime.get('name', 'unknown')} {runtime.get('version') or 'not detected'})"
+    )
+    for result in payload.get("scenarios") or []:
+        print(
+            f"[{str(result['status']).upper():7}] "
+            f"{result['scenario']}: {result['detail']}"
+        )
+    summary = payload.get("summary") or {}
+    print(
+        f"Scenarios: {summary.get('passed', 0)} passed, "
+        f"{summary.get('failed', 0)} failed, "
+        f"{summary.get('skipped', 0)} skipped"
+    )
+    print(
+        "Guarantee claims: verified"
+        if summary.get("claims_verified")
+        else "Guarantee claims: unverified"
+    )
+    print("Compatibility: PASS" if payload.get("compatible") else "Compatibility: FAIL")
+
+
+def cmd_adapters_conformance(args: argparse.Namespace) -> int:
+    driver = (
+        CodexConformanceDriver(args.workdir)
+        if args.adapter == "codex"
+        else ReferenceConformanceDriver(args.workdir)
+    )
+    report = run_adapter_conformance(driver)
+    payload = report.to_dict()
+    if args.out:
+        _write_json(payload, args.out)
+    elif args.json:
+        _write_json(payload)
+    else:
+        _print_conformance_report(payload)
+    return 0 if report.compatible else 2
+
+
 def cmd_doctor_codex(args: argparse.Namespace) -> int:
     response = _CODEX_ADAPTER.doctor(
         _codex_request(AdapterOperation.DOCTOR, repo=args.repo)
     )
     report = dict(response.payload)
+    manifest_data = report.get("adapter_manifest")
+    policy_compatible = True
+    if isinstance(manifest_data, Mapping):
+        manifest = AdapterCapabilityManifest.from_dict(manifest_data)
+        manifest_payload, policy_compatible = _manifest_with_policy(
+            manifest, args.policy
+        )
+        report["adapter_manifest"] = manifest_payload
+        if args.policy is not None:
+            report["policy_compatibility"] = manifest_payload[
+                "policy_compatibility"
+            ]
+    report["ready"] = bool(report.get("ready")) and policy_compatible
     if args.json:
         _write_json(report)
     else:
@@ -237,6 +350,8 @@ def cmd_doctor_codex(args: argparse.Namespace) -> int:
                 print(f"          missing events: {', '.join(missing)}")
         if report.get("codex_version"):
             print(f"Codex: {report['codex_version']}")
+        if isinstance(report.get("adapter_manifest"), Mapping):
+            _print_adapter_manifest(report["adapter_manifest"])
         print("Status: ready" if report["ready"] else "Status: action required")
     return 0 if report["ready"] else 2
 
@@ -1711,6 +1826,39 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--json", action="store_true")
     init.set_defaults(func=cmd_init)
 
+    adapters = sub.add_parser(
+        "adapters", help="Inspect coding-agent adapter capabilities and guarantees."
+    )
+    adapters_sub = adapters.add_subparsers(
+        dest="adapters_command", required=True
+    )
+    adapters_inspect = adapters_sub.add_parser(
+        "inspect", help="Show one machine-readable adapter capability manifest."
+    )
+    adapters_inspect.add_argument("adapter", choices=("codex",))
+    adapters_inspect.add_argument("--repo", default=".")
+    adapters_inspect.add_argument(
+        "--policy", choices=("observe", "guarded", "strict", "critical")
+    )
+    adapters_inspect.add_argument("--json", action="store_true")
+    adapters_inspect.set_defaults(func=cmd_adapters_inspect)
+
+    adapters_conformance = adapters_sub.add_parser(
+        "conformance",
+        help="Run the reusable adapter compatibility suite in isolated fixtures.",
+    )
+    adapters_conformance.add_argument(
+        "adapter", choices=("codex", "reference")
+    )
+    adapters_conformance.add_argument(
+        "--workdir",
+        default=None,
+        help="Optional directory for isolated conformance fixtures.",
+    )
+    adapters_conformance.add_argument("--json", action="store_true")
+    adapters_conformance.add_argument("--out", default=None)
+    adapters_conformance.set_defaults(func=cmd_adapters_conformance)
+
     connect = sub.add_parser(
         "connect", help="Enroll a coding-agent runtime in this project."
     )
@@ -1741,6 +1889,9 @@ def build_parser() -> argparse.ArgumentParser:
         "codex", help="Inspect the project-local Codex lifecycle bridge."
     )
     doctor_codex_parser.add_argument("--repo", default=".")
+    doctor_codex_parser.add_argument(
+        "--policy", choices=("observe", "guarded", "strict", "critical")
+    )
     doctor_codex_parser.add_argument("--json", action="store_true")
     doctor_codex_parser.set_defaults(func=cmd_doctor_codex)
 

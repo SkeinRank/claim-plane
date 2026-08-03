@@ -8,6 +8,47 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane.adapter-conformance.v1`, a reusable thirteen-scenario compatibility suite for every coding-agent adapter.
+- Add the dependency-free `ReferenceAdapter` and reference conformance driver so Claim Plane Core can be tested without an external agent runtime.
+- Add the Codex conformance driver and `claim-plane adapters conformance` command with structured JSON reports, canonical digests, and isolated Git fixtures.
+- Add guarantee-to-scenario verification: every available manifest claim must have passing executable coverage or the adapter report is incompatible.
+- Add the adapter conformance report JSON Schema and regression coverage for built-in adapter parity, uncovered claims, failed claims, report output, idempotency, recovery, cancellation, corruption, and redaction.
+
+### Changed
+
+- Run the dependency-free adapter conformance suite as part of the repository quality gate so capability claims cannot regress without failing CI.
+
+## [0.28.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane.adapter-capabilities.v1`, separating runtime capabilities from effective guarantees with explicit enforcement levels and provider attribution.
+- Add deterministic `observe`, `guarded`, `strict`, and `critical` policy compatibility checks that fail before authority-bearing execution when required guarantees are unavailable.
+- Add `claim-plane adapters inspect codex` and policy-aware `claim-plane doctor codex` output, including adapter/runtime versions, capability levels, guarantee sources, and reasoned incompatibility findings.
+- Add the adapter capability manifest JSON Schema and regression coverage for canonical digests, tamper detection, unsupported hard-guarantee rejection, CLI inspection, and policy refusal.
+
+### Changed
+
+- Bind the effective capability manifest digest, adapter/runtime versions, capabilities, guarantee levels, and guarantee providers into session-start lifecycle evidence and lifecycle reports.
+- Declare project-local Codex interception honestly: supported tool writes may be hard-blocked when runtime coverage is complete, while bypassed host writes remain post-verified.
+
+## [0.27.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane.lifecycle-event.v1`, a runtime-neutral append-only session chronology with deterministic event identities, causal links, sequence validation, and canonical digests.
+- Add shared lifecycle report, replay, recovery validation, and canonical NDJSON export APIs for Codex and future adapters.
+- Add secret-safe event normalization, duplicate suppression, atomic request batches, and fail-closed handling of corrupt, partial, out-of-order, or tampered event streams.
+- Add lifecycle JSON Schema and regression coverage for replay, resume, redaction, evidence export, and invalid-state rejection.
+
+### Changed
+
+- Route Codex adapter operations through the normalized event store and validate the durable causal chain before resume, mutation, amendment, or completion verification.
+
 ## [0.26.0] — 2026-08-03
 
 ### Added

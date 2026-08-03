@@ -23,29 +23,32 @@ if [[ "$(grep -Fc 'language: system' .pre-commit-config.yaml)" -lt 2 ]]; then
   exit 1
 fi
 
-printf '\n[1/7] Ruff lint\n'
+printf '\n[1/8] Ruff lint\n'
 ./scripts/ruff-tool.sh check src tests benchmark experiments
 
-printf '\n[2/7] Ruff format\n'
+printf '\n[2/8] Ruff format\n'
 ./scripts/ruff-tool.sh format --check src tests benchmark experiments
 
-printf '\n[3/7] Mypy\n'
+printf '\n[3/8] Mypy\n'
 mypy src experiments/cooperbench
 
-printf '\n[4/7] Shell syntax\n'
+printf '\n[4/8] Shell syntax\n'
 for script in scripts/*.sh; do
   [[ -f "${script}" ]] || continue
   bash -n "${script}"
 done
 
-printf '\n[5/7] Research environment and bytecode\n'
+printf '\n[5/8] Research environment and bytecode\n'
 python -m experiments.cooperbench environment > /dev/null
 python -m compileall -q src tests benchmark experiments
 
-printf '\n[6/7] Tests\n'
+printf '\n[6/8] Tests\n'
 pytest -q
 
-printf '\n[7/7] Protocol suite\n'
+printf '\n[7/8] Adapter conformance\n'
+PYTHONPATH=src python -m claim_plane.testing.conformance
+
+printf '\n[8/8] Protocol suite\n'
 PYTHONPATH=src python benchmark/run_protocol_suite.py
 
 printf '\nquality gate: passed\n'
