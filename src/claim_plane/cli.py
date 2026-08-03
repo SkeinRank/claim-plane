@@ -19,6 +19,12 @@ from claim_plane.connectors import (
     disconnect_codex,
     init_project,
 )
+from claim_plane.controlled_run import (
+    CONTROLLED_POLICY_ENV,
+    CONTROLLED_RUN_ENV,
+    ControlledRunPreflightError,
+    run_controlled_task,
+)
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
     AdapterHandshake,
@@ -538,6 +544,42 @@ def cmd_doctor_codex(args: argparse.Namespace) -> int:
     return 0 if report["ready"] else 2
 
 
+def cmd_run(args: argparse.Namespace) -> int:
+    handshake = _adapter_handshake(args.adapter, repo=args.repo)
+    adapter = _ADAPTER_REGISTRY.create(args.adapter)
+    try:
+        result = run_controlled_task(
+            args.task,
+            root=args.repo,
+            adapter=adapter,
+            handshake=handshake,
+            policy=args.policy,
+            timeout_seconds=args.timeout,
+            acceptance_timeout=args.acceptance_timeout,
+            model=args.model,
+            quiet=args.json,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+    except ControlledRunPreflightError as exc:
+        if args.json:
+            _write_json(
+                {
+                    "protocol": "claim-plane.controlled-run-error.v1",
+                    "code": "preflight_failed",
+                    "message": str(exc),
+                }
+            )
+        else:
+            print(f"Controlled run could not start: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(result.to_dict(), args.out)
+    elif args.out:
+        _write_json(result.to_dict(), args.out)
+    return result.exit_code
+
+
 def cmd_codex_hook(args: argparse.Namespace) -> int:
     del args
     raw = sys.stdin.read()
@@ -546,6 +588,12 @@ def cmd_codex_hook(args: argparse.Namespace) -> int:
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("Codex hook input must be a JSON object")
+    controlled_run_id = os.environ.get(CONTROLLED_RUN_ENV)
+    if controlled_run_id:
+        payload["_claim_plane_run_id"] = controlled_run_id
+    controlled_policy = os.environ.get(CONTROLLED_POLICY_ENV)
+    if controlled_policy:
+        payload["_claim_plane_policy"] = controlled_policy
     if payload.get("hook_event_name") == "SessionStart":
         repo = str(payload.get("cwd") or ".")
         _adapter_handshake("codex", repo=repo, require_compatible=True)
@@ -2144,6 +2192,37 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_codex_parser.add_argument("--json", action="store_true")
     doctor_codex_parser.set_defaults(func=cmd_doctor_codex, connector="codex")
 
+
+    controlled_run = sub.add_parser(
+        "run",
+        help="Run one coding task under adapter authority and final Git verification.",
+    )
+    controlled_run.add_argument("task")
+    controlled_run.add_argument("--repo", default=".")
+    controlled_run.add_argument(
+        "--adapter",
+        default="codex",
+        choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
+    )
+    controlled_run.add_argument(
+        "--policy", choices=("observe", "guarded", "strict", "critical")
+    )
+    controlled_run.add_argument(
+        "--timeout",
+        type=float,
+        default=3600.0,
+        help="Maximum runtime wall time in seconds (default: 3600).",
+    )
+    controlled_run.add_argument(
+        "--acceptance-timeout",
+        type=float,
+        default=300.0,
+        help="Maximum time for final acceptance verification (default: 300).",
+    )
+    controlled_run.add_argument("--model", default=None)
+    controlled_run.add_argument("--json", action="store_true")
+    controlled_run.add_argument("--out", default=None)
+    controlled_run.set_defaults(func=cmd_run)
 
     codex_hook = sub.add_parser(
         "codex-hook", help="Internal Codex lifecycle dispatcher."

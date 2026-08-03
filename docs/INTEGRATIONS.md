@@ -19,6 +19,28 @@ Acceptance discovery prefers an existing `scripts/check.sh`, then recognized Mak
 
 `claim-plane reset` removes Claim Plane-owned databases, request caches, lifecycle state, session state, and hook handlers. It preserves repository files, foreign Codex hooks, and the project config unless `--remove-config` is supplied explicitly.
 
+## Controlled single-agent execution
+
+The primary Codex product path is one bounded command:
+
+```bash
+claim-plane run "Implement refresh-token rotation" --policy guarded
+```
+
+The command performs project and adapter diagnostics, negotiates the adapter protocol, validates the selected policy against the effective capability manifest, captures the initial Git state, and then starts a non-interactive Codex session. The normal Codex hooks continue to own task bootstrap, intent admission, mutation decisions, amendments, and completion. The runner supplies only process control and run identity; it does not grant mutation authority directly.
+
+A wall-time timeout or keyboard interruption terminates the runtime process group and calls the adapter cancellation path. Unfinished intent authority is released before the terminal record is written. On ordinary completion, Claim Plane inspects the bound session and independently invokes verified completion when the runtime did not already seal one. Runtime success without verified scope and acceptance evidence becomes `REVIEW_REQUIRED` or `REJECTED`, never `VERIFIED`.
+
+The result protocol is `claim-plane.controlled-run.v1`. Its durable record binds the run to the initial and final Git states, capability-manifest digest, negotiated adapter/runtime versions, policy compatibility, lifecycle report, completion summary, and cancellation result. Raw task text, raw tool payloads, raw runtime errors, and the Codex final message are not stored in the record; only bounded metadata and cryptographic digests are retained.
+
+Machine-readable use is available through:
+
+```bash
+claim-plane run "Implement refresh-token rotation" --json
+claim-plane run "Implement refresh-token rotation" --out controlled-run.json
+claim-plane run "Implement refresh-token rotation" --timeout 1800
+```
+
 ## Agent adapter boundary
 
 Coding-agent runtimes integrate through the public `AgentAdapter` contract instead of calling runtime-specific control logic from product code. The adapter receives versioned `AdapterRequest` objects and returns portable `AdapterResponse` objects. The request envelope carries idempotency, timeout, session, run, intent, and expected intent-version data; the payload remains owned by the runtime implementation.

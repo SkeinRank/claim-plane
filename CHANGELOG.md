@@ -8,6 +8,20 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-08-03
+
+### Added
+
+- Add `claim-plane run` as the bounded single-agent Codex entry point with adapter handshake, project diagnostics, policy compatibility checks, wall-time control, and optional model override.
+- Add `claim-plane.controlled-run.v1`, binding each execution to stable run/session/intent identities, initial and final Git-state digests, runtime summaries, lifecycle evidence, completion results, and cancellation outcomes.
+- Add deterministic terminal states and exit codes for `VERIFIED`, `REJECTED`, `REVIEW_REQUIRED`, `CANCELLED`, `TIMED_OUT`, and `FAILED`, plus JSON output and durable private run records.
+- Add the controlled-run JSON Schema and regression coverage for verified delivery, hook environment binding, machine-readable CLI output, and timeout-driven authority revocation.
+
+### Changed
+
+- Propagate controlled run identity through Codex lifecycle hooks so all normalized session events and private connector state bind to the same run.
+- Hash raw task text, final messages, and unexpected error messages in durable controlled-run evidence rather than storing their contents.
+
 ## [0.31.0] — 2026-08-03
 
 ### Added

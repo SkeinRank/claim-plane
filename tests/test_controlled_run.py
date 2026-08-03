@@ -1,0 +1,427 @@
+from __future__ import annotations
+
+import io
+import json
+import subprocess
+from pathlib import Path
+from typing import Any, Mapping
+
+import pytest
+
+from claim_plane import cli
+from claim_plane.connectors import codex
+from claim_plane.connectors.codex_adapter import CodexAdapter
+from claim_plane.controlled_run import (
+    CONTROLLED_RUN_PROTOCOL,
+    ControlledRunOutcome,
+    controlled_run_path,
+    load_controlled_run,
+    run_controlled_task,
+)
+from claim_plane.protocol import AdapterOperation, AdapterRequest, LifecycleEventStore
+
+
+class _CompletedProcess:
+    def __init__(self, stdout: str, stderr: str = "", returncode: int = 0) -> None:
+        self.pid = 999999
+        self.stdout = io.StringIO(stdout)
+        self.stderr = io.StringIO(stderr)
+        self._returncode = returncode
+
+    def poll(self) -> int | None:
+        return self._returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        del timeout
+        return self._returncode
+
+    def terminate(self) -> None:
+        self._returncode = -15
+
+    def kill(self) -> None:
+        self._returncode = -9
+
+
+def _repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "claim-plane@example.invalid"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Claim Plane Tests"],
+        cwd=repo,
+        check=True,
+    )
+    (repo / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repo, check=True)
+    return repo
+
+
+def _request(
+    operation: AdapterOperation,
+    *,
+    repo: Path,
+    run_id: str,
+    session_id: str | None = None,
+    payload: Mapping[str, Any] | None = None,
+) -> AdapterRequest:
+    return AdapterRequest.create(
+        operation,
+        adapter="codex",
+        project_root=str(repo),
+        request_id=f"test-{operation.value}-{run_id}",
+        session_id=session_id,
+        run_id=run_id,
+        intent_version=0 if operation is AdapterOperation.PROPOSE_INTENT else None,
+        payload=payload,
+    )
+
+
+def _prepare(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[CodexAdapter, object]:
+    monkeypatch.setattr(
+        codex, "_codex_version", lambda: ("/opt/codex/bin/codex", "codex 1.2.3")
+    )
+    monkeypatch.setattr(
+        codex,
+        "_codex_auth_status",
+        lambda executable: ("ok", "authentication available"),
+    )
+    monkeypatch.setattr(
+        "claim_plane.controlled_run.shutil.which",
+        lambda executable: "/opt/codex/bin/codex" if executable == "codex" else None,
+    )
+    codex.init_project(repo)
+    codex.connect_codex(repo)
+    adapter = CodexAdapter()
+    return adapter, adapter.registry_handshake(str(repo))
+
+
+def _successful_process_factory(
+    adapter: CodexAdapter,
+    *,
+    repo: Path,
+    task: str,
+):
+    def factory(command: list[str], *, root: Path, env: Mapping[str, str]):
+        assert command[1:4] == ["exec", "--json", "--color"]
+        assert "workspace-write" in command
+        assert command[-1] == task
+        assert root == repo
+        run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        session_id = "thread_controlled_success"
+        adapter.start_session(
+            _request(
+                AdapterOperation.START_SESSION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"source": "startup"},
+            )
+        )
+        adapter.submit_task(
+            _request(
+                AdapterOperation.SUBMIT_TASK,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"prompt": task},
+            )
+        )
+        admitted = adapter.propose_intent(
+            _request(
+                AdapterOperation.PROPOSE_INTENT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={
+                    "proposal": {
+                        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+                        "goal": "Update the fixture value",
+                        "operations": [
+                            {
+                                "access": "write",
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "commitment": "committed",
+                            }
+                        ],
+                        "preserves": [],
+                        "acceptance": [],
+                    }
+                },
+            )
+        )
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+            "*** End Patch"
+        )
+        mutation = adapter.request_mutation(
+            _request(
+                AdapterOperation.REQUEST_MUTATION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"tool_name": "apply_patch", "tool_input": {"command": patch}},
+            )
+        )
+        if mutation.status.value != "succeeded":
+            raise AssertionError(json.dumps(mutation.to_dict(), indent=2))
+        (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+        observed = adapter.observe_result(
+            _request(
+                AdapterOperation.OBSERVE_RESULT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"tool_name": "apply_patch"},
+            )
+        )
+        verified = adapter.verify_completion(
+            AdapterRequest.create(
+                AdapterOperation.VERIFY_COMPLETION,
+                adapter="codex",
+                project_root=str(repo),
+                request_id=f"verify-{run_id}",
+                session_id=session_id,
+                run_id=run_id,
+                intent_id=observed.intent_id,
+                intent_version=observed.intent_version,
+                timeout_seconds=30,
+            )
+        )
+        assert verified.payload["verified"] is True
+        adapter.stop_session(
+            AdapterRequest.create(
+                AdapterOperation.STOP_SESSION,
+                adapter="codex",
+                project_root=str(repo),
+                request_id=f"stop-{run_id}",
+                session_id=session_id,
+                run_id=run_id,
+            )
+        )
+        stream = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": session_id}),
+                json.dumps({"type": "turn.started"}),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "id": "item_1",
+                            "type": "agent_message",
+                            "text": "Updated app.py and verified the change.",
+                        },
+                    }
+                ),
+                json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10}}),
+            )
+        )
+        return _CompletedProcess(stream + "\n")
+
+    return factory
+
+
+def test_one_command_run_verifies_and_persists_git_bound_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value."
+    output = io.StringIO()
+
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        stdout=output,
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(adapter, repo=repo, task=task),
+    )
+
+    assert result.protocol == CONTROLLED_RUN_PROTOCOL
+    assert result.outcome is ControlledRunOutcome.VERIFIED
+    assert result.exit_code == 0
+    assert result.session_id == "thread_controlled_success"
+    assert result.completion["verified"] is True
+    assert result.start_git.digest != result.result_git.digest
+    assert (repo / "app.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+    persisted = load_controlled_run(repo, result.run_id)
+    assert persisted["outcome"] == "VERIFIED"
+    assert task not in controlled_run_path(repo, result.run_id).read_text(
+        encoding="utf-8"
+    )
+    assert "DELIVERY VERIFIED" in output.getvalue()
+    with LifecycleEventStore.for_project(repo) as store:
+        events = store.list_events(adapter="codex", session_id=result.session_id)
+    assert events
+    assert {event.run_id for event in events} == {result.run_id}
+
+
+def test_controlled_hook_environment_binds_run_id_to_session_and_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    _prepare(repo, monkeypatch)
+    run_id = "cpr_0123456789abcdef01234567"
+    monkeypatch.setenv("CLAIM_PLANE_CONTROLLED_RUN_ID", run_id)
+    monkeypatch.setenv("CLAIM_PLANE_CONTROLLED_POLICY", "guarded")
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "hook_event_name": "SessionStart",
+                    "session_id": "thread_env_binding",
+                    "cwd": str(repo),
+                    "source": "startup",
+                }
+            )
+        ),
+    )
+
+    assert cli.main(["codex-hook"]) == 0
+
+    session_path = next((repo / ".claim-plane/codex/sessions").glob("*.json"))
+    session = json.loads(session_path.read_text(encoding="utf-8"))
+    assert session["controlled_run_id"] == run_id
+    assert session["controlled_policy"] == "guarded"
+    with LifecycleEventStore.for_project(repo) as store:
+        events = store.list_events(adapter="codex", session_id="thread_env_binding")
+    assert len(events) == 1
+    assert events[0].run_id == run_id
+
+
+def test_cli_run_returns_machine_readable_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, _ = _prepare(repo, monkeypatch)
+    task = "Update the fixture value."
+    monkeypatch.setattr(cli, "_CODEX_ADAPTER", adapter)
+    monkeypatch.setattr(
+        "claim_plane.controlled_run._spawn_codex",
+        _successful_process_factory(adapter, repo=repo, task=task),
+    )
+    # Default arguments capture the function object, so route the CLI call through a
+    # small wrapper that supplies the deterministic process factory.
+    original = cli.run_controlled_task
+
+    def wrapped(*args: Any, **kwargs: Any):
+        kwargs["process_factory"] = _successful_process_factory(
+            adapter, repo=repo, task=task
+        )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "run_controlled_task", wrapped)
+
+    exit_code = cli.main(
+        ["run", task, "--repo", str(repo), "--policy", "guarded", "--json"]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["protocol"] == CONTROLLED_RUN_PROTOCOL
+    assert payload["verified"] is True
+    assert payload["outcome"] == "VERIFIED"
+
+
+def test_timeout_revokes_active_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    session_id = "thread_controlled_timeout"
+
+    def process_factory(command: list[str], *, root: Path, env: Mapping[str, str]):
+        del command
+        assert root == repo
+        run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        adapter.start_session(
+            _request(
+                AdapterOperation.START_SESSION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"source": "startup"},
+            )
+        )
+        adapter.submit_task(
+            _request(
+                AdapterOperation.SUBMIT_TASK,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"prompt": "Wait forever."},
+            )
+        )
+        adapter.propose_intent(
+            _request(
+                AdapterOperation.PROPOSE_INTENT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={
+                    "proposal": {
+                        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+                        "goal": "Wait forever",
+                        "operations": [
+                            {
+                                "access": "write",
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "commitment": "committed",
+                            }
+                        ],
+                        "preserves": [],
+                        "acceptance": [],
+                    }
+                },
+            )
+        )
+        return _CompletedProcess("")
+
+    def timeout(*args: Any, **kwargs: Any) -> int:
+        del args, kwargs
+        raise TimeoutError("controlled run exceeded its wall-time limit")
+
+    monkeypatch.setattr("claim_plane.controlled_run._stream_runtime", timeout)
+    result = run_controlled_task(
+        "Wait forever.",
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=1,
+        acceptance_timeout=30,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=process_factory,
+    )
+
+    assert result.outcome is ControlledRunOutcome.TIMED_OUT
+    assert result.exit_code == 124
+    assert result.session_id == session_id
+    assert result.cancellation is not None
+    assert result.cancellation["status"] == "cancelled"
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["state"] == "abandoned"

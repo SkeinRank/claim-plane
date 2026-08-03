@@ -595,6 +595,8 @@ class CodexAdapter:
         payload["hook_event_name"] = event_name
         payload["session_id"] = CodexAdapter._require_session(request)
         payload.setdefault("cwd", request.project_root)
+        if request.run_id:
+            payload.setdefault("_claim_plane_run_id", request.run_id)
         if source is not None:
             payload["source"] = source
         return payload
@@ -817,12 +819,19 @@ class CodexAdapter:
                 f"unsupported Codex lifecycle event: {event}",
             )
         request_id, cacheable = _hook_request_id(payload)
+        run_id = payload.get("_claim_plane_run_id")
+        if run_id is not None and not isinstance(run_id, str):
+            raise AdapterProtocolError(
+                AdapterErrorCode.INVALID_REQUEST,
+                "controlled run identity must be a string",
+            )
         request = AdapterRequest.create(
             operation,
             adapter=self.name,
             project_root=root,
             request_id=request_id,
             session_id=session_id,
+            run_id=run_id,
             payload={
                 **dict(payload),
                 "lifecycle": True,

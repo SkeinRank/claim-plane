@@ -988,6 +988,12 @@ def _record_session_handshake(
         session = _load_session(root, session_id)
         source = str(payload.get("source") or session.get("source") or "startup")
         session["source"] = source
+        controlled_run_id = payload.get("_claim_plane_run_id")
+        if isinstance(controlled_run_id, str) and controlled_run_id:
+            session["controlled_run_id"] = controlled_run_id
+            controlled_policy = payload.get("_claim_plane_policy")
+            if isinstance(controlled_policy, str) and controlled_policy:
+                session["controlled_policy"] = controlled_policy
         session["last_event"] = "SessionStart"
         session["last_seen_at"] = now
         session.pop("ended_at", None)
@@ -1011,6 +1017,18 @@ def _record_session_handshake(
         "session_open_branch": _branch_name(root),
         "session_open_worktree_dirty": dirty,
         "session_open_status_sha256": status_digest,
+        "controlled_run_id": (
+            str(payload.get("_claim_plane_run_id"))
+            if isinstance(payload.get("_claim_plane_run_id"), str)
+            and payload.get("_claim_plane_run_id")
+            else None
+        ),
+        "controlled_policy": (
+            str(payload.get("_claim_plane_policy"))
+            if isinstance(payload.get("_claim_plane_policy"), str)
+            and payload.get("_claim_plane_policy")
+            else None
+        ),
         "task_id": None,
         "reserved_intent_id": None,
         "owner": None,

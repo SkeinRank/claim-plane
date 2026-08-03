@@ -2,7 +2,7 @@
 
 **Semantic concurrency control and continuous integration for parallel coding agents.**
 
-> **Research Preview — 0.29.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Research Preview — 0.32.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -110,6 +110,7 @@ Repository-level software citation metadata is available in [`CITATION.cff`](CIT
 - machine-readable adapter capability and guarantee manifests with explicit enforcement levels, guarantee providers, adapter/runtime version binding, policy compatibility checks, lifecycle evidence projection, and executable conformance coverage;
 - an adapter registry with semantic protocol negotiation, project-local adapter/runtime pins, fail-closed migration diagnostics, built-in and entry-point discovery, and negotiated-version evidence binding;
 - project-local Codex enrollment with a stable lifecycle dispatcher, idempotent hook installation, session-bound task bootstrap, pinned Git bases, atomic ChangeIntent admission, pre-mutation authorization, ticketed scope amendment, and verified completion for autonomous Codex work;
+- one-command controlled Codex execution with preflight negotiation, policy compatibility, bounded process lifetime, run/session evidence binding, safe cancellation, final Git verification, stable terminal outcomes, and secret-safe durable results;
 - repository-bound swarm sessions with exact Git bases, planner-proposed work items, deterministic DAG validation, graph fingerprints, dependency layers, and optimistic graph-version replacement;
 - versioned swarm budget policies with hard worker, graph-size, launch, token, cost, wall-time, retry, and concurrency ceilings that the planner cannot widen silently;
 - adaptive concurrency plans that combine the dependency DAG with region, overlap, contract, schema, and worker-budget constraints to produce deterministic execution waves or a fail-closed `replan_required` result;
@@ -188,6 +189,21 @@ claim-plane adapters pin codex --repo .
 The handshake negotiates the installed Claim Plane protocol against the adapter's semantic version range and reports the adapter, runtime, capabilities, guarantees, source, and project pin. An incompatible range or a pinned adapter/runtime mismatch fails before a Codex session starts. The pin is stored under `.claim-plane/adapters/pins/` and may be removed with `claim-plane adapters pin codex --clear`.
 
 External adapter packages can publish a `claim_plane.adapters` Python entry point. They are discovered without changing Claim Plane Core and use the same manifest, conformance, handshake, and pinning paths as Codex.
+
+## One-command controlled Codex run
+
+After enrollment and diagnostics, one command owns the bounded Codex process, authority lifecycle, and final Git verification:
+
+```bash
+claim-plane init
+claim-plane connect codex
+claim-plane doctor
+claim-plane run "Add pagination to the audit API" --policy guarded
+```
+
+The runner performs adapter negotiation and policy compatibility checks before execution, launches Codex in workspace-write mode, binds the runtime session to a stable run identity, and preserves the normal `ChangeIntent` admission and amendment path. `Ctrl-C` and wall-time expiry stop the process and revoke unfinished authority. A successful runtime exit is not sufficient for a green result: Claim Plane inspects the active intent, verifies completion against the current Git state, and returns `DELIVERY VERIFIED`, `REJECTED`, `REVIEW REQUIRED`, `CANCELLED`, `TIMED OUT`, or `FAILED`.
+
+The durable result is written under `.claim-plane/runs/<run-id>/run.json`. It contains task and final-message digests rather than raw text, the starting and resulting Git-state digests, adapter manifest and handshake identity, policy compatibility, lifecycle evidence, verification summary, and cancellation outcome. Use `--json` for automation, `--out result.json` for an additional export, `--timeout` for the wall-time ceiling, and `--model` for an explicit Codex model override.
 
 ## Codex swarm operator
 

@@ -1,5 +1,17 @@
 """Claim Plane — semantic concurrency control for parallel coding agents."""
 
+from claim_plane.controlled_run import (
+    CONTROLLED_RUN_PROTOCOL,
+    ControlledRunError,
+    ControlledRunOutcome,
+    ControlledRunPreflightError,
+    ControlledRunResult,
+    GitState,
+    capture_git_state,
+    controlled_run_path,
+    load_controlled_run,
+    run_controlled_task,
+)
 from claim_plane.core import (
     AcceptanceResult,
     AccessMode,
@@ -202,9 +214,19 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.31.0"
+__version__ = "0.32.0"
 
 __all__ = [
+    "CONTROLLED_RUN_PROTOCOL",
+    "ControlledRunError",
+    "ControlledRunOutcome",
+    "ControlledRunPreflightError",
+    "ControlledRunResult",
+    "GitState",
+    "capture_git_state",
+    "controlled_run_path",
+    "load_controlled_run",
+    "run_controlled_task",
     "ADAPTER_ENTRY_POINT_GROUP",
     "ADAPTER_HANDSHAKE_PROTOCOL",
     "ADAPTER_PIN_PROTOCOL",
