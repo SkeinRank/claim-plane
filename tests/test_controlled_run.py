@@ -140,7 +140,7 @@ def _successful_process_factory(
                 payload={"prompt": task},
             )
         )
-        admitted = adapter.propose_intent(
+        adapter.propose_intent(
             _request(
                 AdapterOperation.PROPOSE_INTENT,
                 repo=repo,

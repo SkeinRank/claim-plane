@@ -21,7 +21,6 @@ from claim_plane.controlled_run import (
 )
 from claim_plane.project import resolve_project_root
 from claim_plane.protocol import (
-    LifecycleCorruptError,
     LifecycleEvent,
     LifecycleEventStore,
     LifecycleEventType,

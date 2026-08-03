@@ -732,17 +732,19 @@ class CodexAdapter:
 
     def verify_completion(self, request: AdapterRequest) -> AdapterResponse:
         session_id = self._require_session(request)
-        if request.payload.get("hook_event_name") == "Stop" or request.payload.get(
-            "lifecycle"
-        ):
-            action = lambda root: self._run_hook(self._hook_payload(request, "Stop"))
-        else:
-            timeout = max(1, int(request.timeout_seconds))
-            action = lambda root: codex_runtime.verify_codex_completion(
+        timeout = max(1, int(request.timeout_seconds))
+
+        def action(root: Path) -> Mapping[str, Any]:
+            if request.payload.get("hook_event_name") == "Stop" or request.payload.get(
+                "lifecycle"
+            ):
+                return self._run_hook(self._hook_payload(request, "Stop"))
+            return codex_runtime.verify_codex_completion(
                 root,
                 session_id=session_id,
                 acceptance_timeout=timeout,
             )
+
         return self._perform(
             request,
             AdapterOperation.VERIFY_COMPLETION,

@@ -23,7 +23,6 @@ from claim_plane.protocol.adapter import (
     AGENT_ADAPTER_PROTOCOL_VERSION,
     AgentAdapter,
 )
-from claim_plane.protocol.capabilities import AdapterCapabilityManifest
 
 ADAPTER_REGISTRY_PROTOCOL = "claim-plane.adapter-registry.v1"
 ADAPTER_REGISTRY_VERSION = "1.0"
