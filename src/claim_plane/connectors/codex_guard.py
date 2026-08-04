@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from claim_plane.core import AccessMode, ChangeIntent, IntentOperation, ResourceKind
+from claim_plane.project import load_project_config
 
 CODEX_GUARD_PROTOCOL = "claim-plane.codex-pre-mutation-guard.v1"
 
@@ -96,6 +97,8 @@ _READ_ONLY_SHELL = frozenset(
         "rg",
         "grep",
         "git",
+        "command",
+        "claim-plane",
     }
 )
 
@@ -288,15 +291,85 @@ def _rg_read_only(argv: Sequence[str]) -> bool:
     return not any(item in dangerous or item.startswith("--pre=") for item in argv[1:])
 
 
-def _simple_read_only_shell(command: str) -> bool:
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+
+
+def _shell_argv(command: str) -> list[str] | None:
     if _has_shell_metacharacters(command):
-        return False
+        return None
     try:
         argv = shlex.split(command, posix=True)
     except ValueError:
-        return False
+        return None
+    while argv and _ENV_ASSIGNMENT.match(argv[0]):
+        argv.pop(0)
+    if argv and posixpath.basename(argv[0]) == "env":
+        argv.pop(0)
+        while argv and (argv[0].startswith("-") or _ENV_ASSIGNMENT.match(argv[0])):
+            argv.pop(0)
+    return argv
+
+
+def _pytest_invocation(argv: Sequence[str]) -> bool:
     if not argv:
+        return False
+    executable = posixpath.basename(argv[0]).casefold()
+    if executable in {"pytest", "py.test"}:
         return True
+    return (
+        executable
+        in {
+            "python",
+            "python3",
+            "python3.10",
+            "python3.11",
+            "python3.12",
+            "python3.13",
+        }
+        and len(argv) >= 3
+        and argv[1:3] == ["-m", "pytest"]
+    )
+
+
+def _configured_acceptance_commands(root: Path) -> tuple[str, ...]:
+    try:
+        config = load_project_config(root)
+    except (FileNotFoundError, OSError, ValueError):
+        return ()
+    acceptance = config.get("acceptance")
+    commands = acceptance.get("commands") if isinstance(acceptance, Mapping) else ()
+    return tuple(
+        item.strip()
+        for item in commands or ()
+        if isinstance(item, str) and item.strip()
+    )
+
+
+def _reserved_acceptance_shell(root: Path, command: str) -> bool:
+    argv = _shell_argv(command)
+    if argv is None or not argv:
+        return False
+    configured = _configured_acceptance_commands(root)
+    if not configured:
+        return False
+    normalized = tuple(argv)
+    for required in configured:
+        required_argv = _shell_argv(required)
+        if required_argv is not None and normalized == tuple(required_argv):
+            return True
+        if (
+            required_argv is not None
+            and _pytest_invocation(required_argv)
+            and _pytest_invocation(argv)
+        ):
+            return True
+    return False
+
+
+def _simple_read_only_shell(command: str) -> bool:
+    argv = _shell_argv(command)
+    if argv is None or not argv:
+        return argv == []
     executable = posixpath.basename(argv[0])
     if executable not in _READ_ONLY_SHELL:
         return False
@@ -309,6 +382,14 @@ def _simple_read_only_shell(command: str) -> bool:
         return not any(item in dangerous for item in argv[1:])
     if executable == "sed":
         return not any(item == "-i" or item.startswith("-i") for item in argv[1:])
+    if executable == "command":
+        return (
+            len(argv) == 3
+            and argv[1] in {"-v", "-V"}
+            and re.fullmatch(r"[A-Za-z0-9_.+-]+", argv[2]) is not None
+        )
+    if executable == "claim-plane":
+        return argv[1:] in (["--help"], ["-h"], ["--version"], ["help"])
     return True
 
 
@@ -596,6 +677,8 @@ def classify_tool_call(
         session_id = session_value if isinstance(session_value, str) else None
         if _claim_plane_control_command(command, session_id=session_id):
             return "control_plane", ()
+        if _reserved_acceptance_shell(root, command):
+            return "acceptance_reserved", ()
         if _simple_read_only_shell(command):
             return "read_only", ()
         mutations = _parse_simple_shell_mutation(root, cwd, command)
@@ -650,6 +733,21 @@ def evaluate_pre_tool_use(
             classification=classification,
             reason_code="control_plane",
             reason="connector-owned Claim Plane control command",
+        )
+
+    if classification == "acceptance_reserved":
+        return GuardEvaluation(
+            allowed=False,
+            mutating=False,
+            tool_name=tool_name,
+            classification=classification,
+            reason_code="acceptance_reserved",
+            reason=(
+                "This configured acceptance command is reserved for Claim Plane's "
+                "trusted final verifier. Finish the admitted edits and stop; Claim "
+                "Plane will execute acceptance after the Codex process exits and bind "
+                "the result to the final Git state."
+            ),
         )
 
     if classification == "opaque_shell":

@@ -1095,9 +1095,11 @@ def run_controlled_task(
             session_id=session_id,
         )
         existing_completion = status.get("completion")
-        if isinstance(existing_completion, Mapping) and existing_completion:
-            completion_payload = dict(existing_completion)
-        elif intent_id:
+        completion_is_verified = bool(
+            isinstance(existing_completion, Mapping)
+            and existing_completion.get("verified") is True
+        )
+        if intent_id and not completion_is_verified:
             response = adapter.verify_completion(
                 _request(
                     AdapterOperation.VERIFY_COMPLETION,
@@ -1108,9 +1110,12 @@ def run_controlled_task(
                     intent_id=intent_id,
                     intent_version=intent_version,
                     timeout_seconds=acceptance_timeout,
+                    payload={"source": "controlled_run_final_verifier"},
                 )
             )
             completion_payload = dict(response.payload)
+        elif isinstance(existing_completion, Mapping) and existing_completion:
+            completion_payload = dict(existing_completion)
         else:
             completion_payload = {
                 "verified": False,

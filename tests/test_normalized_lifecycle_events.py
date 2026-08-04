@@ -117,6 +117,62 @@ def test_reference_adapter_report_replay_and_export_use_generic_code(
     assert loaded == events
 
 
+def test_failed_verification_can_resume_mutation_and_verify_again(
+    tmp_path: Path,
+) -> None:
+    with LifecycleEventStore(tmp_path / "events.sqlite3") as store:
+        batches = (
+            ("start", (_draft(LifecycleEventType.SESSION_STARTED),)),
+            ("task", (_draft(LifecycleEventType.TASK_SUBMITTED),)),
+            (
+                "intent",
+                (
+                    _draft(LifecycleEventType.INTENT_PROPOSED),
+                    _draft(LifecycleEventType.ADMISSION_REQUESTED),
+                    _draft(LifecycleEventType.ADMISSION_GRANTED),
+                ),
+            ),
+            (
+                "verify-failed",
+                (
+                    _draft(LifecycleEventType.VERIFICATION_STARTED),
+                    _draft(LifecycleEventType.VERIFICATION_COMPLETED, verified=False),
+                ),
+            ),
+            (
+                "mutation-after-checkpoint",
+                (
+                    _draft(LifecycleEventType.MUTATION_REQUESTED),
+                    _draft(LifecycleEventType.MUTATION_ALLOWED),
+                ),
+            ),
+            (
+                "observed-after-checkpoint",
+                (_draft(LifecycleEventType.MUTATION_OBSERVED),),
+            ),
+            (
+                "verify-final",
+                (
+                    _draft(LifecycleEventType.VERIFICATION_STARTED),
+                    _draft(LifecycleEventType.VERIFICATION_COMPLETED, verified=True),
+                ),
+            ),
+        )
+        for request_id, drafts in batches:
+            store.append_batch(
+                adapter="reference",
+                session_id="session-retry",
+                request_id=request_id,
+                drafts=drafts,
+                run_id="run-retry",
+            )
+        report = store.report(adapter="reference", session_id="session-retry")
+
+    assert report.valid is True
+    assert report.verified is True
+    assert report.outcome == "verified"
+
+
 def test_duplicate_request_events_are_suppressed_and_conflicts_fail_closed(
     tmp_path: Path,
 ) -> None:

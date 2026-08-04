@@ -1105,6 +1105,7 @@ def _ensure_task_bootstrap(
             "connector_control_fingerprints": _connector_control_fingerprints(root),
             "prompt_sha256": prompt_digest,
             "prompt_length": len(prompt),
+            "required_acceptance": list(_configured_acceptance_commands(root)),
             "task_bootstrapped_at": _utc_now(),
             "task_state": "awaiting_intent",
             "last_event": "UserPromptSubmit",
@@ -1113,6 +1114,22 @@ def _ensure_task_bootstrap(
     )
     _write_session(root, session)
     return session
+
+
+def _configured_acceptance_commands(root: Path) -> tuple[str, ...]:
+    """Return project-required acceptance commands in stable order."""
+
+    config = load_project_config(root)
+    acceptance = config.get("acceptance")
+    commands = acceptance.get("commands") if isinstance(acceptance, Mapping) else ()
+    result: list[str] = []
+    for item in commands or ():
+        if not isinstance(item, str) or not item.strip():
+            continue
+        command = item.strip()
+        if command not in result:
+            result.append(command)
+    return tuple(result)
 
 
 def _string_list(value: Any, *, field: str) -> tuple[str, ...]:
@@ -1193,6 +1210,16 @@ def _intent_from_proposal(
         "bootstrap_protocol": CODEX_SESSION_PROTOCOL,
     }
 
+    proposed_acceptance = _string_list(proposal.get("acceptance"), field="acceptance")
+    required_acceptance = tuple(
+        str(item).strip()
+        for item in session.get("required_acceptance") or ()
+        if isinstance(item, str) and item.strip()
+    )
+    effective_acceptance = tuple(
+        dict.fromkeys((*required_acceptance, *proposed_acceptance))
+    )
+
     intent = ChangeIntent(
         intent_id=str(session["reserved_intent_id"]),
         task_id=str(session["task_id"]),
@@ -1201,7 +1228,7 @@ def _intent_from_proposal(
         base_commit=str(session["task_base_commit"]),
         operations=operations,
         preserves=_string_list(proposal.get("preserves"), field="preserves"),
-        acceptance=_string_list(proposal.get("acceptance"), field="acceptance"),
+        acceptance=effective_acceptance,
         dependencies=_string_list(proposal.get("dependencies"), field="dependencies"),
         metadata=metadata,
     )
@@ -1804,8 +1831,13 @@ def _task_context(session: dict[str, Any]) -> str:
                 *contingent,
                 "Preserve requirements:",
                 *preserves,
-                "Acceptance:",
+                "Acceptance (executed by Claim Plane's trusted final verifier):",
                 *acceptance,
+                "Do not run configured acceptance commands through the agent shell. "
+                "Finish the admitted edits and stop; Claim Plane will execute acceptance "
+                "after the Codex process exits and bind the result to the final Git state.",
+                "Use read-only shell commands only as single commands without pipes, "
+                "redirection, command substitution, &&, or ||.",
                 "Treat this admitted ChangeIntent as the authority boundary for the task.",
                 "If a required repository mutation is denied as outside scope, use only "
                 "the one-time Claim Plane scope-amendment ticket returned by the guard. "
@@ -1834,6 +1866,11 @@ def _task_context(session: dict[str, Any]) -> str:
             "--proposal-json so no shell pipe or temporary repository file is required:",
             f"claim-plane codex-intent admit --session-id {json.dumps(session_id)} "
             "--repo . --proposal-json '<proposal JSON>'",
+            "Project-required acceptance is executed by Claim Plane's trusted final "
+            "verifier after the Codex process exits. Do not run it through the agent "
+            "shell; Claim Plane adds it to the admitted intent automatically.",
+            "Read-only shell inspection must use one command without pipes, redirection, "
+            "command substitution, &&, or ||.",
             "Proposal shape:",
             json.dumps(
                 {
@@ -1855,7 +1892,7 @@ def _task_context(session: dict[str, Any]) -> str:
                         },
                     ],
                     "preserves": [],
-                    "acceptance": [],
+                    "acceptance": list(session.get("required_acceptance") or ()),
                 },
                 separators=(",", ":"),
             ),

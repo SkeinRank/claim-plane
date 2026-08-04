@@ -537,6 +537,60 @@ def test_pretool_read_only_is_allowed_before_intent_admission(tmp_path: Path) ->
     assert status["guard"]["denied_calls"] == 0
 
 
+def test_project_acceptance_is_mandatory_and_reserved_for_final_verifier(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = 'acceptance-fixture'\nversion = '0.1.0'\n"
+        "[tool.pytest.ini_options]\ntestpaths = ['tests']\n",
+        encoding="utf-8",
+    )
+    codex.init_project(repo)
+    codex.connect_codex(repo)
+    session_id = "thr_guard_acceptance"
+    _bootstrap_task(repo, session_id)
+    proposal = _proposal()
+    proposal["acceptance"] = []
+    admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
+
+    assert admitted["acceptance"] == ["python -m pytest"]
+    for command in (
+        "pytest",
+        "PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider",
+        "python -m pytest -q",
+    ):
+        raw = _pretool(
+            repo,
+            session_id,
+            tool_name="exec_command",
+            tool_input={"command": command},
+        )
+        decision = json.loads(raw)["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny"
+        assert "trusted final verifier" in decision["permissionDecisionReason"]
+
+    for command in (
+        "git diff -- README.md",
+        "git status --short",
+        "claim-plane --help",
+        "command -v pytest",
+    ):
+        assert (
+            _pretool(
+                repo,
+                session_id,
+                tool_name="exec_command",
+                tool_input={"command": command},
+            )
+            == ""
+        )
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["guard"]["denied_calls"] == 3
+    assert status["guard"].get("denied_mutation_calls", 0) == 0
+
+
 def test_pretool_mutation_is_denied_before_intent_admission(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     session_id = "thr_guard_no_intent"

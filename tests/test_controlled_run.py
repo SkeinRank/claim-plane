@@ -432,6 +432,146 @@ def test_timeout_revokes_active_authority(
     assert status["state"] == "abandoned"
 
 
+def test_controlled_run_retries_failed_stop_verification_with_project_acceptance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = 'controlled-retry'\nversion = '0.1.0'\n"
+        "[tool.pytest.ini_options]\npythonpath = ['.']\n",
+        encoding="utf-8",
+    )
+    (repo / "test_app.py").write_text(
+        "from app import VALUE\n\ndef test_value():\n    assert VALUE == 2\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add acceptance"], cwd=repo, check=True)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value."
+
+    def process_factory(command: list[str], *, root: Path, env: Mapping[str, str]):
+        assert command[1:4] == ["--ask-for-approval", "never", "exec"]
+        run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        session_id = "thread_controlled_retry"
+        adapter.start_session(
+            _request(
+                AdapterOperation.START_SESSION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"source": "startup"},
+            )
+        )
+        adapter.submit_task(
+            _request(
+                AdapterOperation.SUBMIT_TASK,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"prompt": task},
+            )
+        )
+        admitted = adapter.propose_intent(
+            _request(
+                AdapterOperation.PROPOSE_INTENT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={
+                    "proposal": {
+                        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+                        "goal": "Update the fixture value",
+                        "operations": [
+                            {
+                                "access": "write",
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "commitment": "committed",
+                            }
+                        ],
+                        "preserves": [],
+                        "acceptance": [],
+                    }
+                },
+            )
+        )
+        first = adapter.verify_completion(
+            AdapterRequest.create(
+                AdapterOperation.VERIFY_COMPLETION,
+                adapter="codex",
+                project_root=str(repo),
+                request_id=f"failed-stop-{run_id}",
+                session_id=session_id,
+                run_id=run_id,
+                intent_id=admitted.intent_id,
+                intent_version=admitted.intent_version,
+                timeout_seconds=30,
+                payload={"hook_event_name": "Stop", "lifecycle": True},
+            )
+        )
+        assert first.payload["verified"] is False
+        assert first.payload["acceptance_passed"] is False
+
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+            "*** End Patch"
+        )
+        mutation = adapter.request_mutation(
+            _request(
+                AdapterOperation.REQUEST_MUTATION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"tool_name": "apply_patch", "tool_input": {"command": patch}},
+            )
+        )
+        assert mutation.status.value == "succeeded"
+        (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+        adapter.observe_result(
+            _request(
+                AdapterOperation.OBSERVE_RESULT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"tool_name": "apply_patch"},
+            )
+        )
+        stream = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": session_id}),
+                json.dumps({"type": "turn.completed"}),
+            )
+        )
+        return _CompletedProcess(stream + "\n")
+
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        quiet=True,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=process_factory,
+    )
+
+    assert result.outcome is ControlledRunOutcome.VERIFIED
+    assert result.completion["acceptance_passed"] is True
+    assert result.acceptance["command_count"] == 1
+    assert result.acceptance["commands"] == ["python -m pytest"]
+    assert result.lifecycle is not None
+    assert result.lifecycle["valid"] is True
+    assert result.lifecycle["verified"] is True
+
+
 def test_guarded_run_requires_review_for_configured_critical_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

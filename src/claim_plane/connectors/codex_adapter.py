@@ -620,6 +620,20 @@ class CodexAdapter:
                     result["allowed"] = False
                 if parsed.get("decision") == "block":
                     result["verified"] = False
+
+        if payload.get("hook_event_name") == "Stop":
+            session_id = payload.get("session_id")
+            cwd = payload.get("cwd")
+            if isinstance(session_id, str) and isinstance(cwd, str):
+                try:
+                    status = codex_runtime.codex_intent_status(
+                        cwd, session_id=session_id
+                    )
+                except (FileNotFoundError, ValueError, json.JSONDecodeError):
+                    status = {}
+                completion = status.get("completion")
+                if isinstance(completion, Mapping):
+                    result.update(dict(completion))
         return result
 
     def enroll_project(self, request: AdapterRequest) -> AdapterResponse:

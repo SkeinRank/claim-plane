@@ -383,6 +383,7 @@ _ALLOWED_PREVIOUS: dict[LifecycleEventType, frozenset[LifecycleEventType | None]
             LifecycleEventType.MUTATION_OBSERVED,
             LifecycleEventType.SCOPE_EXPANSION_GRANTED,
             LifecycleEventType.SCOPE_EXPANSION_DENIED,
+            LifecycleEventType.VERIFICATION_COMPLETED,
         }
     ),
     LifecycleEventType.MUTATION_ALLOWED: frozenset(
@@ -406,6 +407,7 @@ _ALLOWED_PREVIOUS: dict[LifecycleEventType, frozenset[LifecycleEventType | None]
             LifecycleEventType.MUTATION_OBSERVED,
             LifecycleEventType.SCOPE_EXPANSION_GRANTED,
             LifecycleEventType.SCOPE_EXPANSION_DENIED,
+            LifecycleEventType.VERIFICATION_COMPLETED,
         }
     ),
     LifecycleEventType.SCOPE_EXPANSION_GRANTED: frozenset(
@@ -423,6 +425,7 @@ _ALLOWED_PREVIOUS: dict[LifecycleEventType, frozenset[LifecycleEventType | None]
             LifecycleEventType.MUTATION_OBSERVED,
             LifecycleEventType.SCOPE_EXPANSION_GRANTED,
             LifecycleEventType.SCOPE_EXPANSION_DENIED,
+            LifecycleEventType.VERIFICATION_COMPLETED,
         }
     ),
     LifecycleEventType.VERIFICATION_COMPLETED: frozenset(
@@ -1203,7 +1206,7 @@ def lifecycle_event_drafts(
         verified = bool(
             response is not None
             and response.status is AdapterStatus.SUCCEEDED
-            and response.payload.get("verified", True)
+            and response.payload.get("verified", False)
         )
         return (
             draft(LifecycleEventType.VERIFICATION_STARTED, request_summary),
