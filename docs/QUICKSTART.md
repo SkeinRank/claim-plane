@@ -45,7 +45,18 @@ claim-plane policy inspect
 claim-plane adapters inspect codex --policy guarded
 ```
 
-## 3. Run one bounded task
+## 3. Work interactively or run one bounded task
+
+For normal conversational development, open Codex through Claim Plane:
+
+```bash
+claim-plane codex --policy guarded
+```
+
+Use the same Codex TUI as usual. When it exits, Claim Plane runs final acceptance,
+verifies the admitted scope, and seals evidence.
+
+For one unattended task:
 
 ```bash
 claim-plane run \
@@ -54,7 +65,7 @@ claim-plane run \
   --timeout 1800
 ```
 
-The task is bound to a versioned `ChangeIntent`. Supported undeclared mutations are
+Both paths bind work to a versioned `ChangeIntent`. Supported undeclared mutations are
 blocked, legitimate scope growth must be re-admitted, and the final Git state is
 verified independently from the model's completion message.
 

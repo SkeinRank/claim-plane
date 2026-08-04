@@ -17,8 +17,14 @@ from pathlib import Path
 from typing import Any, Mapping, TextIO
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-_BLOCKED_COMMAND_RE = re.compile(
-    r"Command blocked by PreToolUse hook:.*?Command:\s*(?P<command>.+?)\s*$",
+_BLOCKED_HOOK_RE = re.compile(
+    r"Command blocked by PreToolUse hook:\s*(?P<reason>.+?)"
+    r"(?:\.\s*Command:\s*(?P<command>.+?))?\s*$",
+    re.IGNORECASE,
+)
+_WRITE_BLOCK_RE = re.compile(
+    r"Claim Plane blocked write to (?P<target>.+?)\.\s*"
+    r"(?P<boundary>(?:Outside|Locked).+?)(?=\s+(?:Mutation|Claim Plane|The operator))",
     re.IGNORECASE,
 )
 
@@ -95,8 +101,11 @@ class ConsoleRenderer:
         runtime_name: str,
         runtime_version: str | None,
         model: str | None,
+        initial_scope: tuple[str, ...] = (),
+        scope_locked: bool = False,
+        title: str = "Claim Plane",
     ) -> None:
-        self._write(self._paint("Claim Plane", "1;36"))
+        self._write(self._paint(title, "1;36"))
         self._write("─" * self.width)
         self._write(f"Run         {run_id}")
         self._write(f"Repository  {root}")
@@ -111,6 +120,12 @@ class ConsoleRenderer:
             f"protocol {protocol_label} · {policy}"
         )
         self._write(control)
+        if initial_scope:
+            scope_label = ", ".join(initial_scope[:3])
+            if len(initial_scope) > 3:
+                scope_label += f" · +{len(initial_scope) - 3} more"
+            expansion = "locked" if scope_locked else "brokered amendments allowed"
+            self._write(f"Scope       {scope_label} · {expansion}")
         self._write()
 
     def step(
@@ -196,9 +211,27 @@ class ConsoleRenderer:
         stripped = _ANSI_RE.sub("", line).strip()
         if not stripped:
             return
-        blocked = _BLOCKED_COMMAND_RE.search(stripped)
+        blocked = _BLOCKED_HOOK_RE.search(stripped)
         if blocked:
-            command = _truncate(blocked.group("command"), width=100)
+            reason = blocked.group("reason") or ""
+            write_block = _WRITE_BLOCK_RE.search(reason)
+            if write_block:
+                target = _truncate(write_block.group("target"), width=88)
+                boundary = _truncate(write_block.group("boundary"), width=100)
+                key = f"write:{target}:{boundary}"
+                if key in self._blocked_commands:
+                    return
+                self._blocked_commands.add(key)
+                self.step(
+                    "Write blocked",
+                    detail=target,
+                    state="warning",
+                    dedupe_key=f"blocked:{key}",
+                )
+                self._write(f"  {self._paint(boundary, '2')}")
+                return
+            raw_command = blocked.group("command") or reason
+            command = _truncate(raw_command, width=100)
             if command in self._blocked_commands:
                 return
             self._blocked_commands.add(command)
@@ -274,6 +307,70 @@ class ConsoleRenderer:
             state="passed" if scope_clean else "failed",
             dedupe_key="verification:scope",
         )
+
+        scope = result.get("scope")
+        scope_map = scope if isinstance(scope, Mapping) else {}
+        amendments = scope_map.get("amendments")
+        amendment_map = amendments if isinstance(amendments, Mapping) else {}
+        admitted_amendments = int(amendment_map.get("admitted") or 0)
+        denied_amendments = int(amendment_map.get("denied") or 0)
+        if admitted_amendments:
+            self.step(
+                "Scope amendment admitted",
+                detail=(
+                    f"{admitted_amendments} brokered "
+                    f"expansion{'s' if admitted_amendments != 1 else ''}"
+                ),
+                state="passed",
+                dedupe_key="verification:amendment:admitted",
+            )
+        if denied_amendments:
+            self.step(
+                "Scope amendment denied",
+                detail=(
+                    f"{denied_amendments} "
+                    f"request{'s' if denied_amendments != 1 else ''}"
+                ),
+                state="warning",
+                dedupe_key="verification:amendment:denied",
+            )
+
+        initial_scope = [
+            str(item)
+            for item in scope_map.get("initial") or ()
+            if isinstance(item, str)
+        ]
+        final_scope = [
+            str(item) for item in scope_map.get("final") or () if isinstance(item, str)
+        ]
+        history = amendment_map.get("history")
+        added_scope: list[str] = []
+        for item in history or ():
+            if not isinstance(item, Mapping) or item.get("allowed") is not True:
+                continue
+            for resource in item.get("resources") or ():
+                if isinstance(resource, str) and resource not in added_scope:
+                    added_scope.append(resource)
+        if initial_scope or added_scope:
+            self.step(
+                "Scope evolution",
+                state="info",
+                dedupe_key="verification:scope:evolution",
+            )
+            if initial_scope:
+                self._write("  Initial  " + self._paint(", ".join(initial_scope), "2"))
+            for resource in added_scope:
+                self._write(
+                    "  Added    " + self._paint(f"{resource} · brokered amendment", "2")
+                )
+            final_count = len(final_scope) or changed_files
+            self._write(
+                "  Final    "
+                + self._paint(
+                    f"{final_count} file{'s' if final_count != 1 else ''}",
+                    "2",
+                )
+            )
 
         acceptance_passed = bool(acceptance_map.get("passed"))
         commands = acceptance_map.get("commands")

@@ -11,6 +11,7 @@ from claim_plane.controlled_run import (
     controlled_run_path,
     load_controlled_run,
     run_controlled_task,
+    run_interactive_codex,
 )
 from claim_plane.evidence import (
     EVIDENCE_REPLAY_PROTOCOL,
@@ -265,7 +266,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.36.1"
+__version__ = "0.36.4"
 
 __all__ = [
     "DOGFOOD_ARMS",
@@ -323,6 +324,7 @@ __all__ = [
     "controlled_run_path",
     "load_controlled_run",
     "run_controlled_task",
+    "run_interactive_codex",
     "ADAPTER_ENTRY_POINT_GROUP",
     "ADAPTER_HANDSHAKE_PROTOCOL",
     "ADAPTER_PIN_PROTOCOL",

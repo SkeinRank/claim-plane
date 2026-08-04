@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import errno
+import io
 import sqlite3
 import subprocess
 import threading
@@ -11,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from claim_plane.connectors.codex import init_project
+from claim_plane.swarm.codex_runner import _spawn_codex_process
 from claim_plane.swarm import (
     CodexRunState,
     cancel_codex_run,
@@ -331,3 +334,31 @@ def test_database_migrates_to_codex_run_schema(tmp_path: Path) -> None:
     connection.close()
     assert version == 9
     assert "swarm_codex_runs" in tables
+
+
+def test_spawn_retries_transient_resource_pressure(tmp_path: Path) -> None:
+    calls = 0
+
+    class Process:
+        pass
+
+    expected = Process()
+
+    def flaky(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        del args, kwargs
+        calls += 1
+        if calls == 1:
+            raise OSError(errno.EAGAIN, "temporary resource pressure")
+        return expected
+
+    result = _spawn_codex_process(
+        ("fake-codex",),
+        cwd=tmp_path,
+        stderr=io.StringIO(),
+        attempts=2,
+        popen_factory=flaky,
+    )
+
+    assert result is expected
+    assert calls == 2

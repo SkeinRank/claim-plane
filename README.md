@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.36.1.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.36.4.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -86,6 +86,8 @@ git switch -c agent/audit-pagination
 claim-plane init
 claim-plane connect codex
 claim-plane doctor
+claim-plane codex --policy guarded
+# or run one bounded unattended task:
 claim-plane run "Add pagination to the audit API and extend its tests" --policy guarded
 claim-plane report latest
 ```
@@ -242,6 +244,30 @@ The handshake negotiates the installed Claim Plane protocol against the adapter'
 
 External adapter packages can publish a `claim_plane.adapters` Python entry point. They are discovered without changing Claim Plane Core and use the same manifest, conformance, handshake, and pinning paths as Codex.
 
+## Interactive Codex launcher
+
+Use the normal Codex conversational TUI without giving up Claim Plane authority or
+final evidence:
+
+```bash
+claim-plane codex --policy guarded
+```
+
+An optional initial prompt opens the same TUI with the first task already submitted:
+
+```bash
+claim-plane codex "Fix timeout handling and update its regression test" \
+  --scope src/connectors/github.py \
+  --policy guarded
+```
+
+Claim Plane owns the working directory, workspace-write sandbox, approval policy,
+model override, initial scope, and final verifier. Codex still owns the interactive
+conversation. When the TUI exits, Claim Plane independently verifies the final Git
+state, runs configured acceptance, seals the controlled-run record, and prints the
+same delivery card used by one-shot execution. Scope remains automatic unless the
+operator supplies `--scope`; `--lock-scope` disables amendments.
+
 ## One-command controlled Codex run
 
 After enrollment and diagnostics, one command owns the bounded Codex process, authority lifecycle, and final Git verification:
@@ -256,6 +282,14 @@ claim-plane run "Add pagination to the audit API" --policy guarded
 The runner performs adapter negotiation and policy compatibility checks before execution, launches Codex in workspace-write mode, binds the runtime session to a stable run identity, and preserves the normal `ChangeIntent` admission and amendment path. `Ctrl-C` and wall-time expiry stop the process and revoke unfinished authority. A successful runtime exit is not sufficient for a green result: Claim Plane inspects the active intent, verifies completion against the current Git state, and returns `DELIVERY VERIFIED`, `REJECTED`, `REVIEW REQUIRED`, `CANCELLED`, `TIMED OUT`, or `FAILED`.
 
 The default terminal view is intentionally compact: it shows preflight, Codex lifecycle, final scope and acceptance checks, risk, changed files, duration, and the evidence location without dumping raw runtime logs. The agent's final message is labelled as untrusted context rather than verification evidence. Use `--verbose` when diagnosing the underlying Codex stream, or `--json` for automation.
+
+Scope remains automatic for normal use. For a reproducible initial authority boundary, repeat `--scope` with repository-relative files or directories; a genuinely required additional file must pass through the brokered amendment path. Add `--lock-scope` only when CI or an operator must forbid every expansion.
+
+```bash
+claim-plane run "Fix timeout handling and update its regression test" \
+  --scope src/connectors/github.py \
+  --policy guarded
+```
 
 The durable result is written under `.claim-plane/runs/<run-id>/run.json`. It contains task and final-message digests rather than raw text, the starting and resulting Git-state digests, adapter manifest and handshake identity, policy compatibility, lifecycle evidence, verification summary, final file and hunk metadata, configured acceptance commands, and cancellation outcome. Use `--out result.json` for an additional export, `--timeout` for the wall-time ceiling, and `--model` for an explicit Codex model override.
 
@@ -430,9 +464,9 @@ When a denial identifies concrete additional file authority, the guard issues a 
 
 The connector also reserves a narrow shell control channel for `claim-plane codex-intent admit`, `status`, `amend`, `verify`, and `abandon`. The command must target the current Codex session and current repository; initial admission uses `--proposal-json` rather than a shell pipe or repository temporary file. Other Claim Plane commands and opaque shell effects remain subject to the normal fail-closed classification. Connector control state under `.claim-plane/**`, `.git/**`, and `.codex/**` cannot be granted through a session intent or amendment.
 
-When Codex tries to finish an active task, the `Stop` lifecycle event runs verified completion. Claim Plane collects tracked and untracked repository changes, checks the actual work against the admitted scope, preserve and contract policies, executes the declared acceptance commands with worktree-integrity checks, and completes the intent only when the resulting evidence is clean. A failed first completion blocks the stop once and returns concrete findings so Codex can repair the work. If the continuation still fails, the session is allowed to stop as explicitly `UNVERIFIED` rather than entering an unbounded model loop.
+For a directly launched Codex session, `Stop` remains the bounded verified-completion checkpoint. Under `claim-plane codex`, however, `Stop` is only a conversational turn boundary: the hook reports `AGENT TURN COMPLETED` and `final verification pending`, allowing the user to continue the TUI without a premature green result. After the user exits, the launcher collects tracked and untracked repository changes, checks the actual work against admitted scope and preserve/contract policy, executes declared acceptance with worktree-integrity checks, and seals normalized verification before session end.
 
-A clean completion is persisted on the session and surfaced as `VERIFIED` with changed-file counts, mutation-authority counters, scope expansions, acceptance outcome, and verification findings. The same result is available explicitly through `claim-plane codex-intent verify --session-id <id> --repo .` and `claim-plane codex-intent status`.
+A clean launcher-owned completion is persisted and surfaced as `VERIFIED` with changed-file counts, mutation-authority counters, scope expansions, acceptance outcome, and verification findings. Direct sessions retain the bounded repair continuation: a failed first Stop can return findings once, and a still-failing continuation ends explicitly `UNVERIFIED` instead of looping indefinitely. The same gate remains available through `claim-plane codex-intent verify --session-id <id> --repo .` and `claim-plane codex-intent status`.
 
 The connector hardens long-running local use as well. Pre-existing user changes are fingerprinted at task bootstrap: unchanged pre-existing paths are excluded from task attribution, while Codex is denied mutation authority over those paths so existing work is not silently mixed into an autonomous task. Only one active Codex session may hold mutation authority in a physical worktree; independent concurrent sessions should use separate Git worktrees, where normal Claim Plane coordination still applies. A resumed session renews a live intent automatically and can re-admit an expired intent only when the pinned commit and branch are unchanged. Changed repository state, released or stale authority, corrupted session state, missing enrollment state, branch switches, and connector hook drift all fail closed. Re-running `claim-plane connect codex` repairs connector-owned hook definitions while preserving unrelated hooks.
 If an unfinished session is intentionally discarded, `claim-plane codex-intent abandon --session-id <id> --repo .` releases its intent authority so another Codex session can use the same worktree immediately.
@@ -442,7 +476,8 @@ committed mutation  -> authorize -> Codex sandbox/approval -> execute
 contingent mutation -> promote + re-admit -> authorize -> execute
 undeclared mutation -> deny -> exact ticket -> reason -> re-admit -> retry
 unprovable mutation -> deny before tool execution
-Stop -> collect evidence -> acceptance -> VERIFIED or bounded repair continuation
+direct Codex Stop -> collect evidence -> VERIFIED or bounded repair continuation
+claim-plane codex Stop -> turn completed -> exit TUI -> acceptance -> VERIFIED
 ```
 
 `claim-plane doctor` checks Git and worktree state, project configuration, state-directory permissions, acceptance commands, credential hygiene, Codex runtime and authentication availability, sandbox characteristics, adapter negotiation, and the hook surface required by the guard. `claim-plane doctor codex` remains an equivalent explicit form. Hook interception is an integration boundary, not a substitute for the brokered reference-monitor boundary: runtime hook coverage and timeout behavior remain properties of Codex itself. Claim Plane therefore keeps broker capabilities, repository identity, admission, and verification as the authoritative core primitives.

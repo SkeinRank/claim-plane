@@ -19,9 +19,16 @@ Acceptance discovery prefers an existing `scripts/check.sh`, then recognized Mak
 
 `claim-plane reset` removes Claim Plane-owned databases, request caches, lifecycle state, session state, and hook handlers. It preserves repository files, foreign Codex hooks, and the project config unless `--remove-config` is supplied explicitly.
 
-## Controlled single-agent execution
+## Interactive and controlled single-agent execution
 
-The primary Codex product path is one bounded command:
+The interactive product path preserves the normal Codex TUI and seals evidence when
+it exits:
+
+```bash
+claim-plane codex --policy guarded
+```
+
+For unattended execution, use one bounded command:
 
 ```bash
 claim-plane run "Implement refresh-token rotation" --policy guarded
@@ -155,7 +162,7 @@ An undeclared mutation with provable file effects can open a short-lived scope-a
 
 The connector's shell control channel is intentionally narrow. `codex-intent admit`, `status`, `amend`, `verify`, and `abandon` may execute only for the current session and current repository. Admission uses inline proposal JSON so the bootstrap does not require a shell pipe or a repository file before authority exists. `.claim-plane/**`, `.git/**`, and `.codex/**` remain connector-protected and cannot be added to the session authority envelope.
 
-`Stop` is the verified-completion checkpoint for an active Codex task. Claim Plane collects the current Git delta, including untracked files, removes connector-owned control files from task-change accounting, executes the intent's acceptance commands, proves that acceptance did not alter the worktree, and runs the normal integration verifier. A clean report completes the intent and records `claim-plane.codex-completion.v1`. A non-clean first attempt returns bounded findings and asks Codex to continue; a still-failing Stop-hook continuation is allowed to end as `UNVERIFIED` so the connector cannot create an unbounded continuation loop.
+For Codex launched directly, `Stop` is the bounded verified-completion checkpoint. For `claim-plane codex`, each `Stop` is an interactive turn boundary and reports final verification as pending; no acceptance result or `VERIFIED` claim is emitted inside the TUI. When the user exits, the launcher collects the Git delta, removes connector-owned control files from task-change accounting, executes acceptance, proves worktree integrity, runs the integration verifier, and only then records `claim-plane.codex-completion.v1` followed by normalized session end. Direct sessions retain one bounded repair continuation and then end explicitly `UNVERIFIED` rather than looping.
 
 The completion record includes changed paths, authorized and denied mutation-call counts, admitted scope expansions, acceptance outcome, executed authority violations, and the deterministic verifier report. `claim-plane codex-intent verify` exposes the same gate explicitly, while `codex-intent status` returns the most recent result.
 

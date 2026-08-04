@@ -142,3 +142,23 @@ def test_console_renderer_does_not_claim_scope_pass_without_verification(
     assert "Scope verified" not in rendered
     assert "Run requires attention" in rendered
     assert "DELIVERY FAILED" in rendered
+
+
+def test_console_renderer_names_blocked_write_and_initial_scope() -> None:
+    output = io.StringIO()
+    renderer = ConsoleRenderer(output, io.StringIO(), colour=False)
+    line = (
+        "2026-08-04T04:23:55Z ERROR router: "
+        "Command blocked by PreToolUse hook: Claim Plane blocked write to "
+        "tests/test_app.py. Outside initial scope: src/app.py. Mutation write "
+        "tests/test_app.py is outside the admitted ChangeIntent. "
+        "Command: *** Begin Patch\n"
+    )
+
+    renderer.runtime_stderr(line)
+
+    rendered = output.getvalue()
+    assert "! Write blocked" in rendered
+    assert "tests/test_app.py" in rendered
+    assert "Outside initial scope: src/app.py." in rendered
+    assert "*** Begin Patch" not in rendered

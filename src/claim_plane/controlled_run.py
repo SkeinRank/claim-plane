@@ -10,11 +10,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import queue
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -41,6 +43,9 @@ CONTROLLED_RUN_PROTOCOL = "claim-plane.controlled-run.v1"
 CONTROLLED_RUN_ENV = "CLAIM_PLANE_CONTROLLED_RUN_ID"
 CONTROLLED_POLICY_ENV = "CLAIM_PLANE_CONTROLLED_POLICY"
 CONTROLLED_POLICY_MANIFEST_ENV = "CLAIM_PLANE_CONTROLLED_POLICY_MANIFEST"
+CONTROLLED_INITIAL_SCOPE_ENV = "CLAIM_PLANE_CONTROLLED_INITIAL_SCOPE"
+CONTROLLED_SCOPE_LOCK_ENV = "CLAIM_PLANE_CONTROLLED_SCOPE_LOCK"
+CONTROLLED_INTERACTIVE_ENV = "CLAIM_PLANE_CONTROLLED_INTERACTIVE"
 CONTROLLED_RUNS_PATH = Path(".claim-plane/runs")
 
 
@@ -183,6 +188,7 @@ class ControlledRunResult:
     completion: Mapping[str, Any]
     changes: Mapping[str, Any]
     acceptance: Mapping[str, Any]
+    scope: Mapping[str, Any]
     lifecycle: Mapping[str, Any] | None
     cancellation: Mapping[str, Any] | None = None
     error: Mapping[str, Any] | None = None
@@ -221,6 +227,7 @@ class ControlledRunResult:
             "completion": dict(self.completion),
             "changes": dict(self.changes),
             "acceptance": dict(self.acceptance),
+            "scope": dict(self.scope),
             "lifecycle": dict(self.lifecycle) if self.lifecycle is not None else None,
             "cancellation": (
                 dict(self.cancellation) if self.cancellation is not None else None
@@ -667,6 +674,105 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
     }
 
 
+_WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[/\\]")
+_SCOPE_GLOB_CHARS = frozenset("*?[")
+
+
+def _normalize_initial_scope(root: Path, values: tuple[str, ...]) -> tuple[str, ...]:
+    """Normalize operator-provided initial mutation scope.
+
+    Literal files remain exact resources. Existing directories and values ending in
+    a slash become recursive repository-relative patterns. User-supplied glob syntax
+    is intentionally rejected so the authority boundary is visually unambiguous.
+    """
+
+    normalized: list[str] = []
+    for raw in values:
+        value = raw.strip().replace("\\", "/")
+        while value.startswith("./"):
+            value = value[2:]
+        if not value or value == ".":
+            raise ValueError("--scope must name a repository file or directory")
+        if value.startswith("/") or _WINDOWS_ABSOLUTE_PATH.match(value):
+            raise ValueError("--scope paths must be repository-relative")
+        if any(char in value for char in _SCOPE_GLOB_CHARS):
+            raise ValueError(
+                "--scope accepts literal files or directories, not glob syntax"
+            )
+        directory_hint = value.endswith("/")
+        clean = posixpath.normpath(value).rstrip("/")
+        if clean in {"", ".", ".."} or clean.startswith("../"):
+            raise ValueError("--scope paths cannot escape the repository")
+        if clean in {".git", ".codex", ".claim-plane"} or clean.startswith(
+            (".git/", ".codex/", ".claim-plane/")
+        ):
+            raise ValueError(
+                "--scope cannot grant connector, Git, or Claim Plane control state"
+            )
+        candidate = root / clean
+        selector = f"{clean}/**" if directory_hint or candidate.is_dir() else clean
+        if selector not in normalized:
+            normalized.append(selector)
+    return tuple(normalized)
+
+
+def _scope_identifiers(value: Any) -> list[str]:
+    result: list[str] = []
+    for item in value or ():
+        if not isinstance(item, Mapping):
+            continue
+        identifier = item.get("identifier") or item.get("path")
+        if isinstance(identifier, str) and identifier and identifier not in result:
+            result.append(identifier)
+    return result
+
+
+def _scope_amendment_history(value: Any) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in value or ():
+        if not isinstance(item, Mapping):
+            continue
+        reason = str(item.get("reason") or "")
+        result.append(
+            {
+                "allowed": bool(item.get("allowed")),
+                "resources": _scope_identifiers(item.get("operations")),
+                "reason_sha256": (
+                    hashlib.sha256(reason.encode("utf-8")).hexdigest()
+                    if reason
+                    else None
+                ),
+            }
+        )
+    return result
+
+
+def _scope_summary(
+    initial_scope: tuple[str, ...],
+    *,
+    locked: bool,
+    adapter_status: Mapping[str, Any],
+) -> dict[str, Any]:
+    amendment = adapter_status.get("scope_amendment")
+    amendment_map = amendment if isinstance(amendment, Mapping) else {}
+    final_scope = _scope_identifiers(adapter_status.get("committed_scope"))
+    history = _scope_amendment_history(amendment_map.get("history"))
+    return {
+        "protocol": "claim-plane.controlled-scope.v1",
+        "mode": "operator" if initial_scope else "planner",
+        "initial": list(initial_scope),
+        "final": final_scope,
+        "locked": locked,
+        "amendments": {
+            "tickets_issued": int(amendment_map.get("tickets_issued") or 0),
+            "requests": int(amendment_map.get("requests") or 0),
+            "admitted": int(amendment_map.get("admitted") or 0),
+            "denied": int(amendment_map.get("denied") or 0),
+            "history": history,
+        },
+    }
+
+
 def _codex_command(
     *,
     root: Path,
@@ -696,6 +802,104 @@ def _codex_command(
         command.extend(("--model", model))
     command.append(task)
     return command
+
+
+_CONTROLLED_CODEX_FLAGS = frozenset(
+    {
+        "--ask-for-approval",
+        "-a",
+        "--sandbox",
+        "-s",
+        "--cd",
+        "-C",
+        "--model",
+        "-m",
+    }
+)
+_CONTROLLED_CODEX_SUBCOMMANDS = frozenset(
+    {"exec", "resume", "fork", "mcp", "mcp-server", "app-server", "cloud"}
+)
+
+
+def _validate_interactive_codex_args(values: tuple[str, ...]) -> tuple[str, ...]:
+    """Allow TUI preferences while retaining launcher-owned authority controls."""
+
+    clean = tuple(item for item in values if item != "--")
+    for index, value in enumerate(clean):
+        name = value.split("=", 1)[0]
+        if name in _CONTROLLED_CODEX_FLAGS:
+            raise ValueError(
+                f"Codex option {name!r} is owned by Claim Plane; use the matching "
+                "claim-plane codex option instead"
+            )
+        if index == 0 and value in _CONTROLLED_CODEX_SUBCOMMANDS:
+            raise ValueError(
+                "claim-plane codex launches the interactive TUI; Codex subcommands "
+                "must not be passed through"
+            )
+    return clean
+
+
+def _codex_interactive_command(
+    *,
+    root: Path,
+    model: str | None,
+    initial_prompt: str | None,
+    codex_args: tuple[str, ...],
+) -> list[str]:
+    executable = shutil.which("codex")
+    if executable is None:
+        raise ControlledRunPreflightError("Codex executable was not found on PATH")
+    command = [
+        executable,
+        "--ask-for-approval",
+        "never",
+        "--sandbox",
+        "workspace-write",
+        "--cd",
+        str(root),
+    ]
+    if model:
+        command.extend(("--model", model))
+    command.extend(_validate_interactive_codex_args(codex_args))
+    if initial_prompt:
+        command.append(initial_prompt)
+    return command
+
+
+def _spawn_interactive_codex(
+    command: list[str], *, root: Path, env: Mapping[str, str]
+) -> ProcessLike:
+    return subprocess.Popen(
+        command,
+        cwd=root,
+        env=dict(env),
+        text=True,
+    )
+
+
+def _terminate_interactive_process(
+    process: ProcessLike, *, grace_seconds: float = 5.0
+) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+    except (OSError, ProcessLookupError):
+        return
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        process.kill()
+    except (OSError, ProcessLookupError):
+        return
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _spawn_codex(
@@ -827,25 +1031,30 @@ def _terminate_process(process: ProcessLike, *, grace_seconds: float = 5.0) -> N
         pass
 
 
-def _session_from_run(root: Path, run_id: str) -> str | None:
+def _session_record_from_run(root: Path, run_id: str) -> dict[str, Any] | None:
     sessions = root / ".claim-plane/codex/sessions"
     if not sessions.is_dir():
         return None
-    matches: list[tuple[str, str]] = []
+    matches: list[tuple[str, dict[str, Any]]] = []
     for path in sessions.glob("*.json"):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if (
-            not isinstance(payload, Mapping)
-            or payload.get("controlled_run_id") != run_id
-        ):
+        if not isinstance(payload, dict) or payload.get("controlled_run_id") != run_id:
             continue
         session_id = payload.get("session_id")
         if isinstance(session_id, str) and session_id:
-            matches.append((str(payload.get("updated_at") or ""), session_id))
-    return sorted(matches)[-1][1] if matches else None
+            matches.append((str(payload.get("updated_at") or ""), payload))
+    return dict(sorted(matches)[-1][1]) if matches else None
+
+
+def _session_from_run(root: Path, run_id: str) -> str | None:
+    payload = _session_record_from_run(root, run_id)
+    if payload is None:
+        return None
+    session_id = payload.get("session_id")
+    return str(session_id) if isinstance(session_id, str) and session_id else None
 
 
 def _inspect_binding(
@@ -999,6 +1208,8 @@ def run_controlled_task(
     timeout_seconds: float = 3600.0,
     acceptance_timeout: float = 300.0,
     model: str | None = None,
+    initial_scope: tuple[str, ...] = (),
+    lock_scope: bool = False,
     quiet: bool = False,
     verbose: bool = False,
     stdout: TextIO,
@@ -1019,6 +1230,9 @@ def run_controlled_task(
         )
 
     resolved_root = resolve_project_root(root)
+    normalized_scope = _normalize_initial_scope(resolved_root, tuple(initial_scope))
+    if lock_scope and not normalized_scope:
+        raise ValueError("--lock-scope requires at least one --scope path")
     run_id = "cpr_" + os.urandom(12).hex()
     started_at = _utc_now()
     effective_policy = _configured_policy(resolved_root, adapter.name, policy)
@@ -1045,6 +1259,12 @@ def run_controlled_task(
     environment[CONTROLLED_POLICY_MANIFEST_ENV] = _canonical_json(
         effective_policy.to_dict()
     )
+    if normalized_scope:
+        environment[CONTROLLED_INITIAL_SCOPE_ENV] = json.dumps(
+            list(normalized_scope), separators=(",", ":")
+        )
+    if lock_scope:
+        environment[CONTROLLED_SCOPE_LOCK_ENV] = "1"
     environment["PYTHONUNBUFFERED"] = "1"
 
     console = None if quiet else ConsoleRenderer(stdout, stderr, verbose=verbose)
@@ -1059,6 +1279,8 @@ def run_controlled_task(
             runtime_name=handshake.runtime_name,
             runtime_version=handshake.runtime_version,
             model=model,
+            initial_scope=normalized_scope,
+            scope_locked=lock_scope,
         )
         console.step(
             "Preflight ready",
@@ -1071,6 +1293,7 @@ def run_controlled_task(
     runtime = RuntimeSummary()
     runtime_returncode: int | None = None
     completion_payload: dict[str, Any] = {}
+    adapter_status: dict[str, Any] = {}
     cancellation: Mapping[str, Any] | None = None
     error: Mapping[str, Any] | None = None
     session_id: str | None = None
@@ -1097,13 +1320,13 @@ def run_controlled_task(
             )
         if console is not None:
             console.verification_started()
-        intent_id, intent_version, status = _inspect_binding(
+        intent_id, intent_version, adapter_status = _inspect_binding(
             adapter,
             root=resolved_root,
             run_id=run_id,
             session_id=session_id,
         )
-        existing_completion = status.get("completion")
+        existing_completion = adapter_status.get("completion")
         completion_is_verified = bool(
             isinstance(existing_completion, Mapping)
             and existing_completion.get("verified") is True
@@ -1235,6 +1458,9 @@ def run_controlled_task(
         completion=completion,
         changes=changes,
         acceptance=acceptance,
+        scope=_scope_summary(
+            normalized_scope, locked=lock_scope, adapter_status=adapter_status
+        ),
         lifecycle=lifecycle,
         cancellation=cancellation,
         error=error,
@@ -1248,4 +1474,358 @@ def run_controlled_task(
             root=resolved_root,
             final_message=runtime.final_message,
         )
+    return result
+
+
+def run_interactive_codex(
+    task: str | None = None,
+    *,
+    root: str | Path = ".",
+    adapter: AgentAdapter,
+    handshake: AdapterHandshake,
+    policy: str | None = None,
+    timeout_seconds: float | None = None,
+    acceptance_timeout: float = 300.0,
+    model: str | None = None,
+    initial_scope: tuple[str, ...] = (),
+    lock_scope: bool = False,
+    codex_args: tuple[str, ...] = (),
+    stdout: TextIO,
+    stderr: TextIO,
+    require_tty: bool = True,
+    process_factory: Callable[..., ProcessLike] = _spawn_interactive_codex,
+) -> ControlledRunResult:
+    """Launch the interactive Codex TUI under Claim Plane authority.
+
+    Codex retains its normal conversational interface. Claim Plane owns the adapter
+    policy, initial scope, final verification, evidence record, and terminal outcome.
+    """
+
+    preflight_started = time.monotonic()
+    cleaned_task = task.strip() if isinstance(task, str) and task.strip() else None
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        raise ValueError("interactive timeout must be positive when provided")
+    if acceptance_timeout <= 0:
+        raise ValueError("acceptance timeout must be positive")
+    if adapter.name != "codex":
+        raise ControlledRunPreflightError(
+            "interactive execution currently has a complete launcher only for Codex"
+        )
+    if require_tty:
+        stdin_isatty = getattr(sys.stdin, "isatty", lambda: False)
+        stdout_isatty = getattr(stdout, "isatty", lambda: False)
+        if not stdin_isatty() or not stdout_isatty():
+            raise ControlledRunPreflightError(
+                "claim-plane codex requires an interactive terminal; use "
+                "'claim-plane run' for non-interactive execution"
+            )
+
+    resolved_root = resolve_project_root(root)
+    normalized_scope = _normalize_initial_scope(resolved_root, tuple(initial_scope))
+    if lock_scope and not normalized_scope:
+        raise ValueError("--lock-scope requires at least one --scope path")
+
+    run_id = "cpr_" + os.urandom(12).hex()
+    started_at = _utc_now()
+    effective_policy = _configured_policy(resolved_root, adapter.name, policy)
+    selected_policy = effective_policy.name
+    if not handshake.compatible:
+        handshake.require_compatible()
+    doctor = _doctor_ready(adapter, root=resolved_root, run_id=run_id)
+    manifest = adapter.capability_manifest(str(resolved_root))
+    compatibility = require_adapter_policy(manifest, selected_policy)
+    start_git = capture_git_state(resolved_root)
+    run_directory = resolved_root / CONTROLLED_RUNS_PATH / run_id
+    run_directory.mkdir(parents=True, exist_ok=False)
+    os.chmod(run_directory, 0o700)
+
+    command = _codex_interactive_command(
+        root=resolved_root,
+        model=model,
+        initial_prompt=cleaned_task,
+        codex_args=tuple(codex_args),
+    )
+    environment = dict(os.environ)
+    environment[CONTROLLED_RUN_ENV] = run_id
+    environment[CONTROLLED_POLICY_ENV] = selected_policy
+    environment[CONTROLLED_POLICY_MANIFEST_ENV] = _canonical_json(
+        effective_policy.to_dict()
+    )
+    if normalized_scope:
+        environment[CONTROLLED_INITIAL_SCOPE_ENV] = json.dumps(
+            list(normalized_scope), separators=(",", ":")
+        )
+    if lock_scope:
+        environment[CONTROLLED_SCOPE_LOCK_ENV] = "1"
+    environment[CONTROLLED_INTERACTIVE_ENV] = "1"
+    environment["PYTHONUNBUFFERED"] = "1"
+
+    console = ConsoleRenderer(stdout, stderr)
+    console.header(
+        run_id=run_id,
+        root=resolved_root,
+        policy=selected_policy,
+        adapter=handshake.adapter,
+        adapter_version=handshake.adapter_version,
+        protocol_version=handshake.negotiated_protocol_version,
+        runtime_name=handshake.runtime_name,
+        runtime_version=handshake.runtime_version,
+        model=model,
+        initial_scope=normalized_scope,
+        scope_locked=lock_scope,
+        title="Claim Plane · Interactive Codex",
+    )
+    console.step(
+        "Preflight ready",
+        detail="adapter, policy, Git, and runtime checks passed",
+        elapsed_seconds=time.monotonic() - preflight_started,
+    )
+    console.step(
+        "Opening Codex TUI",
+        detail="exit Codex normally to seal final evidence",
+        state="active",
+    )
+    stdout.write("\n")
+    stdout.flush()
+
+    process: ProcessLike | None = None
+    runtime_returncode: int | None = None
+    completion_payload: dict[str, Any] = {}
+    adapter_status: dict[str, Any] = {}
+    cancellation: Mapping[str, Any] | None = None
+    error: Mapping[str, Any] | None = None
+    session_record: dict[str, Any] | None = None
+    session_id: str | None = None
+    intent_id: str | None = None
+    intent_version: int | None = None
+    outcome = ControlledRunOutcome.FAILED
+
+    previous_sigint: Any = None
+    signal_handler_changed = False
+    try:
+        if threading.current_thread() is threading.main_thread():
+            previous_sigint = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, lambda _signum, _frame: None)
+            signal_handler_changed = True
+        process = process_factory(command, root=resolved_root, env=environment)
+        try:
+            runtime_returncode = process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(
+                "interactive Codex session exceeded its wall-time limit"
+            ) from exc
+
+        session_record = _session_record_from_run(resolved_root, run_id)
+        session_id = _session_from_run(resolved_root, run_id)
+        if not session_id:
+            outcome = (
+                ControlledRunOutcome.CANCELLED
+                if runtime_returncode == 0
+                else ControlledRunOutcome.FAILED
+            )
+            error = {
+                "code": "no_task_submitted",
+                "message": (
+                    "interactive Codex exited without a Claim Plane task session"
+                ),
+            }
+        else:
+            console.verification_started()
+            intent_id, intent_version, adapter_status = _inspect_binding(
+                adapter,
+                root=resolved_root,
+                run_id=run_id,
+                session_id=session_id,
+            )
+            existing_completion = adapter_status.get("completion")
+            completion_is_verified = bool(
+                isinstance(existing_completion, Mapping)
+                and existing_completion.get("verified") is True
+            )
+            if intent_id and not completion_is_verified:
+                response = adapter.verify_completion(
+                    _request(
+                        AdapterOperation.VERIFY_COMPLETION,
+                        adapter=adapter.name,
+                        root=resolved_root,
+                        run_id=run_id,
+                        session_id=session_id,
+                        intent_id=intent_id,
+                        intent_version=intent_version,
+                        timeout_seconds=acceptance_timeout,
+                        payload={"source": "interactive_codex_final_verifier"},
+                    )
+                )
+                completion_payload = dict(response.payload)
+            elif isinstance(existing_completion, Mapping) and existing_completion:
+                completion_payload = dict(existing_completion)
+            elif intent_id:
+                completion_payload = {
+                    "verified": False,
+                    "errors": 0,
+                    "warnings": 1,
+                    "findings": [],
+                }
+            else:
+                outcome = ControlledRunOutcome.CANCELLED
+                error = {
+                    "code": "no_admitted_intent",
+                    "message": (
+                        "interactive session ended without an admitted ChangeIntent"
+                    ),
+                }
+            if intent_id:
+                outcome = _classify_outcome(
+                    runtime_returncode=runtime_returncode,
+                    completion=completion_payload,
+                )
+                adapter.stop_session(
+                    _request(
+                        AdapterOperation.STOP_SESSION,
+                        adapter=adapter.name,
+                        root=resolved_root,
+                        run_id=run_id,
+                        session_id=session_id,
+                        payload={"source": "interactive_codex_launcher"},
+                    )
+                )
+    except KeyboardInterrupt:
+        if process is not None:
+            _terminate_interactive_process(process)
+        session_record = _session_record_from_run(resolved_root, run_id)
+        session_id = _session_from_run(resolved_root, run_id)
+        cancellation = _cancel_authority(
+            adapter,
+            root=resolved_root,
+            run_id=run_id,
+            session_id=session_id,
+        )
+        outcome = ControlledRunOutcome.CANCELLED
+        error = {"code": "cancelled", "message": "interactive session interrupted"}
+    except TimeoutError:
+        if process is not None:
+            _terminate_interactive_process(process)
+        session_record = _session_record_from_run(resolved_root, run_id)
+        session_id = _session_from_run(resolved_root, run_id)
+        cancellation = _cancel_authority(
+            adapter,
+            root=resolved_root,
+            run_id=run_id,
+            session_id=session_id,
+        )
+        outcome = ControlledRunOutcome.TIMED_OUT
+        error = {
+            "code": "timeout",
+            "message": "interactive session exceeded its configured wall-time limit",
+        }
+    except Exception as exc:  # noqa: BLE001
+        if process is not None:
+            _terminate_interactive_process(process)
+        session_record = _session_record_from_run(resolved_root, run_id)
+        session_id = _session_from_run(resolved_root, run_id)
+        cancellation = _cancel_authority(
+            adapter,
+            root=resolved_root,
+            run_id=run_id,
+            session_id=session_id,
+        )
+        outcome = ControlledRunOutcome.FAILED
+        error = {
+            "code": "interactive_codex_failed",
+            "type": exc.__class__.__name__,
+            "message_sha256": hashlib.sha256(str(exc).encode("utf-8")).hexdigest(),
+        }
+    finally:
+        if signal_handler_changed:
+            signal.signal(signal.SIGINT, previous_sigint)
+
+    result_git = capture_git_state(resolved_root)
+    changed_paths = _changed_paths(resolved_root, start_git.head_commit, result_git)
+    if changed_paths and (not session_id or not intent_id):
+        outcome = ControlledRunOutcome.REJECTED
+        error = {
+            "code": "unbound_repository_changes",
+            "message": "repository changed without a bound admitted ChangeIntent",
+        }
+    risk = effective_policy.classify_many(changed_paths)
+    final_policy_action = PolicyAction(str(risk["final_action"]))
+    if outcome is ControlledRunOutcome.VERIFIED:
+        if final_policy_action is PolicyAction.DENY:
+            outcome = ControlledRunOutcome.REJECTED
+        elif final_policy_action is PolicyAction.REVIEW_REQUIRED:
+            outcome = ControlledRunOutcome.REVIEW_REQUIRED
+
+    completion = _completion_summary(completion_payload)
+    changes = _change_summary(resolved_root, start_git, result_git)
+    acceptance = _acceptance_summary(resolved_root, completion)
+    lifecycle = _lifecycle_summary(resolved_root, session_id)
+
+    prompt_sha = None
+    prompt_length = None
+    if isinstance(session_record, Mapping):
+        raw_sha = session_record.get("prompt_sha256")
+        raw_length = session_record.get("prompt_length")
+        if isinstance(raw_sha, str) and raw_sha:
+            prompt_sha = raw_sha
+        if isinstance(raw_length, int):
+            prompt_length = raw_length
+    fallback_task = cleaned_task or "interactive Codex session"
+
+    result = ControlledRunResult(
+        run_id=run_id,
+        adapter=adapter.name,
+        policy=selected_policy,
+        root=str(resolved_root),
+        started_at=started_at,
+        finished_at=_utc_now(),
+        outcome=outcome,
+        exit_code=_exit_code(outcome),
+        runtime_returncode=runtime_returncode,
+        task_sha256=(
+            prompt_sha or hashlib.sha256(fallback_task.encode("utf-8")).hexdigest()
+        ),
+        task_length=(
+            prompt_length if prompt_length is not None else len(fallback_task)
+        ),
+        session_id=session_id,
+        intent_id=intent_id,
+        intent_version=intent_version,
+        start_git=start_git,
+        result_git=result_git,
+        manifest_digest=manifest.digest(),
+        handshake=handshake.evidence_summary(),
+        policy_compatibility=compatibility.to_dict(),
+        effective_policy=effective_policy.to_dict(),
+        risk=risk,
+        runtime={
+            "session_id": session_id,
+            "event_counts": {},
+            "errors": 0 if runtime_returncode in {0, None} else 1,
+            "final_message_sha256": None,
+            "final_message_length": 0,
+            "usage": {},
+            "doctor_ready": bool(doctor.get("ready")),
+            "model_override": model,
+            "interactive": True,
+            "launcher": "codex_tui",
+        },
+        completion=completion,
+        changes=changes,
+        acceptance=acceptance,
+        scope=_scope_summary(
+            normalized_scope,
+            locked=lock_scope,
+            adapter_status=adapter_status,
+        ),
+        lifecycle=lifecycle,
+        cancellation=cancellation,
+        error=error,
+    )
+    _atomic_write_json(controlled_run_path(resolved_root, run_id), result.to_dict())
+    console.finish(
+        result=result.to_dict(),
+        evidence_path=controlled_run_path(resolved_root, run_id),
+        root=resolved_root,
+        final_message=None,
+    )
     return result

@@ -38,7 +38,15 @@ from claim_plane.connectors.codex_guard import (
     promotion_modes,
     protected_control_path,
 )
-from claim_plane.core import ChangeIntent, IntentOperation, Plane, ResourceKind
+from claim_plane.core import (
+    AccessMode,
+    ChangeIntent,
+    IntentOperation,
+    Plane,
+    ResourceKind,
+    ResourceRef,
+    ScopeCommitment,
+)
 from claim_plane.policy import (
     EffectivePolicy,
     PolicyAction,
@@ -62,7 +70,7 @@ CODEX_INTENT_ADMISSION_PROTOCOL = "claim-plane.codex-intent-admission.v1"
 CODEX_HOOK_COMMAND = "claim-plane codex-hook"
 CODEX_MIN_GUARD_VERSION = (0, 123, 0)
 CODEX_COMPLETION_ACCEPTANCE_TIMEOUT = 300
-CODEX_CONNECTOR_REVISION = 6
+CODEX_CONNECTOR_REVISION = 7
 CODEX_HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -582,7 +590,48 @@ def doctor_codex(root_or_child: str | Path = ".") -> CodexDoctorReport:
     root = resolve_project_root(root_or_child)
     project_report = doctor_project(root)
     checks: list[dict[str, Any]] = [dict(item) for item in project_report.checks]
-    project_checks = {str(item.get("name")): item for item in project_report.checks}
+
+    status_lines = tuple(
+        line
+        for line in _git(
+            root, "status", "--porcelain=v1", "--untracked-files=all"
+        ).splitlines()
+        if line.strip()
+    )
+    managed_paths = {".codex/hooks.json"}
+    managed_lines = tuple(
+        line
+        for line in status_lines
+        if line[3:].strip().replace("\\", "/") in managed_paths
+    )
+    non_managed_lines = tuple(
+        line for line in status_lines if line not in managed_lines
+    )
+    if status_lines and not non_managed_lines:
+        for item in checks:
+            if item.get("name") == "working_tree":
+                item.update(
+                    {
+                        "status": "info",
+                        "detail": (
+                            "working tree changes are limited to managed Codex "
+                            "connector state"
+                        ),
+                    }
+                )
+                break
+    checks.append(
+        {
+            "name": "managed_connector_state",
+            "status": "info" if managed_lines else "ok",
+            "detail": (
+                ", ".join(line[3:].strip() for line in managed_lines)
+                if managed_lines
+                else "no untracked managed connector files"
+            ),
+        }
+    )
+    project_checks = {str(item.get("name")): item for item in checks}
     project_initialized = all(
         str(project_checks.get(name, {}).get("status")) == "ok"
         for name in ("project_config", "project_state", "state_directory")
@@ -1004,6 +1053,15 @@ def _record_session_handshake(
             if isinstance(policy_manifest, Mapping):
                 effective = EffectivePolicy.from_dict(policy_manifest)
                 session["controlled_policy_manifest"] = effective.to_dict()
+        controlled_scope = payload.get("_claim_plane_initial_scope")
+        if isinstance(controlled_scope, list) and all(
+            isinstance(item, str) and item for item in controlled_scope
+        ):
+            session["operator_initial_scope"] = list(dict.fromkeys(controlled_scope))
+        if payload.get("_claim_plane_scope_locked") is True:
+            session["operator_scope_locked"] = True
+        if payload.get("_claim_plane_interactive") is True:
+            session["controlled_interactive"] = True
         session["last_event"] = "SessionStart"
         session["last_seen_at"] = now
         session.pop("ended_at", None)
@@ -1044,6 +1102,17 @@ def _record_session_handshake(
             if isinstance(payload.get("_claim_plane_policy_manifest"), Mapping)
             else None
         ),
+        "operator_initial_scope": (
+            list(dict.fromkeys(payload["_claim_plane_initial_scope"]))
+            if isinstance(payload.get("_claim_plane_initial_scope"), list)
+            and all(
+                isinstance(item, str) and item
+                for item in payload["_claim_plane_initial_scope"]
+            )
+            else []
+        ),
+        "operator_scope_locked": payload.get("_claim_plane_scope_locked") is True,
+        "controlled_interactive": payload.get("_claim_plane_interactive") is True,
         "task_id": None,
         "reserved_intent_id": None,
         "owner": None,
@@ -1163,6 +1232,78 @@ def _validate_operation_path(operation: IntentOperation) -> None:
         )
 
 
+def _operator_scope(session: Mapping[str, Any]) -> tuple[str, ...]:
+    raw = session.get("operator_initial_scope")
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            item.strip() for item in raw if isinstance(item, str) and item.strip()
+        )
+    )
+
+
+def _scope_selector_covers(selector: str, identifier: str) -> bool:
+    return ResourceRef(kind=ResourceKind.FILE, identifier=selector).covers_path(
+        identifier
+    )
+
+
+def _apply_operator_initial_scope(
+    session: Mapping[str, Any], operations: tuple[IntentOperation, ...]
+) -> tuple[tuple[IntentOperation, ...], tuple[dict[str, Any], ...]]:
+    """Apply an operator-provided initial authority ceiling to a model proposal.
+
+    The planner still proposes the task intent. Explicit scope only constrains the
+    first admitted mutation surface. Out-of-scope file operations are omitted so a
+    later concrete write must cross the normal one-time amendment path.
+    """
+
+    selectors = _operator_scope(session)
+    if not selectors:
+        return operations, ()
+
+    retained: list[IntentOperation] = []
+    omitted: list[dict[str, Any]] = []
+    for operation in operations:
+        if (
+            operation.access.mutating
+            and operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+            and not any(
+                _scope_selector_covers(selector, operation.resource.identifier)
+                for selector in selectors
+            )
+        ):
+            omitted.append(_operation_summary(operation))
+            continue
+        retained.append(operation)
+
+    existing_identifiers = {
+        operation.resource.identifier
+        for operation in retained
+        if operation.access.mutating
+        and operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+    }
+    for selector in selectors:
+        if selector in existing_identifiers:
+            continue
+        retained.append(
+            IntentOperation(
+                access=AccessMode.WRITE,
+                resource=ResourceRef(
+                    kind=ResourceKind.FILE,
+                    identifier=selector,
+                    metadata={"operator_initial_scope": True},
+                ),
+                required=True,
+                commitment=ScopeCommitment.COMMITTED,
+                metadata={"operator_initial_scope": True},
+            )
+        )
+
+    return tuple(retained), tuple(omitted)
+
+
 def _intent_from_proposal(
     session: dict[str, Any], proposal: dict[str, Any]
 ) -> tuple[ChangeIntent, str]:
@@ -1197,6 +1338,7 @@ def _intent_from_proposal(
     operations = tuple(IntentOperation.from_dict(item) for item in raw_operations)
     for operation in operations:
         _validate_operation_path(operation)
+    operations, scope_omissions = _apply_operator_initial_scope(session, operations)
 
     proposal_metadata = proposal.get("metadata") or {}
     if not isinstance(proposal_metadata, dict):
@@ -1208,6 +1350,9 @@ def _intent_from_proposal(
         "codex_session_id": str(session["session_id"]),
         "prompt_sha256": str(session.get("prompt_sha256") or ""),
         "bootstrap_protocol": CODEX_SESSION_PROTOCOL,
+        "operator_initial_scope": list(_operator_scope(session)),
+        "operator_scope_locked": bool(session.get("operator_scope_locked")),
+        "operator_scope_omissions": list(scope_omissions),
     }
 
     proposed_acceptance = _string_list(proposal.get("acceptance"), field="acceptance")
@@ -1380,6 +1525,10 @@ def amend_codex_scope(
     intent_id = session.get("active_intent_id")
     if not isinstance(intent_id, str) or not intent_id:
         raise ValueError("Codex session has no active ChangeIntent to amend")
+    if session.get("operator_scope_locked") is True:
+        raise ValueError(
+            "operator locked the initial scope; brokered amendments are disabled"
+        )
 
     pending = session.get("pending_scope_amendment")
     if not isinstance(pending, dict):
@@ -1637,6 +1786,35 @@ def _handle_stop_completion(
     intent_id = session.get("active_intent_id")
     if not isinstance(intent_id, str) or not intent_id:
         return
+    if (
+        session.get("controlled_interactive") is True
+        or payload.get("_claim_plane_interactive") is True
+    ):
+        # In the TUI, Stop is a conversational turn boundary.  Acceptance and
+        # terminal evidence belong to the outer ``claim-plane codex`` launcher
+        # after the user exits the session, never to an in-turn hook.
+        session["task_state"] = "awaiting_final_verification"
+        session["last_turn_completed_at"] = _utc_now()
+        session.pop("completion", None)
+        _write_session(root, session)
+        _write_hook_output(
+            output,
+            {
+                "systemMessage": "\n".join(
+                    [
+                        "Claim Plane — AGENT TURN COMPLETED",
+                        "✓ mutation activity recorded",
+                        "✓ current authority state preserved",
+                        "● final verification pending",
+                        (
+                            "Exit Codex to run configured acceptance checks and "
+                            "seal evidence."
+                        ),
+                    ]
+                )
+            },
+        )
+        return
     try:
         result = verify_codex_completion(root, session_id=str(session["session_id"]))
     except Exception as exc:
@@ -1750,6 +1928,11 @@ def codex_intent_status(
             "recovery_reason": session.get("recovery_reason"),
             "concurrent_sessions": list(session.get("concurrent_sessions") or ()),
         },
+        "operator_scope": {
+            "mode": "operator" if _operator_scope(session) else "planner",
+            "initial": list(_operator_scope(session)),
+            "locked": bool(session.get("operator_scope_locked")),
+        },
         "guard": {
             "protocol": session.get("guard_protocol") or CODEX_GUARD_PROTOCOL,
             "pretool_calls": int(session.get("guard_pretool_calls") or 0),
@@ -1825,6 +2008,16 @@ def _task_context(session: dict[str, Any]) -> str:
                 f"Intent: {session.get('active_intent_id')}",
                 f"Base commit: {session.get('task_base_commit')}",
                 f"Goal: {session.get('intent_goal')}",
+                (
+                    "Operator initial scope: " + ", ".join(_operator_scope(session))
+                    if _operator_scope(session)
+                    else "Operator initial scope: automatic planner"
+                ),
+                (
+                    "Scope expansion: locked by operator"
+                    if session.get("operator_scope_locked")
+                    else "Scope expansion: brokered amendments allowed"
+                ),
                 "Committed scope:",
                 *committed,
                 "Contingent scope:",
@@ -1861,6 +2054,22 @@ def _task_context(session: dict[str, Any]) -> str:
             f"Task: {session.get('task_id')}",
             f"Pinned base commit: {session.get('task_base_commit')}",
             dirty_note,
+            (
+                "Operator-provided initial mutation scope: "
+                + ", ".join(_operator_scope(session))
+                if _operator_scope(session)
+                else "Initial mutation scope is selected automatically by the planner."
+            ),
+            (
+                "The operator locked this scope. Do not request or attempt changes "
+                "outside it."
+                if session.get("operator_scope_locked")
+                else (
+                    "If a genuinely required write falls outside explicit initial scope, "
+                    "let Claim Plane issue a brokered amendment ticket after the "
+                    "denied mutation."
+                )
+            ),
             "Before the first repository mutation, inspect the repository read-only "
             "and admit one ChangeIntent for this task.",
             "Submit the proposal through the connector-owned control command. Use "
@@ -1898,9 +2107,16 @@ def _task_context(session: dict[str, Any]) -> str:
                 },
                 separators=(",", ":"),
             ),
-            "Use committed scope for expected changes and contingent scope only for "
-            "plausible fallback surfaces. Do not provide intent_id, owner, or base "
-            "revision; Claim Plane binds those to this session.",
+            (
+                "When operator initial scope is present, keep the initial proposal's "
+                "mutating file operations inside it. Claim Plane enforces this "
+                "server-side."
+                if _operator_scope(session)
+                else "Use committed scope for expected changes and contingent scope only "
+                "for plausible fallback surfaces."
+            ),
+            "Do not provide intent_id, owner, or base revision; Claim Plane binds those "
+            "to this session.",
         ]
     )
 
@@ -1979,6 +2195,16 @@ def _attach_scope_amendment_ticket(
         "multiple_scope_promotions",
     }:
         return evaluation
+    if session.get("operator_scope_locked") is True:
+        return replace(
+            evaluation,
+            reason_code="operator_scope_locked",
+            reason=(
+                evaluation.reason
+                + " The operator locked the initial scope, so no amendment ticket "
+                "is available."
+            ),
+        )
     intent_id = session.get("active_intent_id")
     if not isinstance(intent_id, str) or not intent_id:
         return evaluation
@@ -2046,6 +2272,7 @@ _OBSERVE_INVARIANT_DENIALS = frozenset(
         "protected_control_path",
         "branch_changed",
         "preexisting_dirty_path",
+        "operator_scope_locked",
     }
 )
 
@@ -2414,7 +2641,13 @@ def handle_codex_hook(payload: dict[str, Any], *, output: TextIO | None = None) 
             promoted=bool(evaluation.allowed and evaluation.promotion is not None),
         )
         if not evaluation.allowed:
-            _write_hook_output(output, denied_hook_output(evaluation))
+            _write_hook_output(
+                output,
+                denied_hook_output(
+                    evaluation,
+                    initial_scope=_operator_scope(session),
+                ),
+            )
         return 0
 
     if event in {"PostToolUse", "Stop"}:

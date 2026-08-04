@@ -52,12 +52,13 @@ def test_preview_version_and_public_contract_are_consistent() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = technical_preview_manifest(ROOT)
 
-    assert __version__ == "0.36.1"
+    assert __version__ == "0.36.4"
     assert project["project"]["version"] == __version__
     assert manifest["version"] == __version__
     assert manifest["channel"] == "single-agent-codex"
     assert manifest["python"]["supported"] is True
     assert all(item["present"] is True for item in manifest["documentation"])
+    assert "claim-plane codex" in manifest["stable_commands"]
     assert "claim-plane run" in manifest["stable_commands"]
     assert [item["code"] for item in exit_code_manifest()["codes"]] == [
         0,
@@ -215,3 +216,16 @@ def test_preview_support_files_and_release_validation_are_present() -> None:
     assert "./scripts/check-technical-preview.sh" in (
         ROOT / "scripts/check.sh"
     ).read_text(encoding="utf-8")
+
+
+def test_interactive_codex_command_parses_without_manual_scope() -> None:
+    parser = cli.build_parser()
+    automatic = parser.parse_args(["codex"])
+    guided = parser.parse_args(
+        ["codex", "Fix timeout handling", "--scope", "src/connector.py"]
+    )
+
+    assert automatic.task is None
+    assert automatic.scope is None
+    assert guided.task == "Fix timeout handling"
+    assert guided.scope == ["src/connector.py"]

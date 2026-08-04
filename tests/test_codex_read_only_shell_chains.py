@@ -23,6 +23,7 @@ def _classify(root: Path, command: str) -> str:
         "git diff --check; git diff -- src/app.py tests/test_app.py",
         "git status --short && command -v pytest",
         "pwd; git status --short && claim-plane --version",
+        "git diff -- src/app.py tests/test_app.py; printf '%s\\n' '--- status ---'; git status --short",
     ),
 )
 def test_read_only_shell_chains_are_classified_as_read_only(

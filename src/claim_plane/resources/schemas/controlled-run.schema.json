@@ -32,6 +32,7 @@
     "completion",
     "changes",
     "acceptance",
+    "scope",
     "lifecycle",
     "cancellation",
     "error"
@@ -169,6 +170,67 @@
     },
     "acceptance": {
       "$ref": "acceptance-summary.schema.json"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "mode",
+        "initial",
+        "locked",
+        "amendments"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "claim-plane.controlled-scope.v1"
+        },
+        "mode": {
+          "enum": [
+            "planner",
+            "operator"
+          ]
+        },
+        "initial": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "amendments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tickets_issued",
+            "requests",
+            "admitted",
+            "denied"
+          ],
+          "properties": {
+            "tickets_issued": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "requests": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "admitted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "denied": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

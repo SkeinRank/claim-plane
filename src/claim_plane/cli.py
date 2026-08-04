@@ -21,11 +21,15 @@ from claim_plane.connectors import (
 )
 from claim_plane.connectors.codex_adapter import CodexAdapter
 from claim_plane.controlled_run import (
+    CONTROLLED_INITIAL_SCOPE_ENV,
+    CONTROLLED_INTERACTIVE_ENV,
     CONTROLLED_POLICY_ENV,
     CONTROLLED_POLICY_MANIFEST_ENV,
     CONTROLLED_RUN_ENV,
+    CONTROLLED_SCOPE_LOCK_ENV,
     ControlledRunPreflightError,
     run_controlled_task,
+    run_interactive_codex,
 )
 from claim_plane.exit_codes import ExitCode, exit_code_manifest
 from claim_plane.preview import technical_preview_manifest
@@ -750,12 +754,14 @@ def cmd_run(args: argparse.Namespace) -> int:
             timeout_seconds=args.timeout,
             acceptance_timeout=args.acceptance_timeout,
             model=args.model,
+            initial_scope=tuple(args.scope or ()),
+            lock_scope=args.lock_scope,
             quiet=args.json,
             verbose=args.verbose,
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
-    except ControlledRunPreflightError as exc:
+    except (ControlledRunPreflightError, ValueError) as exc:
         if args.json:
             _write_json(
                 {
@@ -770,6 +776,32 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.json:
         _write_json(result.to_dict(), args.out)
     elif args.out:
+        _write_json(result.to_dict(), args.out)
+    return result.exit_code
+
+
+def cmd_codex(args: argparse.Namespace) -> int:
+    handshake = _adapter_handshake("codex", repo=args.repo)
+    adapter = _ADAPTER_REGISTRY.create("codex")
+    try:
+        result = run_interactive_codex(
+            args.task,
+            root=args.repo,
+            adapter=adapter,
+            handshake=handshake,
+            policy=args.policy,
+            timeout_seconds=args.timeout,
+            acceptance_timeout=args.acceptance_timeout,
+            model=args.model,
+            initial_scope=tuple(args.scope or ()),
+            lock_scope=args.lock_scope,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+    except (ControlledRunPreflightError, ValueError) as exc:
+        print(f"Interactive Codex could not start: {exc}", file=sys.stderr)
+        return 2
+    if args.out:
         _write_json(result.to_dict(), args.out)
     return result.exit_code
 
@@ -813,6 +845,18 @@ def _print_evidence_report(payload: Mapping[str, Any]) -> None:
         f"{decisions.get('observed_count', 0)} observed, "
         f"{decisions.get('amendment_count', 0)} amendments"
     )
+    scope = payload.get("scope") or {}
+    amendments = scope.get("amendments") or {}
+    for index, item in enumerate(amendments.get("history") or (), start=1):
+        if not isinstance(item, Mapping):
+            continue
+        decision = "ALLOW" if item.get("allowed") else "DENY"
+        resources = ", ".join(
+            str(resource)
+            for resource in item.get("resources") or ()
+            if isinstance(resource, str)
+        )
+        print(f"  Amendment {index}: {decision} {resources or 'no resources'}")
     acceptance = payload.get("acceptance") or {}
     print(
         f"Acceptance: {'PASS' if acceptance.get('passed') else 'NOT VERIFIED'} "
@@ -1007,6 +1051,18 @@ def cmd_codex_hook(args: argparse.Namespace) -> int:
         if controlled_policy and effective.name != controlled_policy:
             raise ValueError("controlled policy name and manifest do not match")
         payload["_claim_plane_policy_manifest"] = effective.to_dict()
+    controlled_scope = os.environ.get(CONTROLLED_INITIAL_SCOPE_ENV)
+    if controlled_scope:
+        scope_payload = json.loads(controlled_scope)
+        if not isinstance(scope_payload, list) or not all(
+            isinstance(item, str) and item for item in scope_payload
+        ):
+            raise ValueError("controlled initial scope must be a JSON string array")
+        payload["_claim_plane_initial_scope"] = list(scope_payload)
+    if os.environ.get(CONTROLLED_SCOPE_LOCK_ENV) == "1":
+        payload["_claim_plane_scope_locked"] = True
+    if os.environ.get(CONTROLLED_INTERACTIVE_ENV) == "1":
+        payload["_claim_plane_interactive"] = True
     if payload.get("hook_event_name") == "SessionStart":
         repo = str(payload.get("cwd") or ".")
         _adapter_handshake("codex", repo=repo, require_compatible=True)
@@ -2730,6 +2786,59 @@ def build_parser() -> argparse.ArgumentParser:
     dogfood_gate.add_argument("--json", action="store_true")
     dogfood_gate.set_defaults(func=cmd_dogfood_gate)
 
+    interactive_codex = sub.add_parser(
+        "codex",
+        help=(
+            "Open the interactive Codex TUI under Claim Plane authority and seal "
+            "evidence when the session exits."
+        ),
+    )
+    interactive_codex.add_argument(
+        "task",
+        nargs="?",
+        default=None,
+        help=(
+            "Optional initial prompt; omit it to start with the normal Codex composer."
+        ),
+    )
+    interactive_codex.add_argument("--repo", default=".")
+    interactive_codex.add_argument("--policy", choices=POLICY_NAMES)
+    interactive_codex.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="Optional maximum interactive session wall time in seconds.",
+    )
+    interactive_codex.add_argument(
+        "--acceptance-timeout",
+        type=float,
+        default=300.0,
+        help="Maximum time for final acceptance verification (default: 300).",
+    )
+    interactive_codex.add_argument("--model", default=None)
+    interactive_codex.add_argument(
+        "--scope",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Optional initial mutation scope; repeat for multiple files or "
+            "directories. Brokered amendments remain available unless "
+            "--lock-scope is set."
+        ),
+    )
+    interactive_codex.add_argument(
+        "--lock-scope",
+        action="store_true",
+        help="Deny every mutation outside explicit --scope paths; no amendments.",
+    )
+    interactive_codex.add_argument(
+        "--out",
+        default=None,
+        help="Optionally write the final controlled-run JSON record to this path.",
+    )
+    interactive_codex.set_defaults(func=cmd_codex)
+
     controlled_run = sub.add_parser(
         "run",
         help="Run one coding task under adapter authority and final Git verification.",
@@ -2755,6 +2864,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum time for final acceptance verification (default: 300).",
     )
     controlled_run.add_argument("--model", default=None)
+    controlled_run.add_argument(
+        "--scope",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Operator-provided initial mutation scope; repeat for multiple files or "
+            "directories. The planner remains automatic and may request brokered "
+            "amendments unless --lock-scope is set."
+        ),
+    )
+    controlled_run.add_argument(
+        "--lock-scope",
+        action="store_true",
+        help="Deny every mutation outside explicit --scope paths; no amendments.",
+    )
     run_output = controlled_run.add_mutually_exclusive_group()
     run_output.add_argument(
         "--json",

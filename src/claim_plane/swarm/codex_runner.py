@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -54,6 +55,48 @@ _ACTIVE_STATES = {
 _TERMINATE_GRACE_SECONDS = 5.0
 _HEARTBEAT_INTERVAL_SECONDS = 1.0
 _RUN_LEASE_SECONDS = 15
+
+
+_TRANSIENT_SPAWN_ERRNOS = frozenset(
+    {
+        errno.EAGAIN,
+        errno.EDEADLK,
+        errno.EMFILE,
+        errno.ENFILE,
+        errno.ENOMEM,
+    }
+)
+
+
+def _spawn_codex_process(
+    command: tuple[str, ...],
+    *,
+    cwd: Path,
+    stderr: TextIO,
+    attempts: int = 3,
+    popen_factory: Any = subprocess.Popen,
+) -> subprocess.Popen[str]:
+    """Retry only transient OS resource-pressure failures during process spawn."""
+
+    if attempts < 1:
+        raise ValueError("spawn attempts must be positive")
+    for attempt in range(1, attempts + 1):
+        try:
+            return popen_factory(
+                list(command),
+                cwd=cwd,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=stderr,
+                start_new_session=True,
+                env=os.environ.copy(),
+                bufsize=1,
+            )
+        except OSError as exc:
+            if exc.errno not in _TRANSIENT_SPAWN_ERRNOS or attempt >= attempts:
+                raise
+            time.sleep(0.05 * attempt)
+    raise RuntimeError("unreachable process-spawn retry state")
 
 
 def _utc_now() -> str:
@@ -645,15 +688,10 @@ def run_codex_work_item(
             stderr_path.open("w", encoding="utf-8") as stderr_handle,
             events_path.open("w", encoding="utf-8") as events_handle,
         ):
-            process = subprocess.Popen(
-                list(record.command),
+            process = _spawn_codex_process(
+                record.command,
                 cwd=worktree,
-                text=True,
-                stdout=subprocess.PIPE,
                 stderr=stderr_handle,
-                start_new_session=True,
-                env=os.environ.copy(),
-                bufsize=1,
             )
             running = record.with_updates(
                 state=CodexRunState.RUNNING,

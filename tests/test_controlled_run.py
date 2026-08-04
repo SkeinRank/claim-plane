@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import subprocess
@@ -17,6 +18,7 @@ from claim_plane.controlled_run import (
     controlled_run_path,
     load_controlled_run,
     run_controlled_task,
+    run_interactive_codex,
 )
 from claim_plane.project import dump_project_config, load_project_config
 from claim_plane.protocol import AdapterOperation, AdapterRequest, LifecycleEventStore
@@ -117,6 +119,7 @@ def _successful_process_factory(
         assert command[-1] == task
         assert root == repo
         run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        assert "CLAIM_PLANE_CONTROLLED_INTERACTIVE" not in env
         policy_manifest = json.loads(env["CLAIM_PLANE_CONTROLLED_POLICY_MANIFEST"])
         assert policy_manifest["preset"]["name"] == "guarded"
         assert policy_manifest["digest"]
@@ -910,3 +913,465 @@ def test_evidence_report_fails_closed_for_corrupt_lifecycle(
 
     with pytest.raises(EvidenceError):
         build_evidence_report(repo, result.run_id)
+
+
+def test_controlled_run_records_optional_operator_initial_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value."
+
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        initial_scope=("app.py",),
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(adapter, repo=repo, task=task),
+    )
+
+    assert result.scope == {
+        "protocol": "claim-plane.controlled-scope.v1",
+        "mode": "operator",
+        "initial": ["app.py"],
+        "final": ["app.py"],
+        "locked": False,
+        "amendments": {
+            "tickets_issued": 0,
+            "requests": 0,
+            "admitted": 0,
+            "denied": 0,
+            "history": [],
+        },
+    }
+    persisted = load_controlled_run(repo, result.run_id)
+    assert persisted["scope"] == result.scope
+
+
+def test_controlled_scope_validation_is_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+
+    with pytest.raises(ValueError, match="requires at least one"):
+        run_controlled_task(
+            "Update the fixture value.",
+            root=repo,
+            adapter=adapter,
+            handshake=handshake,
+            lock_scope=True,
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+    with pytest.raises(ValueError, match="control state"):
+        run_controlled_task(
+            "Update the fixture value.",
+            root=repo,
+            adapter=adapter,
+            handshake=handshake,
+            initial_scope=(".claim-plane/config.yaml",),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+
+
+def test_controlled_run_explicit_scope_records_real_brokered_amendment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    (repo / "test_app.py").write_text("EXPECTED = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "test_app.py"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "add test fixture"], cwd=repo, check=True)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update app.py and keep its test fixture aligned."
+
+    def factory(command: list[str], *, root: Path, env: Mapping[str, str]):
+        assert root == repo
+        assert command[-1] == task
+        assert json.loads(env["CLAIM_PLANE_CONTROLLED_INITIAL_SCOPE"]) == ["app.py"]
+        run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        session_id = "thread_controlled_operator_amendment"
+        scope = json.loads(env["CLAIM_PLANE_CONTROLLED_INITIAL_SCOPE"])
+
+        def scoped_request(
+            operation: AdapterOperation,
+            suffix: str,
+            payload: Mapping[str, Any],
+        ) -> AdapterRequest:
+            return AdapterRequest.create(
+                operation,
+                adapter="codex",
+                project_root=str(repo),
+                request_id=f"{suffix}-{run_id}",
+                session_id=session_id,
+                run_id=run_id,
+                payload=payload,
+            )
+
+        adapter.start_session(
+            _request(
+                AdapterOperation.START_SESSION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={
+                    "source": "startup",
+                    "_claim_plane_initial_scope": scope,
+                },
+            )
+        )
+        adapter.submit_task(
+            _request(
+                AdapterOperation.SUBMIT_TASK,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={
+                    "prompt": task,
+                    "_claim_plane_initial_scope": scope,
+                },
+            )
+        )
+        adapter.propose_intent(
+            _request(
+                AdapterOperation.PROPOSE_INTENT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={
+                    "proposal": {
+                        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+                        "goal": "Update the value and matching test fixture",
+                        "operations": [
+                            {
+                                "access": "write",
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "commitment": "committed",
+                            },
+                            {
+                                "access": "test",
+                                "kind": "file",
+                                "identifier": "test_app.py",
+                                "commitment": "committed",
+                            },
+                        ],
+                        "preserves": [],
+                        "acceptance": [],
+                    }
+                },
+            )
+        )
+
+        app_patch = (
+            "*** Begin Patch\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+            "*** End Patch"
+        )
+        allowed = adapter.request_mutation(
+            scoped_request(
+                AdapterOperation.REQUEST_MUTATION,
+                "mutate-app",
+                {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": app_patch},
+                },
+            )
+        )
+        assert allowed.status.value == "succeeded"
+        (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+        adapter.observe_result(
+            scoped_request(
+                AdapterOperation.OBSERVE_RESULT,
+                "observe-app",
+                {"tool_name": "apply_patch"},
+            )
+        )
+
+        test_patch = (
+            "*** Begin Patch\n"
+            "*** Update File: test_app.py\n"
+            "@@\n"
+            "-EXPECTED = 1\n"
+            "+EXPECTED = 2\n"
+            "*** End Patch"
+        )
+        denied = adapter.request_mutation(
+            scoped_request(
+                AdapterOperation.REQUEST_MUTATION,
+                "mutate-test-denied",
+                {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": test_patch},
+                },
+            )
+        )
+        assert denied.status.value == "denied"
+        status = codex.codex_intent_status(repo, session_id=session_id)
+        ticket = status["scope_amendment"]["pending"]["ticket_id"]
+        amended = codex.amend_codex_scope(
+            repo,
+            session_id=session_id,
+            ticket_id=ticket,
+            reason="The behavior change requires its test fixture to stay aligned.",
+        )
+        assert amended["allowed"] is True
+
+        retry = adapter.request_mutation(
+            scoped_request(
+                AdapterOperation.REQUEST_MUTATION,
+                "mutate-test-retry",
+                {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"command": test_patch},
+                },
+            )
+        )
+        assert retry.status.value == "succeeded"
+        (repo / "test_app.py").write_text("EXPECTED = 2\n", encoding="utf-8")
+        observed = adapter.observe_result(
+            scoped_request(
+                AdapterOperation.OBSERVE_RESULT,
+                "observe-test",
+                {"tool_name": "apply_patch"},
+            )
+        )
+        verified = adapter.verify_completion(
+            AdapterRequest.create(
+                AdapterOperation.VERIFY_COMPLETION,
+                adapter="codex",
+                project_root=str(repo),
+                request_id=f"verify-{run_id}",
+                session_id=session_id,
+                run_id=run_id,
+                intent_id=observed.intent_id,
+                intent_version=observed.intent_version,
+                timeout_seconds=30,
+            )
+        )
+        assert verified.payload["verified"] is True
+        adapter.stop_session(
+            AdapterRequest.create(
+                AdapterOperation.STOP_SESSION,
+                adapter="codex",
+                project_root=str(repo),
+                request_id=f"stop-{run_id}",
+                session_id=session_id,
+                run_id=run_id,
+            )
+        )
+        stream = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": session_id}),
+                json.dumps({"type": "turn.started"}),
+                json.dumps({"type": "turn.completed"}),
+            )
+        )
+        return _CompletedProcess(stream + "\n")
+
+    output = io.StringIO()
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        initial_scope=("app.py",),
+        stdout=output,
+        stderr=io.StringIO(),
+        process_factory=factory,
+    )
+
+    assert result.outcome is ControlledRunOutcome.VERIFIED
+    assert result.scope["amendments"] == {
+        "tickets_issued": 1,
+        "requests": 1,
+        "admitted": 1,
+        "denied": 0,
+        "history": [
+            {
+                "allowed": True,
+                "resources": ["test_app.py"],
+                "reason_sha256": hashlib.sha256(
+                    b"The behavior change requires its test fixture to stay aligned."
+                ).hexdigest(),
+            }
+        ],
+    }
+    assert "Scope amendment admitted" in output.getvalue()
+
+
+def test_interactive_codex_launcher_preserves_tui_and_seals_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value interactively."
+    output = io.StringIO()
+
+    def factory(command: list[str], *, root: Path, env: Mapping[str, str]):
+        assert root == repo
+        assert command[1:3] == ["--ask-for-approval", "never"]
+        assert command[3:5] == ["--sandbox", "workspace-write"]
+        assert "exec" not in command
+        assert command[-1] == task
+        run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        assert env["CLAIM_PLANE_CONTROLLED_INTERACTIVE"] == "1"
+        session_id = "thread_interactive_success"
+        adapter.start_session(
+            _request(
+                AdapterOperation.START_SESSION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"source": "startup"},
+            )
+        )
+        adapter.submit_task(
+            _request(
+                AdapterOperation.SUBMIT_TASK,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"prompt": task},
+            )
+        )
+        adapter.propose_intent(
+            _request(
+                AdapterOperation.PROPOSE_INTENT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={
+                    "proposal": {
+                        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+                        "goal": "Update the fixture value",
+                        "operations": [
+                            {
+                                "access": "write",
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "commitment": "committed",
+                            }
+                        ],
+                        "preserves": [],
+                        "acceptance": [],
+                    }
+                },
+            )
+        )
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+            "*** End Patch"
+        )
+        mutation = adapter.request_mutation(
+            _request(
+                AdapterOperation.REQUEST_MUTATION,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"tool_name": "apply_patch", "tool_input": {"command": patch}},
+            )
+        )
+        assert mutation.status.value == "succeeded"
+        (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+        observed = adapter.observe_result(
+            _request(
+                AdapterOperation.OBSERVE_RESULT,
+                repo=repo,
+                run_id=run_id,
+                session_id=session_id,
+                payload={"tool_name": "apply_patch"},
+            )
+        )
+        assert observed.intent_id is not None
+        pending_output = io.StringIO()
+        assert (
+            adapter.dispatch_hook(
+                {
+                    "hook_event_name": "Stop",
+                    "session_id": session_id,
+                    "cwd": str(repo),
+                    "event_id": "interactive-turn-1",
+                    "_claim_plane_run_id": run_id,
+                    "_claim_plane_interactive": True,
+                },
+                output=pending_output,
+            )
+            == 0
+        )
+        assert "AGENT TURN COMPLETED" in pending_output.getvalue()
+        assert "final verification pending" in pending_output.getvalue()
+        status = codex.codex_intent_status(repo, session_id=session_id)
+        assert status["state"] == "awaiting_final_verification"
+        assert not status.get("completion")
+        assert (
+            adapter.dispatch_hook(
+                {
+                    "hook_event_name": "SessionEnd",
+                    "session_id": session_id,
+                    "cwd": str(repo),
+                    "event_id": "interactive-session-end",
+                    "_claim_plane_run_id": run_id,
+                    "_claim_plane_interactive": True,
+                    "reason": "user_exit",
+                }
+            )
+            == 0
+        )
+        return _CompletedProcess("")
+
+    result = run_interactive_codex(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        model="gpt-test",
+        stdout=output,
+        stderr=io.StringIO(),
+        require_tty=False,
+        process_factory=factory,
+    )
+
+    assert result.outcome is ControlledRunOutcome.VERIFIED
+    assert result.runtime["interactive"] is True
+    assert result.runtime["launcher"] == "codex_tui"
+    assert result.task_sha256 == hashlib.sha256(task.encode("utf-8")).hexdigest()
+    assert "Claim Plane · Interactive Codex" in output.getvalue()
+    assert "DELIVERY VERIFIED" in output.getvalue()
+    assert load_controlled_run(repo, result.run_id)["verified"] is True
+
+
+def test_interactive_codex_rejects_passthrough_authority_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+
+    with pytest.raises(ValueError, match="owned by Claim Plane"):
+        run_interactive_codex(
+            root=repo,
+            adapter=adapter,
+            handshake=handshake,
+            codex_args=("--sandbox", "danger-full-access"),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+            require_tty=False,
+        )

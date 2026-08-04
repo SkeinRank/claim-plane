@@ -365,6 +365,7 @@ def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
         },
         "guarantees": _guarantee_summary(run, events),
         "changes": dict(changes),
+        "scope": dict(run.get("scope") or {}),
         "acceptance": dict(acceptance),
         "verification": dict(run.get("completion") or {}),
         "decisions": _decision_summary(events),

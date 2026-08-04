@@ -1004,13 +1004,48 @@ def promotion_modes(mutation: MutationRequest) -> tuple[AccessMode, ...]:
     return _mutation_modes(mutation)
 
 
-def denied_hook_output(evaluation: GuardEvaluation) -> dict[str, Any]:
+def _human_denial_reason(
+    evaluation: GuardEvaluation,
+    *,
+    initial_scope: Sequence[str] = (),
+) -> str:
+    """Return one concise model- and operator-visible denial explanation."""
+
+    paths = ", ".join(evaluation.paths) or "unknown repository path"
+    if evaluation.mutating:
+        prefix = f"Claim Plane blocked write to {paths}."
+    else:
+        prefix = "Claim Plane blocked this tool call."
+
+    boundary = ""
+    if evaluation.reason_code == "outside_admitted_scope":
+        if initial_scope:
+            boundary = " Outside initial scope: " + ", ".join(initial_scope) + "."
+        else:
+            boundary = " Outside admitted ChangeIntent."
+    elif evaluation.reason_code == "operator_scope_locked":
+        if initial_scope:
+            boundary = " Locked initial scope: " + ", ".join(initial_scope) + "."
+        else:
+            boundary = " Operator-locked scope does not permit this write."
+
+    return prefix + boundary + " " + evaluation.reason
+
+
+def denied_hook_output(
+    evaluation: GuardEvaluation,
+    *,
+    initial_scope: Sequence[str] = (),
+) -> dict[str, Any]:
     """Build the current Codex ``PreToolUse`` deny response."""
 
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": evaluation.reason,
+            "permissionDecisionReason": _human_denial_reason(
+                evaluation,
+                initial_scope=initial_scope,
+            ),
         }
     }

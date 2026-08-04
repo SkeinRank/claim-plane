@@ -8,6 +8,48 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.36.4] — 2026-08-04
+
+### Fixed
+
+- Keep interactive Codex turn boundaries non-terminal: `Stop` now reports `AGENT TURN COMPLETED` with final verification pending, while configured acceptance and evidence sealing run exactly once after the user exits the TUI.
+- Namespace native Codex hook idempotency keys by lifecycle event and payload so reused turn-level identifiers cannot make `PreToolUse` or `PostToolUse` fail with an adapter-cache conflict.
+- Route read-only inspection and connector-control hooks outside the normalized mutation state machine, eliminating false hook failures before a ChangeIntent is admitted while preserving fail-closed mutation enforcement.
+- Defer interactive `SessionEnd` normalization until launcher-owned verification completes, then seal the session in the correct lifecycle order.
+- Distinguish untracked Claim Plane-managed `.codex/hooks.json` from user-authored dirty worktree changes in `claim-plane doctor`.
+
+### Changed
+
+- Bump the Codex connector revision to 7 so existing enrollments are explicitly refreshed with the corrected interactive lifecycle behavior.
+- Preserve exact operator-provided initial scope in the TUI path; out-of-scope writes now reach the brokered amendment flow instead of being hidden by failed lifecycle hooks.
+
+## [0.36.3] — 2026-08-04
+
+### Added
+
+- Add `claim-plane codex` as an interactive launcher that preserves the normal Codex TUI while binding the session to Claim Plane policy, scope, lifecycle, final acceptance, and durable evidence.
+- Add optional initial prompts, model selection, operator-guided scope, scope locking, acceptance timeout, session timeout, and final JSON export to the interactive launcher.
+- Record interactive runs with the same `claim-plane.controlled-run.v1` evidence contract used by one-shot execution.
+
+### Changed
+
+- Render denied writes with the exact target and operator boundary instead of exposing an opaque tool payload header.
+- Show initial scope, brokered additions, and final scope as a compact scope-evolution block in the verification card and evidence report.
+- Retry only transient operating-system resource-pressure errors when spawning headless swarm Codex workers, preventing isolated macOS `EAGAIN`/resource-deadlock failures from becoming false `SPAWN_FAILED` outcomes.
+
+## [0.36.2] — 2026-08-04
+
+### Added
+
+- Add optional repeatable `claim-plane run --scope PATH` for operator-provided initial mutation authority while keeping automatic planner-generated scope as the default user experience.
+- Add `--lock-scope` for CI, compliance, and deterministic experiments that must deny every out-of-scope mutation without opening an amendment ticket.
+- Persist initial-scope mode, lock state, and amendment counts in controlled-run evidence and show brokered expansions in the human console summary.
+
+### Changed
+
+- Constrain model-proposed initial file operations server-side when explicit scope is present; genuinely required additional files must cross the existing exact-resource amendment path.
+- Keep zero-friction automatic planning for normal runs: users only provide scope when they need a reproducible boundary or a strict authority ceiling.
+
 ## [0.36.1] — 2026-08-04
 
 ### Added

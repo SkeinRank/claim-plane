@@ -7,6 +7,7 @@ preview:
 claim-plane init
 claim-plane connect codex
 claim-plane doctor
+claim-plane codex
 claim-plane run
 claim-plane report
 claim-plane replay
@@ -63,6 +64,35 @@ claim-plane schemas export ./claim-plane-schemas
 The exported files include SHA-256 identities in `schemas list` output and can be pinned
 alongside CI tooling.
 
+## Interactive Codex TUI
+
+`claim-plane codex` opens the normal interactive Codex interface while Claim Plane
+owns the authority and evidence boundary:
+
+```bash
+claim-plane codex --policy guarded
+```
+
+The user can converse with Codex normally. Project hooks still block undeclared
+writes and broker justified scope amendments. At each agent-turn boundary the TUI
+shows `AGENT TURN COMPLETED` and explicitly keeps final verification pending. After
+the TUI exits, Claim Plane runs the trusted final verifier, seals session lifecycle,
+and writes `.claim-plane/runs/<run-id>/run.json`.
+
+An initial prompt and guided scope are optional:
+
+```bash
+claim-plane codex "Fix timeout handling and update tests" \
+  --scope src/connectors/github.py \
+  --model gpt-5.6-luna
+```
+
+Available launcher controls are `--repo`, `--policy`, `--model`, `--scope`,
+`--lock-scope`, `--timeout`, `--acceptance-timeout`, and `--out`. Sandbox mode,
+approval policy, and working directory remain Claim Plane-owned so the interactive
+session cannot silently weaken its control boundary. Use `claim-plane run` for
+non-interactive automation and machine-only JSON output.
+
 ## Controlled-run terminal modes
 
 The normal `claim-plane run` view is designed for human review. It prints a compact
@@ -79,6 +109,21 @@ Use verbose mode for adapter or runtime debugging:
 ```bash
 claim-plane run "Implement the task" --policy guarded --verbose
 ```
+
+Normal runs keep scope automatic: the planner proposes the initial ChangeIntent and
+Claim Plane enforces it. For reproducible experiments or operator-guided work, provide
+one or more initial mutation paths:
+
+```bash
+claim-plane run "Fix timeout handling and update tests" \
+  --scope src/connectors/github.py \
+  --policy guarded
+```
+
+A required write outside explicit initial scope is denied first and may then receive
+a one-time exact-resource amendment ticket. Use `--lock-scope` to disable amendments
+entirely; it requires at least one `--scope` path. Directories are recursive when they
+already exist or when written with a trailing slash.
 
 Verbose mode preserves raw Codex runtime diagnostics in addition to the human summary.
 `--verbose` and `--json` are mutually exclusive. Redirected output is plain text, and

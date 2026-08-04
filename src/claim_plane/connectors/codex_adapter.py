@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, TextIO
 
 from claim_plane.connectors import codex as codex_runtime
+from claim_plane.connectors.codex_guard import classify_tool_call
 from claim_plane.core import Plane
 from claim_plane.protocol import (
     AGENT_ADAPTER_PROTOCOL_VERSION,
@@ -72,6 +73,16 @@ def _request_cache_path(root: Path, request_id: str) -> Path:
 
 
 def _hook_request_id(payload: Mapping[str, Any]) -> tuple[str, bool]:
+    """Return an idempotency key scoped to one concrete hook invocation.
+
+    Codex may reuse a turn-level ``request_id`` or ``event_id`` across several
+    lifecycle hooks.  Using that value alone makes UserPromptSubmit, PreToolUse,
+    PostToolUse, and Stop collide in the adapter request cache.  Namespace the key
+    by the hook event and the full secret-safe payload digest so an exact replay is
+    idempotent while distinct tools and lifecycle phases cannot conflict.
+    """
+
+    identity: dict[str, str] = {}
     for key in (
         "request_id",
         "requestId",
@@ -84,7 +95,7 @@ def _hook_request_id(payload: Mapping[str, Any]) -> tuple[str, bool]:
     ):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return f"codex-hook-{value.strip()}", True
+            identity[key] = value.strip()
     canonical = json.dumps(
         dict(payload),
         ensure_ascii=False,
@@ -92,8 +103,17 @@ def _hook_request_id(payload: Mapping[str, Any]) -> tuple[str, bool]:
         separators=(",", ":"),
         default=str,
     )
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return f"codex-hook-unkeyed-{digest}-{uuid.uuid4().hex}", False
+    payload_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if identity:
+        event = str(payload.get("hook_event_name") or "unknown").strip().casefold()
+        identity_digest = hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()[:16]
+        return (
+            f"codex-hook-{event}-{identity_digest}-{payload_digest[:24]}",
+            True,
+        )
+    return f"codex-hook-unkeyed-{payload_digest}-{uuid.uuid4().hex}", False
 
 
 def _map_runtime_error(exc: Exception, request: AdapterRequest) -> AdapterProtocolError:
@@ -806,6 +826,15 @@ class CodexAdapter:
                 AdapterErrorCode.INVALID_REQUEST,
                 "Codex hook input requires hook_event_name",
             )
+        if (
+            event in {"Stop", "SessionEnd"}
+            and payload.get("_claim_plane_interactive") is True
+        ):
+            # A Codex TUI Stop event marks the end of one conversational turn, and
+            # SessionEnd is emitted by the runtime before control returns to the
+            # launcher.  Defer normalized final verification and session sealing to
+            # ``claim-plane codex`` so acceptance runs exactly once, after TUI exit.
+            return codex_runtime.handle_codex_hook(dict(payload), output=output)
         root = str(payload.get("cwd") or ".")
         session_id = payload.get("session_id")
         if session_id is not None and not isinstance(session_id, str):
@@ -813,6 +842,29 @@ class CodexAdapter:
                 AdapterErrorCode.INVALID_REQUEST,
                 "Codex hook session_id must be a string",
             )
+        if event in {"PreToolUse", "PostToolUse"}:
+            try:
+                resolved_root = codex_runtime.resolve_project_root(root)
+                classification, _ = classify_tool_call(resolved_root, payload)
+            except (FileNotFoundError, ValueError):
+                classification = "unknown"
+            if classification != "mutation":
+                # Repository inspection, connector-control commands, and denied
+                # opaque surfaces are enforced and recorded by the runtime bridge,
+                # but they are not mutation lifecycle transitions.  Bypassing the
+                # normalized mutation adapter path prevents harmless inspection
+                # before intent admission from producing invalid state-machine
+                # transitions or noisy hook failures in the Codex TUI.
+                return codex_runtime.handle_codex_hook(dict(payload), output=output)
+            if isinstance(session_id, str) and session_id:
+                try:
+                    status = codex_runtime.codex_intent_status(
+                        root, session_id=session_id
+                    )
+                except (FileNotFoundError, ValueError, json.JSONDecodeError):
+                    status = {}
+                if not status.get("intent_id"):
+                    return codex_runtime.handle_codex_hook(dict(payload), output=output)
         operation = {
             "SessionStart": (
                 AdapterOperation.RESUME

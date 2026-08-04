@@ -18,6 +18,7 @@ _STABLE_COMMANDS = (
     "claim-plane init",
     "claim-plane connect codex",
     "claim-plane doctor",
+    "claim-plane codex",
     "claim-plane run",
     "claim-plane report",
     "claim-plane replay",
@@ -81,7 +82,7 @@ def technical_preview_manifest(
         },
         "documentation": documentation,
         "limitations": [
-            "Codex is the first complete one-command adapter path.",
+            "Codex is the first complete interactive and one-command adapter path.",
             (
                 "Project-local runtime hooks are not a non-bypassable "
                 "operating-system boundary."

@@ -1935,3 +1935,166 @@ def test_abandon_releases_worktree_authority_for_next_codex_session(
         codex.codex_intent_status(repo, session_id="thr_abandon_owner")["state"]
         == "abandoned"
     )
+
+
+def _bootstrap_operator_scoped_task(
+    repo: Path,
+    *,
+    session_id: str,
+    scope: list[str],
+    locked: bool = False,
+) -> None:
+    codex.init_project(repo)
+    codex.connect_codex(repo)
+    assert (
+        codex.handle_codex_hook(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": session_id,
+                "cwd": str(repo),
+                "source": "startup",
+                "_claim_plane_initial_scope": scope,
+                "_claim_plane_scope_locked": locked,
+            }
+        )
+        == 0
+    )
+    assert (
+        codex.handle_codex_hook(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": session_id,
+                "cwd": str(repo),
+                "prompt": (
+                    "Fix the cache race and update the appropriate test coverage."
+                ),
+                "_claim_plane_initial_scope": scope,
+                "_claim_plane_scope_locked": locked,
+            }
+        )
+        == 0
+    )
+
+
+def test_operator_initial_scope_constrains_model_proposal_server_side(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_operator_scope"
+    _bootstrap_operator_scoped_task(repo, session_id=session_id, scope=["src/cache.py"])
+
+    result = codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    assert [item["identifier"] for item in result["committed_scope"]] == [
+        "src/cache.py"
+    ]
+    assert result["contingent_scope"] == []
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    assert status["operator_scope"] == {
+        "mode": "operator",
+        "initial": ["src/cache.py"],
+        "locked": False,
+    }
+
+    from claim_plane.core import Plane
+
+    plane = Plane.open(repo / ".claim-plane/plane.db")
+    try:
+        intent = plane.intent(str(result["intent_id"]))
+        assert intent is not None
+        omissions = intent.metadata["operator_scope_omissions"]
+        assert {item["identifier"] for item in omissions} == {
+            "src/locking.py",
+            "tests/test_cache.py",
+        }
+    finally:
+        plane.close()
+
+
+def test_operator_initial_scope_forces_exact_brokered_amendment(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_operator_amend"
+    _bootstrap_operator_scoped_task(repo, session_id=session_id, scope=["src/cache.py"])
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    denied = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: tests/test_cache.py", "@@", "-old", "+new"
+            )
+        },
+    )
+    reason = json.loads(denied)["hookSpecificOutput"]["permissionDecisionReason"]
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    ticket = status["scope_amendment"]["pending"]["ticket_id"]
+
+    assert "codex-intent amend" in reason
+    assert status["scope_amendment"]["tickets_issued"] == 1
+    amended = codex.amend_codex_scope(
+        repo,
+        session_id=session_id,
+        ticket_id=ticket,
+        reason="The behavior change requires matching regression coverage.",
+    )
+    assert amended["allowed"] is True
+
+    retry = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: tests/test_cache.py", "@@", "-old", "+new"
+            )
+        },
+    )
+    assert retry == ""
+    final = codex.codex_intent_status(repo, session_id=session_id)
+    assert final["scope_amendment"]["admitted"] == 1
+    assert "tests/test_cache.py" in {
+        item["identifier"] for item in final["committed_scope"]
+    }
+
+
+def test_locked_operator_scope_never_issues_amendment_ticket(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_operator_locked"
+    _bootstrap_operator_scoped_task(
+        repo,
+        session_id=session_id,
+        scope=["src/cache.py"],
+        locked=True,
+    )
+    codex.admit_codex_intent(repo, session_id=session_id, proposal=_proposal())
+
+    denied = _pretool(
+        repo,
+        session_id,
+        tool_name="apply_patch",
+        tool_input={
+            "command": _patch(
+                "*** Update File: tests/test_cache.py", "@@", "-old", "+new"
+            )
+        },
+    )
+    reason = json.loads(denied)["hookSpecificOutput"]["permissionDecisionReason"]
+    status = codex.codex_intent_status(repo, session_id=session_id)
+
+    assert "locked the initial scope" in reason
+    assert "codex-intent amend" not in reason
+    assert status["scope_amendment"]["pending"] == {}
+    assert status["operator_scope"]["locked"] is True
+    with pytest.raises(ValueError, match="amendments are disabled"):
+        codex.amend_codex_scope(
+            repo,
+            session_id=session_id,
+            ticket_id="missing",
+            reason="should not be accepted",
+        )
