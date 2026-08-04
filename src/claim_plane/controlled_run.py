@@ -678,14 +678,14 @@ def _codex_command(
         raise ControlledRunPreflightError("Codex executable was not found on PATH")
     command = [
         executable,
+        "--ask-for-approval",
+        "never",
         "exec",
         "--json",
         "--color",
         "never",
         "--sandbox",
         "workspace-write",
-        "--ask-for-approval",
-        "never",
         "--cd",
         str(root),
         "--output-last-message",

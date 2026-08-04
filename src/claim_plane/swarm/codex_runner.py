@@ -486,12 +486,12 @@ def _reserve_run(
     final_path = run_dir / "final-message.txt"
     command = [
         executable,
+        "--ask-for-approval",
+        "never",
         "exec",
         "--json",
         "--sandbox",
         "workspace-write",
-        "--ask-for-approval",
-        "never",
         "--output-last-message",
         str(final_path),
     ]

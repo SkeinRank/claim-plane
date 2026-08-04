@@ -111,7 +111,8 @@ def _successful_process_factory(
     task: str,
 ):
     def factory(command: list[str], *, root: Path, env: Mapping[str, str]):
-        assert command[1:4] == ["exec", "--json", "--color"]
+        assert command[1:4] == ["--ask-for-approval", "never", "exec"]
+        assert command[4:6] == ["--json", "--color"]
         assert "workspace-write" in command
         assert command[-1] == task
         assert root == repo
