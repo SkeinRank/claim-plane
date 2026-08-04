@@ -7,7 +7,7 @@ from pathlib import Path
 
 try:
     import tomllib
-except ModuleNotFoundError:
+except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
 
 from claim_plane import __version__, cli
@@ -52,7 +52,7 @@ def test_preview_version_and_public_contract_are_consistent() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = technical_preview_manifest(ROOT)
 
-    assert __version__ == "0.36.0"
+    assert __version__ == "0.36.1"
     assert project["project"]["version"] == __version__
     assert manifest["version"] == __version__
     assert manifest["channel"] == "single-agent-codex"

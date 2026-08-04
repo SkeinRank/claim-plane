@@ -15,11 +15,12 @@ fi
 python - <<'PY'
 from __future__ import annotations
 
+from pathlib import Path
+
 try:
     import tomllib
-except ModuleNotFoundError:
+except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
-from pathlib import Path
 
 root = Path.cwd()
 version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]

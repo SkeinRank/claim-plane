@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.36.1] — 2026-08-04
+
+### Added
+
+- Add a compact terminal narrative for controlled Codex runs with a stable header, explicit execution stages, verification results, changed-file summary, evidence location, and a clearly labelled untrusted agent summary.
+- Add `claim-plane run --verbose` for raw Codex runtime diagnostics while keeping the default product output concise and human-readable.
+- Add restrained automatic terminal colour with `NO_COLOR` support and plain-text output when redirected or captured by automation.
+
+### Changed
+
+- Replace raw Codex stderr in the default run experience with deduplicated policy notices and a concise hint to use `--verbose` for unclassified runtime diagnostics.
+- Present scope, acceptance, risk, changed files, duration, and final delivery outcome as one scan-friendly verification card without changing the machine-readable controlled-run record.
+
 ## [0.36.0] — 2026-08-03
 
 ### Added

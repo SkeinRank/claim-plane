@@ -134,8 +134,22 @@ def _events_for_run(root: Path, run: Mapping[str, Any]) -> tuple[LifecycleEvent,
             events = store.list_events(adapter=adapter, session_id=session_id)
     except Exception as exc:  # noqa: BLE001
         raise EvidenceError("normalized lifecycle evidence is unavailable") from exc
-    if events and any(event.run_id != run.get("run_id") for event in events):
+    expected_run_id = run.get("run_id")
+    # Some Codex versions do not propagate the controlled-run environment into
+    # every project-local hook. Those native events remain explicitly unbound,
+    # while the final verifier seals the session with the durable run id.
+    explicit_run_ids = {
+        event.run_id
+        for event in events
+        if isinstance(event.run_id, str) and event.run_id
+    }
+    foreign_run_ids = sorted(
+        run_id for run_id in explicit_run_ids if run_id != expected_run_id
+    )
+    if foreign_run_ids:
         raise EvidenceError("lifecycle stream is bound to a different controlled run")
+    if events and expected_run_id not in explicit_run_ids:
+        raise EvidenceError("lifecycle stream is not bound to the controlled run")
     return events
 
 

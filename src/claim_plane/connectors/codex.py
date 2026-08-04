@@ -1836,8 +1836,9 @@ def _task_context(session: dict[str, Any]) -> str:
                 "Do not run configured acceptance commands through the agent shell. "
                 "Finish the admitted edits and stop; Claim Plane will execute acceptance "
                 "after the Codex process exits and bind the result to the final Git state.",
-                "Use read-only shell commands only as single commands without pipes, "
-                "redirection, command substitution, &&, or ||.",
+                "Read-only shell commands may be chained with ; or && only when "
+                "every segment is independently read-only. Pipes, redirection, "
+                "background execution, ||, and command substitution remain denied.",
                 "Treat this admitted ChangeIntent as the authority boundary for the task.",
                 "If a required repository mutation is denied as outside scope, use only "
                 "the one-time Claim Plane scope-amendment ticket returned by the guard. "
@@ -1869,8 +1870,9 @@ def _task_context(session: dict[str, Any]) -> str:
             "Project-required acceptance is executed by Claim Plane's trusted final "
             "verifier after the Codex process exits. Do not run it through the agent "
             "shell; Claim Plane adds it to the admitted intent automatically.",
-            "Read-only shell inspection must use one command without pipes, redirection, "
-            "command substitution, &&, or ||.",
+            "Read-only shell inspection may chain commands with ; or && only when "
+            "every segment is independently read-only. Pipes, redirection, background "
+            "execution, ||, and command substitution remain denied.",
             "Proposal shape:",
             json.dumps(
                 {

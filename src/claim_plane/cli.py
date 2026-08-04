@@ -751,6 +751,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             acceptance_timeout=args.acceptance_timeout,
             model=args.model,
             quiet=args.json,
+            verbose=args.verbose,
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
@@ -2754,7 +2755,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum time for final acceptance verification (default: 300).",
     )
     controlled_run.add_argument("--model", default=None)
-    controlled_run.add_argument("--json", action="store_true")
+    run_output = controlled_run.add_mutually_exclusive_group()
+    run_output.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit only the machine-readable controlled-run record.",
+    )
+    run_output.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show raw Codex runtime diagnostics in addition to the human summary.",
+    )
     controlled_run.add_argument("--out", default=None)
     controlled_run.set_defaults(func=cmd_run)
 

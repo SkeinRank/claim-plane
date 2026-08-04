@@ -366,7 +366,100 @@ def _reserved_acceptance_shell(root: Path, command: str) -> bool:
     return False
 
 
-def _simple_read_only_shell(command: str) -> bool:
+def _read_only_shell_segments(command: str) -> tuple[str, ...] | None:
+    """Split a bounded read-only shell chain without evaluating shell syntax.
+
+    Only ``;`` and ``&&`` are accepted as separators. Every other control surface
+    remains fail-closed, including pipes, redirects, background execution, command
+    substitution, newlines, and malformed or empty segments. Quotes are tracked only
+    to avoid treating a separator inside a quoted argument as shell structure; the
+    existing single-command parser still performs the final conservative validation.
+    """
+
+    segments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+    index = 0
+
+    def finish_segment() -> bool:
+        segment = "".join(current).strip()
+        if not segment:
+            return False
+        segments.append(segment)
+        current.clear()
+        return True
+
+    while index < len(command):
+        character = command[index]
+
+        if escaped:
+            current.append(character)
+            escaped = False
+            index += 1
+            continue
+
+        if quote == "'":
+            current.append(character)
+            if character == "'":
+                quote = None
+            index += 1
+            continue
+
+        if quote == '"':
+            if character == "\\":
+                current.append(character)
+                escaped = True
+                index += 1
+                continue
+            if character == '"':
+                current.append(character)
+                quote = None
+                index += 1
+                continue
+            if character == "`" or command.startswith(("$(", "${"), index):
+                return None
+            current.append(character)
+            index += 1
+            continue
+
+        if character == "\\":
+            current.append(character)
+            escaped = True
+            index += 1
+            continue
+        if character in {"'", '"'}:
+            current.append(character)
+            quote = character
+            index += 1
+            continue
+        if character in {"\n", "\r", "|", "<", ">", "`"}:
+            return None
+        if character == "$" and index + 1 < len(command):
+            if command[index + 1] in {"(", "{"}:
+                return None
+        if character == "&":
+            if index + 1 >= len(command) or command[index + 1] != "&":
+                return None
+            if not finish_segment():
+                return None
+            index += 2
+            continue
+        if character == ";":
+            if not finish_segment():
+                return None
+            index += 1
+            continue
+
+        current.append(character)
+        index += 1
+
+    if quote is not None or escaped or not finish_segment():
+        return None
+    return tuple(segments)
+
+
+def _single_read_only_shell(command: str) -> bool:
     argv = _shell_argv(command)
     if argv is None or not argv:
         return argv == []
@@ -391,6 +484,13 @@ def _simple_read_only_shell(command: str) -> bool:
     if executable == "claim-plane":
         return argv[1:] in (["--help"], ["-h"], ["--version"], ["help"])
     return True
+
+
+def _simple_read_only_shell(command: str) -> bool:
+    segments = _read_only_shell_segments(command)
+    return segments is not None and all(
+        _single_read_only_shell(segment) for segment in segments
+    )
 
 
 def _parse_simple_shell_mutation(

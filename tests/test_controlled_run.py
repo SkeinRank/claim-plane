@@ -238,6 +238,101 @@ def _successful_process_factory(
     return factory
 
 
+def _unbound_hook_process_factory(
+    adapter: CodexAdapter,
+    *,
+    repo: Path,
+    task: str,
+    session_id: str = "thread_controlled_unbound_hooks",
+):
+    def request(
+        operation: AdapterOperation,
+        *,
+        payload: Mapping[str, Any] | None = None,
+        intent_version: int | None = None,
+    ) -> AdapterRequest:
+        return AdapterRequest.create(
+            operation,
+            adapter="codex",
+            project_root=str(repo),
+            request_id=f"unbound-{operation.value}-{session_id}",
+            session_id=session_id,
+            run_id=None,
+            intent_version=intent_version,
+            payload=payload,
+        )
+
+    def factory(command: list[str], *, root: Path, env: Mapping[str, str]):
+        assert root == repo
+        assert env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
+        adapter.start_session(
+            request(
+                AdapterOperation.START_SESSION,
+                payload={"source": "startup"},
+            )
+        )
+        adapter.submit_task(
+            request(
+                AdapterOperation.SUBMIT_TASK,
+                payload={"prompt": task},
+            )
+        )
+        adapter.propose_intent(
+            request(
+                AdapterOperation.PROPOSE_INTENT,
+                intent_version=0,
+                payload={
+                    "proposal": {
+                        "protocol": codex.CODEX_INTENT_PROPOSAL_PROTOCOL,
+                        "goal": "Update the fixture value",
+                        "operations": [
+                            {
+                                "access": "write",
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "commitment": "committed",
+                            }
+                        ],
+                        "preserves": [],
+                        "acceptance": [],
+                    }
+                },
+            )
+        )
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: app.py\n"
+            "@@\n"
+            "-VALUE = 1\n"
+            "+VALUE = 2\n"
+            "*** End Patch"
+        )
+        mutation = adapter.request_mutation(
+            request(
+                AdapterOperation.REQUEST_MUTATION,
+                payload={"tool_name": "apply_patch", "tool_input": {"command": patch}},
+            )
+        )
+        assert mutation.status.value == "succeeded"
+        (repo / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+        adapter.observe_result(
+            request(
+                AdapterOperation.OBSERVE_RESULT,
+                payload={"tool_name": "apply_patch"},
+            )
+        )
+        stream = "\n".join(
+            (
+                json.dumps({"type": "thread.started", "thread_id": session_id}),
+                json.dumps({"type": "turn.started"}),
+                json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10}}),
+            )
+        )
+        return _CompletedProcess(stream + "\n")
+
+    return factory
+
+
 def test_one_command_run_verifies_and_persists_git_bound_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -690,6 +785,97 @@ def test_cli_report_and_replay_support_latest_selector(
     replay = json.loads(capsys.readouterr().out)
     assert replay["run_id"] == result.run_id
     assert replay["protocol"] == "claim-plane.evidence-replay.v1"
+
+
+def test_latest_evidence_accepts_unbound_hook_events_with_run_bound_verifier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from claim_plane.evidence import build_evidence_replay, build_evidence_report
+
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    first_task = "Update the fixture value in the first controlled run."
+    first = run_controlled_task(
+        first_task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        quiet=True,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(
+            adapter, repo=repo, task=first_task
+        ),
+    )
+    subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=repo, check=True)
+
+    second_task = "Update the fixture value with native hook events."
+    second = run_controlled_task(
+        second_task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        quiet=True,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_unbound_hook_process_factory(
+            adapter, repo=repo, task=second_task
+        ),
+    )
+
+    with LifecycleEventStore.for_project(repo) as store:
+        events = store.list_events(adapter="codex", session_id=second.session_id or "")
+    assert any(event.run_id is None for event in events)
+    assert any(event.run_id == second.run_id for event in events)
+
+    report = build_evidence_report(repo, "latest")
+    replay = build_evidence_replay(repo, "latest")
+
+    assert first.run_id != second.run_id
+    assert report["run_id"] == second.run_id
+    assert report["integrity"]["valid"] is True
+    assert replay["run_id"] == second.run_id
+    assert replay["event_count"] == len(events)
+
+
+def test_evidence_rejects_explicit_foreign_run_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from claim_plane.evidence import EvidenceError, build_evidence_report
+
+    repo = _repo(tmp_path)
+    adapter, handshake = _prepare(repo, monkeypatch)
+    task = "Update the fixture value."
+    result = run_controlled_task(
+        task,
+        root=repo,
+        adapter=adapter,
+        handshake=handshake,
+        policy="guarded",
+        timeout_seconds=30,
+        acceptance_timeout=30,
+        quiet=True,
+        stdout=io.StringIO(),
+        stderr=io.StringIO(),
+        process_factory=_successful_process_factory(adapter, repo=repo, task=task),
+    )
+    path = controlled_run_path(repo, result.run_id)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["run_id"] = "cpr_foreign"
+    foreign_path = controlled_run_path(repo, "cpr_foreign")
+    foreign_path.parent.mkdir(parents=True)
+    foreign_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(EvidenceError, match="different controlled run"):
+        build_evidence_report(repo, "cpr_foreign")
 
 
 def test_evidence_report_fails_closed_for_corrupt_lifecycle(

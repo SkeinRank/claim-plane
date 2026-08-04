@@ -24,6 +24,7 @@ from enum import Enum
 from pathlib import Path
 from typing import IO, Any, Callable, Mapping, Protocol, TextIO
 
+from claim_plane.console import ConsoleRenderer
 from claim_plane.exit_codes import ExitCode
 from claim_plane.policy import EffectivePolicy, PolicyAction, resolve_policy
 from claim_plane.project import load_project_config, resolve_project_root
@@ -730,29 +731,16 @@ def _reader(
         output.put((name, None))
 
 
-def _runtime_stage(payload: Mapping[str, Any]) -> str | None:
-    event_type = str(payload.get("type") or "")
-    if event_type == "thread.started":
-        return "Codex session started"
-    if event_type == "turn.started":
-        return "Agent working"
-    if event_type == "turn.completed":
-        return "Agent turn completed"
-    if event_type == "turn.failed":
-        return "Agent turn failed"
-    if event_type == "error":
-        return "Agent runtime error"
-    return None
-
-
 def _stream_runtime(
     process: ProcessLike,
     *,
     timeout_seconds: float,
     summary: RuntimeSummary,
     quiet: bool,
+    verbose: bool,
     stdout: TextIO,
     stderr: TextIO,
+    console: ConsoleRenderer | None,
 ) -> int:
     messages: queue.Queue[tuple[str, str | None]] = queue.Queue()
     readers = (
@@ -770,8 +758,8 @@ def _stream_runtime(
     for reader in readers:
         reader.start()
     open_streams = 2
-    deadline = time.monotonic() + timeout_seconds
-    announced: set[str] = set()
+    started = time.monotonic()
+    deadline = started + timeout_seconds
     while open_streams:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -784,7 +772,9 @@ def _stream_runtime(
             open_streams -= 1
             continue
         if source == "stderr":
-            if not quiet:
+            if console is not None:
+                console.runtime_stderr(line)
+            elif not quiet and verbose:
                 stderr.write(line)
                 stderr.flush()
             continue
@@ -794,18 +784,18 @@ def _stream_runtime(
         try:
             payload = json.loads(stripped)
         except json.JSONDecodeError:
-            if not quiet:
+            if not quiet and verbose:
                 stdout.write(stripped + "\n")
                 stdout.flush()
             continue
         if not isinstance(payload, Mapping):
             continue
         summary.observe(payload)
-        stage = _runtime_stage(payload)
-        if stage and stage not in announced and not quiet:
-            announced.add(stage)
-            stdout.write(stage + "\n")
-            stdout.flush()
+        if console is not None:
+            console.runtime_payload(
+                payload,
+                elapsed_seconds=time.monotonic() - started,
+            )
     return process.wait(timeout=max(0.1, deadline - time.monotonic()))
 
 
@@ -1010,12 +1000,14 @@ def run_controlled_task(
     acceptance_timeout: float = 300.0,
     model: str | None = None,
     quiet: bool = False,
+    verbose: bool = False,
     stdout: TextIO,
     stderr: TextIO,
     process_factory: Callable[..., ProcessLike] = _spawn_codex,
 ) -> ControlledRunResult:
     """Run one Codex task under adapter authority and final Git verification."""
 
+    preflight_started = time.monotonic()
     cleaned_task = task.strip()
     if not cleaned_task:
         raise ValueError("controlled run task must not be empty")
@@ -1055,12 +1047,25 @@ def run_controlled_task(
     )
     environment["PYTHONUNBUFFERED"] = "1"
 
-    if not quiet:
-        stdout.write(f"RUN {run_id}\n")
-        stdout.write(f"Policy: {selected_policy}\n")
-        stdout.write("Preflight: READY\n")
-        stdout.write("Task submitted\n")
-        stdout.flush()
+    console = None if quiet else ConsoleRenderer(stdout, stderr, verbose=verbose)
+    if console is not None:
+        console.header(
+            run_id=run_id,
+            root=resolved_root,
+            policy=selected_policy,
+            adapter=handshake.adapter,
+            adapter_version=handshake.adapter_version,
+            protocol_version=handshake.negotiated_protocol_version,
+            runtime_name=handshake.runtime_name,
+            runtime_version=handshake.runtime_version,
+            model=model,
+        )
+        console.step(
+            "Preflight ready",
+            detail="adapter, policy, Git, and runtime checks passed",
+            elapsed_seconds=time.monotonic() - preflight_started,
+        )
+        console.step("Task submitted")
 
     process: ProcessLike | None = None
     runtime = RuntimeSummary()
@@ -1079,8 +1084,10 @@ def run_controlled_task(
             timeout_seconds=timeout_seconds,
             summary=runtime,
             quiet=quiet,
+            verbose=verbose,
             stdout=stdout,
             stderr=stderr,
+            console=console,
         )
         runtime.seal()
         session_id = runtime.session_id or _session_from_run(resolved_root, run_id)
@@ -1088,6 +1095,8 @@ def run_controlled_task(
             raise ControlledRunError(
                 "Codex finished without a session identity bound to this run"
             )
+        if console is not None:
+            console.verification_started()
         intent_id, intent_version, status = _inspect_binding(
             adapter,
             root=resolved_root,
@@ -1232,25 +1241,11 @@ def run_controlled_task(
     )
     _atomic_write_json(controlled_run_path(resolved_root, run_id), result.to_dict())
 
-    if not quiet:
-        stdout.write("Verification:\n")
-        scope_clean = (
-            completion.get("errors", 0) == 0
-            and completion.get("executed_violations", 0) == 0
+    if console is not None:
+        console.finish(
+            result=result.to_dict(),
+            evidence_path=controlled_run_path(resolved_root, run_id),
+            root=resolved_root,
+            final_message=runtime.final_message,
         )
-        stdout.write(f"  scope: {'PASS' if scope_clean else 'FAIL'}\n")
-        stdout.write(
-            "  acceptance: "
-            + ("PASS" if completion.get("acceptance_passed") else "NOT VERIFIED")
-            + "\n"
-        )
-        stdout.write(
-            f"  risk: {risk['highest_risk'].upper()} ({risk['final_action']})\n"
-        )
-        stdout.write(f"DELIVERY {outcome.value.replace('_', ' ')}\n")
-        stdout.write(f"Evidence: {controlled_run_path(resolved_root, run_id)}\n")
-        if runtime.final_message:
-            stdout.write("\nCodex final message:\n")
-            stdout.write(runtime.final_message.rstrip() + "\n")
-        stdout.flush()
     return result

@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.36.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.36.1.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -255,7 +255,9 @@ claim-plane run "Add pagination to the audit API" --policy guarded
 
 The runner performs adapter negotiation and policy compatibility checks before execution, launches Codex in workspace-write mode, binds the runtime session to a stable run identity, and preserves the normal `ChangeIntent` admission and amendment path. `Ctrl-C` and wall-time expiry stop the process and revoke unfinished authority. A successful runtime exit is not sufficient for a green result: Claim Plane inspects the active intent, verifies completion against the current Git state, and returns `DELIVERY VERIFIED`, `REJECTED`, `REVIEW REQUIRED`, `CANCELLED`, `TIMED OUT`, or `FAILED`.
 
-The durable result is written under `.claim-plane/runs/<run-id>/run.json`. It contains task and final-message digests rather than raw text, the starting and resulting Git-state digests, adapter manifest and handshake identity, policy compatibility, lifecycle evidence, verification summary, final file and hunk metadata, configured acceptance commands, and cancellation outcome. Use `--json` for automation, `--out result.json` for an additional export, `--timeout` for the wall-time ceiling, and `--model` for an explicit Codex model override.
+The default terminal view is intentionally compact: it shows preflight, Codex lifecycle, final scope and acceptance checks, risk, changed files, duration, and the evidence location without dumping raw runtime logs. The agent's final message is labelled as untrusted context rather than verification evidence. Use `--verbose` when diagnosing the underlying Codex stream, or `--json` for automation.
+
+The durable result is written under `.claim-plane/runs/<run-id>/run.json`. It contains task and final-message digests rather than raw text, the starting and resulting Git-state digests, adapter manifest and handshake identity, policy compatibility, lifecycle evidence, verification summary, final file and hunk metadata, configured acceptance commands, and cancellation outcome. Use `--out result.json` for an additional export, `--timeout` for the wall-time ceiling, and `--model` for an explicit Codex model override.
 
 ## Evidence report and replay
 

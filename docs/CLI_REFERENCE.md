@@ -62,3 +62,24 @@ claim-plane schemas export ./claim-plane-schemas
 
 The exported files include SHA-256 identities in `schemas list` output and can be pinned
 alongside CI tooling.
+
+## Controlled-run terminal modes
+
+The normal `claim-plane run` view is designed for human review. It prints a compact
+header, one line per meaningful lifecycle transition, a final verification card, and
+the durable evidence path. Raw Codex stderr is not streamed by default. Known policy
+blocks are rendered as concise, deduplicated notices.
+
+```bash
+claim-plane run "Implement the task" --policy guarded
+```
+
+Use verbose mode for adapter or runtime debugging:
+
+```bash
+claim-plane run "Implement the task" --policy guarded --verbose
+```
+
+Verbose mode preserves raw Codex runtime diagnostics in addition to the human summary.
+`--verbose` and `--json` are mutually exclusive. Redirected output is plain text, and
+interactive colour can be disabled with the standard `NO_COLOR` environment variable.
