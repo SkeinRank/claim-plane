@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, TextIO
+from typing import IO, Any, Callable, Mapping, Protocol, TextIO
 
 from claim_plane.exit_codes import ExitCode
 from claim_plane.policy import EffectivePolicy, PolicyAction, resolve_policy
@@ -64,8 +64,8 @@ class ControlledRunPreflightError(ControlledRunError):
 
 class ProcessLike(Protocol):
     pid: int
-    stdout: TextIO | None
-    stderr: TextIO | None
+    stdout: IO[str] | None
+    stderr: IO[str] | None
 
     def poll(self) -> int | None: ...
 
@@ -327,9 +327,9 @@ def _untracked_digest(root: Path) -> dict[str, str]:
             else:
                 result[relative] = "other"
         except OSError as exc:
-            result[relative] = "error:" + hashlib.sha256(
-                str(exc).encode("utf-8")
-            ).hexdigest()
+            result[relative] = (
+                "error:" + hashlib.sha256(str(exc).encode("utf-8")).hexdigest()
+            )
     return dict(sorted(result.items()))
 
 
@@ -361,7 +361,15 @@ def capture_git_state(root_or_child: str | Path) -> GitState:
         "untracked": untracked,
     }
     digest = hashlib.sha256(_canonical_json(unsigned).encode("utf-8")).hexdigest()
-    return GitState(**unsigned, digest=digest)
+    return GitState(
+        head_commit=head_commit,
+        head_tree=head_tree,
+        branch=branch,
+        status_sha256=hashlib.sha256(status).hexdigest(),
+        diff_sha256=hashlib.sha256(diff).hexdigest(),
+        untracked=untracked,
+        digest=digest,
+    )
 
 
 def _request(
@@ -466,8 +474,6 @@ def _changed_paths(
         if item
     }
     return tuple(sorted(tracked | set(result_git.untracked)))
-
-
 
 
 _HUNK_RE = re.compile(
@@ -587,17 +593,17 @@ def _change_summary(
         )
 
     changed_untracked = {
-        path: descriptor
-        for path, descriptor in result_git.untracked.items()
-        if start_git.untracked.get(path) != descriptor
+        relative_path: descriptor
+        for relative_path, descriptor in result_git.untracked.items()
+        if start_git.untracked.get(relative_path) != descriptor
     }
     for relative, descriptor in sorted(changed_untracked.items()):
-        path = root / relative
+        untracked_path = root / relative
         additions: int | None = None
         binary = True
-        if path.is_file():
+        if untracked_path.is_file():
             try:
-                data = path.read_bytes()
+                data = untracked_path.read_bytes()
             except OSError:
                 data = b""
             try:
@@ -648,9 +654,7 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
     acceptance = config.get("acceptance")
     commands = acceptance.get("commands") if isinstance(acceptance, Mapping) else ()
     safe_commands = [
-        str(item)
-        for item in commands or ()
-        if isinstance(item, str) and item.strip()
+        str(item) for item in commands or () if isinstance(item, str) and item.strip()
     ]
     return {
         "protocol": "claim-plane.acceptance-summary.v1",
@@ -712,7 +716,7 @@ def _spawn_codex(
 
 
 def _reader(
-    stream: TextIO | None,
+    stream: IO[str] | None,
     name: str,
     output: queue.Queue[tuple[str, str | None]],
 ) -> None:
@@ -945,9 +949,7 @@ def _completion_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         "errors": int(payload.get("errors") or 0),
         "warnings": int(payload.get("warnings") or 0),
         "executed_violations": int(payload.get("executed_violations") or 0),
-        "authorized_mutation_calls": int(
-            payload.get("authorized_mutation_calls") or 0
-        ),
+        "authorized_mutation_calls": int(payload.get("authorized_mutation_calls") or 0),
         "denied_mutation_calls": int(payload.get("denied_mutation_calls") or 0),
         "scope_promotions": int(payload.get("scope_promotions") or 0),
         "scope_expansions": int(payload.get("scope_expansions") or 0),
@@ -976,9 +978,10 @@ def _classify_outcome(
         return ControlledRunOutcome.FAILED
     if completion.get("verified") is True:
         return ControlledRunOutcome.VERIFIED
-    if int(completion.get("errors") or 0) > 0 or int(
-        completion.get("executed_violations") or 0
-    ) > 0:
+    if (
+        int(completion.get("errors") or 0) > 0
+        or int(completion.get("executed_violations") or 0) > 0
+    ):
         return ControlledRunOutcome.REJECTED
     return ControlledRunOutcome.REVIEW_REQUIRED
 
@@ -1237,8 +1240,7 @@ def run_controlled_task(
             + "\n"
         )
         stdout.write(
-            f"  risk: {risk['highest_risk'].upper()} "
-            f"({risk['final_action']})\n"
+            f"  risk: {risk['highest_risk'].upper()} ({risk['final_action']})\n"
         )
         stdout.write(f"DELIVERY {outcome.value.replace('_', ' ')}\n")
         stdout.write(f"Evidence: {controlled_run_path(resolved_root, run_id)}\n")

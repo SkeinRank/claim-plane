@@ -135,21 +135,22 @@ def test_duplicate_request_events_are_suppressed_and_conflicts_fail_closed(
         )
 
         assert replayed == original
-        assert len(
-            store.list_events(
-                adapter="reference",
-                session_id="session-duplicate",
+        assert (
+            len(
+                store.list_events(
+                    adapter="reference",
+                    session_id="session-duplicate",
+                )
             )
-        ) == 1
+            == 1
+        )
 
         with pytest.raises(LifecycleConflictError):
             store.append_batch(
                 adapter="reference",
                 session_id="session-duplicate",
                 request_id="start-once",
-                drafts=(
-                    _draft(LifecycleEventType.SESSION_STARTED, source="changed"),
-                ),
+                drafts=(_draft(LifecycleEventType.SESSION_STARTED, source="changed"),),
             )
 
 

@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from claim_plane.controlled_run import (
     CONTROLLED_RUNS_PATH,
@@ -166,9 +166,7 @@ def _safe_event_payload(event: LifecycleEvent) -> dict[str, Any]:
         "source",
     }
     return {
-        key: value
-        for key, value in sorted(event.payload.items())
-        if key in allowed
+        key: value for key, value in sorted(event.payload.items()) if key in allowed
     }
 
 
@@ -222,8 +220,13 @@ def _guarantee_summary(
         "POST_VERIFIED": [],
         "UNAVAILABLE": [],
     }
+    iterable: Iterable[tuple[str, Mapping[str, Any]]]
     if isinstance(guarantees, Mapping):
-        iterable = guarantees.items()
+        iterable = (
+            (str(name), declaration)
+            for name, declaration in guarantees.items()
+            if isinstance(declaration, Mapping)
+        )
     elif isinstance(guarantees, Sequence) and not isinstance(guarantees, (str, bytes)):
         iterable = (
             (str(item.get("name") or item.get("guarantee") or "unknown"), item)
@@ -233,12 +236,8 @@ def _guarantee_summary(
     else:
         iterable = ()
     for name, declaration in iterable:
-        if not isinstance(declaration, Mapping):
-            continue
         raw_level = (
-            declaration.get("level")
-            or declaration.get("enforcement")
-            or "UNAVAILABLE"
+            declaration.get("level") or declaration.get("enforcement") or "UNAVAILABLE"
         )
         level = str(raw_level).upper()
         levels.setdefault(level, []).append(str(name))
@@ -272,26 +271,24 @@ def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
                 {
                     "code": "lifecycle_head_mismatch",
                     "message": (
-                        "durable run record and lifecycle journal have "
-                        "different heads"
+                        "durable run record and lifecycle journal have different heads"
                     ),
                 }
             )
+    completion_value = run.get("completion")
+    completion: Mapping[str, Any] = (
+        completion_value if isinstance(completion_value, Mapping) else {}
+    )
     changes = run.get("changes")
     if not isinstance(changes, Mapping):
         changes = {
             "protocol": "claim-plane.change-summary.v1",
             "available": False,
             "files": [],
-            "file_count": int((run.get("completion") or {}).get("changed_files") or 0),
+            "file_count": int(completion.get("changed_files") or 0),
         }
     acceptance = run.get("acceptance")
     if not isinstance(acceptance, Mapping):
-        completion = (
-            run.get("completion")
-            if isinstance(run.get("completion"), Mapping)
-            else {}
-        )
         acceptance = {
             "commands": [],
             "passed": bool(completion.get("acceptance_passed")),

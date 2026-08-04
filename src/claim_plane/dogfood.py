@@ -112,8 +112,7 @@ class DogfoodRepository:
             language=_text(payload.get("language"), field_name="language").lower(),
         )
         if not all(
-            character in "0123456789abcdef"
-            for character in repository.base_commit
+            character in "0123456789abcdef" for character in repository.base_commit
         ):
             raise ValueError("base_commit must be hexadecimal")
         if not 7 <= len(repository.base_commit) <= 64:
@@ -216,8 +215,7 @@ class GoldenSuite:
     ) -> "GoldenSuite":
         if payload.get("protocol") != DOGFOOD_SUITE_PROTOCOL:
             raise ValueError(
-                "unsupported dogfood suite protocol: "
-                f"{payload.get('protocol')!r}"
+                f"unsupported dogfood suite protocol: {payload.get('protocol')!r}"
             )
         repositories_raw = payload.get("repositories")
         tasks_raw = payload.get("tasks")
@@ -304,8 +302,7 @@ class GoldenSuite:
             if len(represented) < 5:
                 findings.append("tasks must cover at least five repositories")
             if any(
-                len(repository.base_commit) != 40
-                for repository in self.repositories
+                len(repository.base_commit) != 40 for repository in self.repositories
             ):
                 findings.append(
                     "release-grade repository commits must be full 40-character SHAs"
@@ -461,15 +458,14 @@ class DogfoodPlan:
                     seed=_integer(item.get("seed"), field_name="seed"),
                     arm=DogfoodArm(str(item.get("arm"))),
                     policy=(
-                        None
-                        if item.get("policy") is None
-                        else str(item.get("policy"))
+                        None if item.get("policy") is None else str(item.get("policy"))
                     ),
                 )
             )
-            if entries[-1].prompt_sha256 != hashlib.sha256(
-                entries[-1].prompt.encode("utf-8")
-            ).hexdigest():
+            if (
+                entries[-1].prompt_sha256
+                != hashlib.sha256(entries[-1].prompt.encode("utf-8")).hexdigest()
+            ):
                 raise ValueError(
                     f"prompt_sha256 mismatch for plan task {entries[-1].task_id!r}"
                 )
@@ -747,6 +743,12 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return None if denominator == 0 else numerator / denominator
 
 
+def _metric_rate(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
 def _mean(values: Sequence[float]) -> float | None:
     return None if not values else sum(values) / len(values)
 
@@ -758,14 +760,10 @@ def _arm_summary(results: Sequence[DogfoodResult]) -> dict[str, Any]:
         result.cost_usd for result in evaluated if result.cost_usd is not None
     ]
     known_input = [
-        result.input_tokens
-        for result in evaluated
-        if result.input_tokens is not None
+        result.input_tokens for result in evaluated if result.input_tokens is not None
     ]
     known_output = [
-        result.output_tokens
-        for result in evaluated
-        if result.output_tokens is not None
+        result.output_tokens for result in evaluated if result.output_tokens is not None
     ]
     return {
         "expected_count": len(results),
@@ -924,10 +922,10 @@ def evaluate_dogfood_release_gate(
         success_drop = None
         reliability_gain = None
     else:
-        bare_success = bare.get("task_success_rate")
-        guarded_success = guarded.get("task_success_rate")
-        bare_delivery = bare.get("accepted_delivery_rate")
-        guarded_delivery = guarded.get("accepted_delivery_rate")
+        bare_success = _metric_rate(bare.get("task_success_rate"))
+        guarded_success = _metric_rate(guarded.get("task_success_rate"))
+        bare_delivery = _metric_rate(bare.get("accepted_delivery_rate"))
+        guarded_delivery = _metric_rate(guarded.get("accepted_delivery_rate"))
         if None in {bare_success, guarded_success, bare_delivery, guarded_delivery}:
             status = DogfoodGateStatus.INCOMPLETE
             findings.append(
@@ -939,8 +937,12 @@ def evaluate_dogfood_release_gate(
             success_drop = None
             reliability_gain = None
         else:
-            success_drop = float(bare_success) - float(guarded_success)
-            reliability_gain = float(guarded_delivery) - float(bare_delivery)
+            assert bare_success is not None
+            assert guarded_success is not None
+            assert bare_delivery is not None
+            assert guarded_delivery is not None
+            success_drop = bare_success - guarded_success
+            reliability_gain = guarded_delivery - bare_delivery
             if success_drop > max_drop and reliability_gain < min_gain:
                 status = DogfoodGateStatus.BLOCKED
                 findings.append(

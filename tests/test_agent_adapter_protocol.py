@@ -64,9 +64,7 @@ def _enrolled(tmp_path: Path) -> tuple[Path, CodexAdapter]:
     repo = _repo(tmp_path)
     init_project(repo)
     adapter = CodexAdapter()
-    adapter.enroll_project(
-        _request(AdapterOperation.ENROLL_PROJECT, repo, "enroll-1")
-    )
+    adapter.enroll_project(_request(AdapterOperation.ENROLL_PROJECT, repo, "enroll-1"))
     return repo, adapter
 
 
@@ -114,9 +112,7 @@ def test_codex_implements_public_agent_adapter_protocol(tmp_path: Path) -> None:
     repo, adapter = _enrolled(tmp_path)
 
     assert isinstance(adapter, AgentAdapter)
-    response = adapter.doctor(
-        _request(AdapterOperation.DOCTOR, repo, "doctor-1")
-    )
+    response = adapter.doctor(_request(AdapterOperation.DOCTOR, repo, "doctor-1"))
     assert response.status is AdapterStatus.SUCCEEDED
     assert response.payload["root"] == str(repo.resolve())
 
@@ -316,9 +312,7 @@ def test_cancellation_releases_authority_and_resume_never_invents_it(
     plane = Plane.open(repo / ".claim-plane/plane.db")
     try:
         record = next(
-            item
-            for item in plane.intents()
-            if item["intent_id"] == admitted.intent_id
+            item for item in plane.intents() if item["intent_id"] == admitted.intent_id
         )
     finally:
         plane.close()

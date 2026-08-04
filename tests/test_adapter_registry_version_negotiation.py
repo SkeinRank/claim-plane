@@ -100,8 +100,7 @@ def test_incompatible_protocol_range_fails_before_adapter_use(tmp_path: Path) ->
     assert handshake.compatible is False
     assert handshake.negotiated_protocol_version is None
     assert any(
-        item.code is HandshakeCode.PROTOCOL_INCOMPATIBLE
-        for item in handshake.findings
+        item.code is HandshakeCode.PROTOCOL_INCOMPATIBLE for item in handshake.findings
     )
     with pytest.raises(AdapterRegistryError):
         handshake.require_compatible()
@@ -171,13 +170,16 @@ def test_codex_session_start_refuses_mismatched_pin_before_state_creation(
     assert not sessions.exists() or not list(sessions.glob("*.json"))
 
 
-
-def test_pin_requires_detected_runtime(tmp_path: Path) -> None:
+def test_pin_requires_detected_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = _repo(tmp_path)
+    monkeypatch.setattr(codex, "_codex_version", lambda: (None, None))
     registry = build_adapter_registry(discover_external=False)
 
     with pytest.raises(AdapterRegistryError, match="before its runtime"):
         registry.pin("codex", project_root=repo)
+
 
 def test_external_entry_point_registers_without_core_changes(
     monkeypatch: pytest.MonkeyPatch,

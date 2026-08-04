@@ -14,6 +14,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+from claim_plane.protocol.capabilities import AdapterCapabilityManifest
+
 AGENT_ADAPTER_PROTOCOL = "claim-plane.agent-adapter.v1"
 AGENT_ADAPTER_PROTOCOL_VERSION = "1.0"
 
@@ -324,9 +326,7 @@ class AdapterResponse:
             replayed=bool(data.get("replayed")),
             payload=dict(data.get("payload") or {}),
             error=(
-                dict(data["error"])
-                if isinstance(data.get("error"), Mapping)
-                else None
+                dict(data["error"]) if isinstance(data.get("error"), Mapping) else None
             ),
         )
 
@@ -337,6 +337,10 @@ class AgentAdapter(Protocol):
 
     name: str
     protocol_version: str
+
+    def capability_manifest(
+        self, project_root: str = "."
+    ) -> AdapterCapabilityManifest: ...
 
     def enroll_project(self, request: AdapterRequest) -> AdapterResponse: ...
 

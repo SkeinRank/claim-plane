@@ -115,9 +115,10 @@ def test_release_grade_suite_freezes_prompt_and_repository_inputs() -> None:
     assert len(suite.coder_seeds) == 2
     assert len(suite.digest) == 64
     assert suite.tasks[0].prompt_sha256
-    assert GoldenSuite.from_dict(
-        suite.to_dict(), require_release_grade=True
-    ).digest == suite.digest
+    assert (
+        GoldenSuite.from_dict(suite.to_dict(), require_release_grade=True).digest
+        == suite.digest
+    )
 
 
 def test_release_grade_validation_rejects_small_or_unpinned_corpus() -> None:
@@ -149,9 +150,7 @@ def test_suite_digest_detects_prompt_tampering() -> None:
 
 
 def test_plan_expands_every_task_seed_and_arm_deterministically() -> None:
-    suite = freeze_golden_suite(
-        _candidate(), frozen_at="2026-08-03T00:00:00Z"
-    )
+    suite = freeze_golden_suite(_candidate(), frozen_at="2026-08-03T00:00:00Z")
     first = build_dogfood_plan(
         suite, model="codex-test", created_at="2026-08-03T01:00:00Z"
     )
@@ -165,7 +164,6 @@ def test_plan_expands_every_task_seed_and_arm_deterministically() -> None:
     assert len({entry.execution_id for entry in first.entries}) == len(first.entries)
     assert {entry.arm for entry in first.entries} == set(DogfoodArm)
     assert DogfoodPlan.from_dict(first.to_dict()).digest == first.digest
-
 
 
 def test_result_binding_rejects_identity_override() -> None:
@@ -197,6 +195,7 @@ def test_result_binding_rejects_identity_override() -> None:
     with pytest.raises(ValueError, match="protected field task_id"):
         build_dogfood_result(plan, plan.entries[0].execution_id, tampered)
 
+
 def test_aggregation_never_fills_missing_measurements() -> None:
     suite = freeze_golden_suite(
         _candidate(tasks=1, repositories=1, seeds=(101,)),
@@ -217,9 +216,7 @@ def test_aggregation_never_fills_missing_measurements() -> None:
 
 
 def test_release_gate_passes_compensating_reliability_gain() -> None:
-    suite = freeze_golden_suite(
-        _candidate(), frozen_at="2026-08-03T00:00:00Z"
-    )
+    suite = freeze_golden_suite(_candidate(), frozen_at="2026-08-03T00:00:00Z")
     plan = build_dogfood_plan(suite, created_at="2026-08-03T01:00:00Z")
     results = []
     for index, entry in enumerate(plan.entries):
@@ -300,30 +297,36 @@ def test_cli_freeze_plan_aggregate_and_gate(tmp_path: Path) -> None:
     gate_path = tmp_path / "gate.json"
     candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
 
-    assert cli.main(
-        [
-            "dogfood",
-            "freeze",
-            str(candidate_path),
-            "--out",
-            str(suite_path),
-            "--frozen-at",
-            "2026-08-03T00:00:00Z",
-            "--json",
-        ]
-    ) == 0
-    assert cli.main(
-        [
-            "dogfood",
-            "plan",
-            str(suite_path),
-            "--out",
-            str(plan_path),
-            "--created-at",
-            "2026-08-03T01:00:00Z",
-            "--json",
-        ]
-    ) == 0
+    assert (
+        cli.main(
+            [
+                "dogfood",
+                "freeze",
+                str(candidate_path),
+                "--out",
+                str(suite_path),
+                "--frozen-at",
+                "2026-08-03T00:00:00Z",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert (
+        cli.main(
+            [
+                "dogfood",
+                "plan",
+                str(suite_path),
+                "--out",
+                str(plan_path),
+                "--created-at",
+                "2026-08-03T01:00:00Z",
+                "--json",
+            ]
+        )
+        == 0
+    )
     suite = GoldenSuite.from_dict(json.loads(suite_path.read_text()))
     plan = DogfoodPlan.from_dict(json.loads(plan_path.read_text()))
     results = []
@@ -345,47 +348,56 @@ def test_cli_freeze_plan_aggregate_and_gate(tmp_path: Path) -> None:
         evaluation_path = tmp_path / f"evaluation-{index}.json"
         result_path = tmp_path / f"result-{index}.json"
         evaluation_path.write_text(json.dumps(evaluation), encoding="utf-8")
-        assert cli.main(
-            [
-                "dogfood",
-                "record",
-                str(plan_path),
-                entry.execution_id,
-                str(evaluation_path),
-                "--out",
-                str(result_path),
-                "--json",
-            ]
-        ) == 0
+        assert (
+            cli.main(
+                [
+                    "dogfood",
+                    "record",
+                    str(plan_path),
+                    entry.execution_id,
+                    str(evaluation_path),
+                    "--out",
+                    str(result_path),
+                    "--json",
+                ]
+            )
+            == 0
+        )
         results.append(json.loads(result_path.read_text()))
     results_path.write_text(json.dumps(results), encoding="utf-8")
 
-    assert cli.main(
-        [
-            "dogfood",
-            "aggregate",
-            str(suite_path),
-            str(plan_path),
-            str(results_path),
-            "--out",
-            str(summary_path),
-            "--generated-at",
-            "2026-08-03T02:00:00Z",
-            "--json",
-        ]
-    ) == 0
-    assert cli.main(
-        [
-            "dogfood",
-            "gate",
-            str(summary_path),
-            "--out",
-            str(gate_path),
-            "--evaluated-at",
-            "2026-08-03T03:00:00Z",
-            "--json",
-        ]
-    ) == 0
+    assert (
+        cli.main(
+            [
+                "dogfood",
+                "aggregate",
+                str(suite_path),
+                str(plan_path),
+                str(results_path),
+                "--out",
+                str(summary_path),
+                "--generated-at",
+                "2026-08-03T02:00:00Z",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert (
+        cli.main(
+            [
+                "dogfood",
+                "gate",
+                str(summary_path),
+                "--out",
+                str(gate_path),
+                "--evaluated-at",
+                "2026-08-03T03:00:00Z",
+                "--json",
+            ]
+        )
+        == 0
+    )
     gate = json.loads(gate_path.read_text())
     assert gate["status"] == "PASSED"
     assert suite.digest == plan.suite_digest

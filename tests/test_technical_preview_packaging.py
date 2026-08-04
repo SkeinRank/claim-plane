@@ -3,8 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-import tomllib
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 from claim_plane import __version__, cli
 from claim_plane.exit_codes import ExitCode, exit_code_manifest

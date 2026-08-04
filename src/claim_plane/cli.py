@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from claim_plane import __version__
 from claim_plane.connectors import (
@@ -19,6 +19,7 @@ from claim_plane.connectors import (
     disconnect_codex,
     init_project,
 )
+from claim_plane.connectors.codex_adapter import CodexAdapter
 from claim_plane.controlled_run import (
     CONTROLLED_POLICY_ENV,
     CONTROLLED_POLICY_MANIFEST_ENV,
@@ -132,7 +133,7 @@ from claim_plane.testing.conformance import ReferenceConformanceDriver
 DEFAULT_DB = ".claim-plane/plane.db"
 
 _ADAPTER_REGISTRY = build_adapter_registry()
-_CODEX_ADAPTER = _ADAPTER_REGISTRY.create("codex")
+_CODEX_ADAPTER = cast(CodexAdapter, _ADAPTER_REGISTRY.create("codex"))
 
 
 def _adapter_handshake(
@@ -161,10 +162,7 @@ def _print_adapter_handshake(payload: Mapping[str, Any]) -> None:
     pin = payload.get("pin")
     print("Pin: present" if pin else "Pin: none")
     for finding in payload.get("findings") or []:
-        print(
-            f"  [{str(finding['severity']).upper():7}] "
-            f"{finding['message']}"
-        )
+        print(f"  [{str(finding['severity']).upper():7}] {finding['message']}")
     print("Compatibility: OK" if payload.get("compatible") else "Compatibility: FAILED")
 
 
@@ -313,8 +311,10 @@ def cmd_config_migrate(args: argparse.Namespace) -> int:
     if args.json:
         _write_json(payload)
     else:
-        action = "Would migrate" if args.dry_run and payload["changed"] else (
-            "Migrated" if payload["changed"] else "Already current"
+        action = (
+            "Would migrate"
+            if args.dry_run and payload["changed"]
+            else ("Migrated" if payload["changed"] else "Already current")
         )
         print(f"{action}: {payload['source_protocol']} → {payload['target_protocol']}")
         if payload.get("backup"):
@@ -416,9 +416,7 @@ def cmd_connect_codex(args: argparse.Namespace) -> int:
 
 def cmd_disconnect_codex(args: argparse.Namespace) -> int:
     response = _CODEX_ADAPTER.unenroll_project(
-        _codex_request(
-            AdapterOperation.UNENROLL_PROJECT, repo=args.repo
-        )
+        _codex_request(AdapterOperation.UNENROLL_PROJECT, repo=args.repo)
     )
     result = dict(response.payload)
     if args.json:
@@ -518,10 +516,7 @@ def cmd_policy_classify(args: argparse.Namespace) -> int:
             f"{payload['final_action']}"
         )
         for finding in payload["findings"]:
-            print(
-                f"  {finding['path']}: {finding['level']} → "
-                f"{finding['action']}"
-            )
+            print(f"  {finding['path']}: {finding['level']} → {finding['action']}")
             print(f"    {finding['explanation']}")
     return 3 if payload["final_action"] == "DENY" else 0
 
@@ -551,13 +546,8 @@ def _print_adapter_manifest(payload: Mapping[str, Any]) -> None:
     for name, level in sorted(dict(payload.get("capabilities") or {}).items()):
         print(f"  {name}: {level}")
     print("Guarantees:")
-    for name, declaration in sorted(
-        dict(payload.get("guarantees") or {}).items()
-    ):
-        print(
-            f"  {name}: {declaration['level']} "
-            f"({declaration['provided_by']})"
-        )
+    for name, declaration in sorted(dict(payload.get("guarantees") or {}).items()):
+        print(f"  {name}: {declaration['level']} ({declaration['provided_by']})")
     compatibility = payload.get("policy_compatibility")
     if isinstance(compatibility, Mapping):
         status = "compatible" if compatibility.get("compatible") else "unavailable"
@@ -720,9 +710,7 @@ def cmd_doctor_codex(args: argparse.Namespace) -> int:
             manifest, effective_policy.name
         )
         report["adapter_manifest"] = manifest_payload
-        report["policy_compatibility"] = manifest_payload[
-            "policy_compatibility"
-        ]
+        report["policy_compatibility"] = manifest_payload["policy_compatibility"]
     report["registry_handshake"] = handshake.to_dict()
     report["ready"] = (
         bool(report.get("ready")) and policy_compatible and handshake.compatible
@@ -783,7 +771,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     elif args.out:
         _write_json(result.to_dict(), args.out)
     return result.exit_code
-
 
 
 def _print_evidence_report(payload: Mapping[str, Any]) -> None:
@@ -898,26 +885,20 @@ def cmd_dogfood_freeze(args: argparse.Namespace) -> int:
 
 
 def cmd_dogfood_validate(args: argparse.Namespace) -> int:
-    suite = load_golden_suite(
-        args.suite, require_release_grade=args.release_grade
-    )
+    suite = load_golden_suite(args.suite, require_release_grade=args.release_grade)
     payload = suite.to_dict()
     if args.json:
         _write_json(payload)
     else:
         _print_dogfood_suite(payload)
         print(
-            "Validation: release-grade"
-            if args.release_grade
-            else "Validation: valid"
+            "Validation: release-grade" if args.release_grade else "Validation: valid"
         )
     return 0
 
 
 def cmd_dogfood_plan(args: argparse.Namespace) -> int:
-    suite = load_golden_suite(
-        args.suite, require_release_grade=args.release_grade
-    )
+    suite = load_golden_suite(args.suite, require_release_grade=args.release_grade)
     plan = build_dogfood_plan(suite, model=args.model, created_at=args.created_at)
     payload = plan.to_dict()
     _write_json(payload, args.out)
@@ -964,9 +945,7 @@ def _print_dogfood_summary(payload: Mapping[str, Any]) -> None:
 
 
 def cmd_dogfood_aggregate(args: argparse.Namespace) -> int:
-    suite = load_golden_suite(
-        args.suite, require_release_grade=args.release_grade
-    )
+    suite = load_golden_suite(args.suite, require_release_grade=args.release_grade)
     plan = load_dogfood_plan(args.plan)
     results = load_dogfood_results(args.results)
     payload = aggregate_dogfood_results(
@@ -2557,9 +2536,7 @@ def build_parser() -> argparse.ArgumentParser:
     adapters = sub.add_parser(
         "adapters", help="Inspect coding-agent adapter capabilities and guarantees."
     )
-    adapters_sub = adapters.add_subparsers(
-        dest="adapters_command", required=True
-    )
+    adapters_sub = adapters.add_subparsers(dest="adapters_command", required=True)
     adapters_list = adapters_sub.add_parser(
         "list", help="List built-in and discovered external adapters."
     )
@@ -2580,9 +2557,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
     )
     adapters_inspect.add_argument("--repo", default=".")
-    adapters_inspect.add_argument(
-        "--policy", choices=POLICY_NAMES
-    )
+    adapters_inspect.add_argument("--policy", choices=POLICY_NAMES)
     adapters_inspect.add_argument("--json", action="store_true")
     adapters_inspect.set_defaults(func=cmd_adapters_inspect)
 
@@ -2590,9 +2565,7 @@ def build_parser() -> argparse.ArgumentParser:
         "conformance",
         help="Run the reusable adapter compatibility suite in isolated fixtures.",
     )
-    adapters_conformance.add_argument(
-        "adapter", choices=("codex", "reference")
-    )
+    adapters_conformance.add_argument("adapter", choices=("codex", "reference"))
     adapters_conformance.add_argument(
         "--workdir",
         default=None,
@@ -2610,9 +2583,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
     )
     adapters_doctor.add_argument("--repo", default=".")
-    adapters_doctor.add_argument(
-        "--policy", choices=POLICY_NAMES
-    )
+    adapters_doctor.add_argument("--policy", choices=POLICY_NAMES)
     adapters_doctor.add_argument("--json", action="store_true")
     adapters_doctor.set_defaults(func=cmd_adapters_doctor)
 
@@ -2656,9 +2627,7 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor", help="Inspect project and coding-agent enrollment health."
     )
     doctor.add_argument("--repo", default=".")
-    doctor.add_argument(
-        "--policy", choices=POLICY_NAMES
-    )
+    doctor.add_argument("--policy", choices=POLICY_NAMES)
     doctor.add_argument("--json", action="store_true")
     doctor.set_defaults(func=cmd_doctor_codex, connector="codex")
     doctor_sub = doctor.add_subparsers(dest="doctor_connector")
@@ -2666,19 +2635,14 @@ def build_parser() -> argparse.ArgumentParser:
         "codex", help="Inspect the project-local Codex lifecycle bridge."
     )
     doctor_codex_parser.add_argument("--repo", default=".")
-    doctor_codex_parser.add_argument(
-        "--policy", choices=POLICY_NAMES
-    )
+    doctor_codex_parser.add_argument("--policy", choices=POLICY_NAMES)
     doctor_codex_parser.add_argument("--json", action="store_true")
     doctor_codex_parser.set_defaults(func=cmd_doctor_codex, connector="codex")
-
 
     policy_parser = sub.add_parser(
         "policy", help="Inspect policy presets and classify repository risk."
     )
-    policy_sub = policy_parser.add_subparsers(
-        dest="policy_command", required=True
-    )
+    policy_sub = policy_parser.add_subparsers(dest="policy_command", required=True)
     policy_inspect = policy_sub.add_parser(
         "inspect", help="Show effective policy semantics and adapter compatibility."
     )
@@ -2696,7 +2660,6 @@ def build_parser() -> argparse.ArgumentParser:
     policy_classify.add_argument("--policy", choices=POLICY_NAMES)
     policy_classify.add_argument("--json", action="store_true")
     policy_classify.set_defaults(func=cmd_policy_classify)
-
 
     dogfood = sub.add_parser(
         "dogfood",
@@ -2761,13 +2724,10 @@ def build_parser() -> argparse.ArgumentParser:
     dogfood_gate.add_argument("summary")
     dogfood_gate.add_argument("--out", default=None)
     dogfood_gate.add_argument("--max-task-success-drop", type=float, default=0.05)
-    dogfood_gate.add_argument(
-        "--min-accepted-delivery-gain", type=float, default=0.02
-    )
+    dogfood_gate.add_argument("--min-accepted-delivery-gain", type=float, default=0.02)
     dogfood_gate.add_argument("--evaluated-at", default=None)
     dogfood_gate.add_argument("--json", action="store_true")
     dogfood_gate.set_defaults(func=cmd_dogfood_gate)
-
 
     controlled_run = sub.add_parser(
         "run",
@@ -2780,9 +2740,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="codex",
         choices=tuple(item.name for item in _ADAPTER_REGISTRY.registrations()),
     )
-    controlled_run.add_argument(
-        "--policy", choices=POLICY_NAMES
-    )
+    controlled_run.add_argument("--policy", choices=POLICY_NAMES)
     controlled_run.add_argument(
         "--timeout",
         type=float,
@@ -2799,7 +2757,6 @@ def build_parser() -> argparse.ArgumentParser:
     controlled_run.add_argument("--json", action="store_true")
     controlled_run.add_argument("--out", default=None)
     controlled_run.set_defaults(func=cmd_run)
-
 
     report_parser = sub.add_parser(
         "report",

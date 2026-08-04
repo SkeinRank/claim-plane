@@ -116,9 +116,7 @@ def _successful_process_factory(
         assert command[-1] == task
         assert root == repo
         run_id = env["CLAIM_PLANE_CONTROLLED_RUN_ID"]
-        policy_manifest = json.loads(
-            env["CLAIM_PLANE_CONTROLLED_POLICY_MANIFEST"]
-        )
+        policy_manifest = json.loads(env["CLAIM_PLANE_CONTROLLED_POLICY_MANIFEST"])
         assert policy_manifest["preset"]["name"] == "guarded"
         assert policy_manifest["digest"]
         session_id = "thread_controlled_success"
@@ -466,9 +464,7 @@ def test_guarded_run_requires_review_for_configured_critical_path(
         quiet=True,
         stdout=io.StringIO(),
         stderr=io.StringIO(),
-        process_factory=_successful_process_factory(
-            adapter, repo=repo, task=task
-        ),
+        process_factory=_successful_process_factory(adapter, repo=repo, task=task),
     )
 
     assert result.outcome is ControlledRunOutcome.REVIEW_REQUIRED
@@ -476,9 +472,7 @@ def test_guarded_run_requires_review_for_configured_critical_path(
     assert result.effective_policy["preset"]["name"] == "guarded"
     assert result.risk["highest_risk"] == "critical"
     assert result.risk["final_action"] == "REVIEW_REQUIRED"
-    assert any(
-        item["path"] == "app.py" for item in result.risk["findings"]
-    )
+    assert any(item["path"] == "app.py" for item in result.risk["findings"])
 
 
 def test_evidence_report_and_replay_are_deterministic_after_restart(

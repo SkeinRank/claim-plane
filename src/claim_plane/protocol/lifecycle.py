@@ -92,7 +92,6 @@ def _optional_text(value: str | None, *, field_name: str) -> str | None:
     return _required_text(value, field_name=field_name)
 
 
-
 def _canonical_json(payload: Mapping[str, Any]) -> str:
     return json.dumps(
         payload,
@@ -191,13 +190,10 @@ class LifecycleEvent:
         if self.intent_version is not None and self.intent_version < 0:
             raise ValueError("intent_version must be non-negative")
         if self.protocol != LIFECYCLE_EVENT_PROTOCOL:
-            raise ValueError(
-                f"lifecycle protocol must be {LIFECYCLE_EVENT_PROTOCOL!r}"
-            )
+            raise ValueError(f"lifecycle protocol must be {LIFECYCLE_EVENT_PROTOCOL!r}")
         if self.protocol_version != LIFECYCLE_EVENT_PROTOCOL_VERSION:
             raise ValueError(
-                "unsupported lifecycle protocol version: "
-                f"{self.protocol_version!r}"
+                f"unsupported lifecycle protocol version: {self.protocol_version!r}"
             )
         object.__setattr__(self, "payload", dict(self.payload))
         expected = self.compute_digest()
@@ -687,12 +683,7 @@ class LifecycleEventStore:
 
     @classmethod
     def for_project(cls, project_root: str | Path) -> "LifecycleEventStore":
-        return cls(
-            Path(project_root)
-            / ".claim-plane"
-            / "lifecycle"
-            / "events.sqlite3"
-        )
+        return cls(Path(project_root) / ".claim-plane" / "lifecycle" / "events.sqlite3")
 
     def __enter__(self) -> "LifecycleEventStore":
         return self
@@ -842,9 +833,7 @@ class LifecycleEventStore:
                 (adapter, session_id),
             ).fetchall()
             existing = tuple(self._row_to_event(row) for row in rows)
-            existing_report = (
-                build_lifecycle_report(existing) if existing else None
-            )
+            existing_report = build_lifecycle_report(existing) if existing else None
             if existing_report is not None and not existing_report.valid:
                 raise LifecycleCorruptError(
                     "cannot append to an invalid lifecycle stream"
@@ -898,10 +887,7 @@ class LifecycleEventStore:
                 raise LifecycleCorruptError(
                     "lifecycle request is only partially persisted"
                 )
-            if (
-                expected_sequence is not None
-                and expected_sequence != current_sequence
-            ):
+            if expected_sequence is not None and expected_sequence != current_sequence:
                 raise LifecycleConflictError(
                     "lifecycle expected sequence does not match durable head"
                 )
@@ -913,7 +899,9 @@ class LifecycleEventStore:
                 caused_by = (
                     candidates[-1].event_id
                     if candidates
-                    else head.event_id if head is not None else None
+                    else head.event_id
+                    if head is not None
+                    else None
                 )
                 event = LifecycleEvent(
                     event_id=_event_identity(
@@ -1264,9 +1252,7 @@ def record_adapter_lifecycle(
                 drafts=drafts,
                 run_id=request.run_id,
                 default_intent_id=(
-                    response.intent_id
-                    if response is not None
-                    else request.intent_id
+                    response.intent_id if response is not None else request.intent_id
                 ),
                 default_intent_version=(
                     response.intent_version

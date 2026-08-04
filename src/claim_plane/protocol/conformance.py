@@ -38,9 +38,7 @@ class ConformanceScenario(str, Enum):
     OUT_OF_ORDER_EVENT_FAILS_CLOSED = "out_of_order_event_fails_closed"
     CRASH_RESUME_SAFE = "adapter_crash_resumes_safely"
     CANCELLATION_REVOKES_AUTHORITY = "cancellation_revokes_authority"
-    COMPLETION_DETECTS_UNCOVERED_MUTATION = (
-        "completion_detects_uncovered_mutation"
-    )
+    COMPLETION_DETECTS_UNCOVERED_MUTATION = "completion_detects_uncovered_mutation"
     CORRUPT_STATE_CANNOT_VERIFY = "corrupt_state_cannot_produce_verified"
     SECRET_VALUES_ABSENT = "secret_values_absent_from_evidence"
 
@@ -112,15 +110,9 @@ class GuaranteeConformance:
 
 
 _DEFAULT_GUARANTEE_SCENARIOS: dict[str, tuple[ConformanceScenario, ...]] = {
-    "undeclared_tool_write": (
-        ConformanceScenario.UNDECLARED_MUTATION_DENIED,
-    ),
-    "bypassed_host_write": (
-        ConformanceScenario.COMPLETION_DETECTS_UNCOVERED_MUTATION,
-    ),
-    "subagent_mutation": (
-        ConformanceScenario.COMPLETION_DETECTS_UNCOVERED_MUTATION,
-    ),
+    "undeclared_tool_write": (ConformanceScenario.UNDECLARED_MUTATION_DENIED,),
+    "bypassed_host_write": (ConformanceScenario.COMPLETION_DETECTS_UNCOVERED_MUTATION,),
+    "subagent_mutation": (ConformanceScenario.COMPLETION_DETECTS_UNCOVERED_MUTATION,),
     "completion_verification": (
         ConformanceScenario.COMPLETION_DETECTS_UNCOVERED_MUTATION,
         ConformanceScenario.CORRUPT_STATE_CANNOT_VERIFY,
@@ -129,9 +121,7 @@ _DEFAULT_GUARANTEE_SCENARIOS: dict[str, tuple[ConformanceScenario, ...]] = {
         ConformanceScenario.OUT_OF_ORDER_EVENT_FAILS_CLOSED,
         ConformanceScenario.CORRUPT_STATE_CANNOT_VERIFY,
     ),
-    "stale_intent_version": (
-        ConformanceScenario.STALE_INTENT_VERSION_DENIED,
-    ),
+    "stale_intent_version": (ConformanceScenario.STALE_INTENT_VERSION_DENIED,),
     "cancellation_revokes_authority": (
         ConformanceScenario.CANCELLATION_REVOKES_AUTHORITY,
     ),
@@ -242,8 +232,7 @@ def _guarantee_results(
                     scenarios=(),
                     verified=False,
                     detail=(
-                        "No conformance scenario is bound to this available "
-                        "guarantee."
+                        "No conformance scenario is bound to this available guarantee."
                     ),
                 )
             )

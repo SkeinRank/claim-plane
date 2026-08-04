@@ -106,9 +106,7 @@ class SemanticVersion:
         prerelease = tuple(
             part for part in (match.group("prerelease") or "").split(".") if part
         )
-        build = tuple(
-            part for part in (match.group("build") or "").split(".") if part
-        )
+        build = tuple(part for part in (match.group("build") or "").split(".") if part)
         return cls(
             int(match.group("major")),
             int(match.group("minor") or 0),
@@ -201,27 +199,29 @@ class VersionRange:
                 prefix = version_text[:-2]
                 components = prefix.split(".")
                 if len(components) == 1:
-                    lower = SemanticVersion.parse(prefix)
-                    upper = SemanticVersion(lower.major + 1, 0, 0)
+                    lower_version = SemanticVersion.parse(prefix)
+                    upper_version = SemanticVersion(lower_version.major + 1, 0, 0)
                 elif len(components) == 2:
-                    lower = SemanticVersion.parse(prefix)
-                    upper = SemanticVersion(lower.major, lower.minor + 1, 0)
+                    lower_version = SemanticVersion.parse(prefix)
+                    upper_version = SemanticVersion(
+                        lower_version.major, lower_version.minor + 1, 0
+                    )
                 else:
                     raise ValueError(f"invalid wildcard version: {version_text!r}")
                 comparators.extend(
-                    (_Comparator(">=", lower), _Comparator("<", upper))
+                    (_Comparator(">=", lower_version), _Comparator("<", upper_version))
                 )
                 continue
             version = SemanticVersion.parse(version_text)
             if operator == "~=":
-                lower = _Comparator(">=", version)
+                lower_comparator = _Comparator(">=", version)
                 release_text = version_text.split("-", 1)[0].split("+", 1)[0]
                 component_count = len(release_text.lstrip("v").split("."))
                 if component_count >= 3:
                     upper_version = SemanticVersion(version.major, version.minor + 1, 0)
                 else:
                     upper_version = SemanticVersion(version.major + 1, 0, 0)
-                comparators.extend((lower, _Comparator("<", upper_version)))
+                comparators.extend((lower_comparator, _Comparator("<", upper_version)))
             else:
                 comparators.append(_Comparator(operator, version))
         if not comparators:
@@ -492,9 +492,7 @@ def adapter_pin_path(project_root: str | Path, adapter: str) -> Path:
     return root / ".claim-plane" / "adapters" / "pins" / f"{safe_name}.json"
 
 
-def load_adapter_pin(
-    project_root: str | Path, adapter: str
-) -> AdapterPin | None:
+def load_adapter_pin(project_root: str | Path, adapter: str) -> AdapterPin | None:
     path = adapter_pin_path(project_root, adapter)
     if not path.exists():
         return None
@@ -503,9 +501,7 @@ def load_adapter_pin(
         raise ValueError(f"{path} must contain a JSON object")
     pin = AdapterPin.from_dict(payload)
     if pin.adapter != adapter:
-        raise ValueError(
-            f"adapter pin targets {pin.adapter!r}, expected {adapter!r}"
-        )
+        raise ValueError(f"adapter pin targets {pin.adapter!r}, expected {adapter!r}")
     return pin
 
 
@@ -884,9 +880,7 @@ class AdapterRegistry:
             "entry_point_group": ADAPTER_ENTRY_POINT_GROUP,
             "core_protocol_versions": list(CORE_ADAPTER_PROTOCOL_VERSIONS),
             "adapters": adapters,
-            "discovery_findings": [
-                item.to_dict() for item in self.discovery_findings
-            ],
+            "discovery_findings": [item.to_dict() for item in self.discovery_findings],
         }
         result["digest"] = _canonical_digest(result)
         return result

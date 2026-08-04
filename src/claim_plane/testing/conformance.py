@@ -182,12 +182,14 @@ class ReferenceConformanceDriver:
         )
         assert rejected.status is AdapterStatus.DENIED
         assert rejected.intent_version == admitted.intent_version
-        assert self._mutation(
-            root, session, admitted, "README.md", "old-authority"
-        ).status is AdapterStatus.SUCCEEDED
-        assert self._mutation(
-            root, session, admitted, "outside.py", "still-denied"
-        ).status is AdapterStatus.DENIED
+        assert (
+            self._mutation(root, session, admitted, "README.md", "old-authority").status
+            is AdapterStatus.SUCCEEDED
+        )
+        assert (
+            self._mutation(root, session, admitted, "outside.py", "still-denied").status
+            is AdapterStatus.DENIED
+        )
         return ConformanceObservation(
             "Rejected expansion left the previous authority unchanged."
         )

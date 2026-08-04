@@ -151,9 +151,7 @@ class CodexAdapter:
         )
         return registry.handshake(self.name, project_root=project_root)
 
-    def capability_manifest(
-        self, project_root: str = "."
-    ) -> AdapterCapabilityManifest:
+    def capability_manifest(self, project_root: str = ".") -> AdapterCapabilityManifest:
         """Return the effective Codex capability and guarantee declaration."""
 
         root = codex_runtime.resolve_project_root(project_root)
@@ -173,9 +171,9 @@ class CodexAdapter:
                 "project_hook_feature",
             )
         )
-        pre_write_complete = hooks_complete and status(
-            "pre_mutation_guard_compatibility"
-        ) == "ok"
+        pre_write_complete = (
+            hooks_complete and status("pre_mutation_guard_compatibility") == "ok"
+        )
         completion_complete = hooks_complete
 
         capabilities = {
@@ -548,9 +546,9 @@ class CodexAdapter:
             self._record_lifecycle(root, request, error=error)
             raise
         except Exception as exc:  # noqa: BLE001
-            error = _map_runtime_error(exc, request)
-            self._record_lifecycle(root, request, error=error)
-            raise error from exc
+            mapped_error = _map_runtime_error(exc, request)
+            self._record_lifecycle(root, request, error=mapped_error)
+            raise mapped_error from exc
 
         intent_id, intent_version = self._binding(root, request.session_id)
         resolved_status = status or AdapterStatus.SUCCEEDED
@@ -757,9 +755,7 @@ class CodexAdapter:
         return self._perform(
             request,
             AdapterOperation.INSPECT,
-            lambda root: codex_runtime.codex_intent_status(
-                root, session_id=session_id
-            ),
+            lambda root: codex_runtime.codex_intent_status(root, session_id=session_id),
         )
 
     def cancel(self, request: AdapterRequest) -> AdapterResponse:

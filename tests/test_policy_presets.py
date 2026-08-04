@@ -79,21 +79,24 @@ def test_project_rules_raise_risk_and_explain_the_policy_action() -> None:
     auth = next(item for item in payload["findings"] if item["path"].startswith("src/"))
     assert auth["level"] == "critical"
     assert "authentication boundary" in auth["explanation"]
-    assert effective.digest() == resolve_policy(
-        "guarded",
-        risk={
-            "default": "low",
-            "include_builtin_rules": False,
-            "rules": [
-                {
-                    "match": "src/auth/**",
-                    "level": "critical",
-                    "reason": "authentication boundary",
-                }
-            ],
-        },
-        source="test",
-    ).digest()
+    assert (
+        effective.digest()
+        == resolve_policy(
+            "guarded",
+            risk={
+                "default": "low",
+                "include_builtin_rules": False,
+                "rules": [
+                    {
+                        "match": "src/auth/**",
+                        "level": "critical",
+                        "reason": "authentication boundary",
+                    }
+                ],
+            },
+            source="test",
+        ).digest()
+    )
 
 
 def test_observe_records_would_deny_without_weakening_control_invariants(

@@ -221,9 +221,7 @@ def load_project_config(root_or_child: str | Path = ".") -> dict[str, Any]:
             if protocol == LEGACY_PROJECT_CONFIG_PROTOCOL
             else ""
         )
-        raise ValueError(
-            f"{path} uses unsupported protocol {protocol!r}.{remediation}"
-        )
+        raise ValueError(f"{path} uses unsupported protocol {protocol!r}.{remediation}")
     return root_payload
 
 
@@ -320,8 +318,7 @@ def migrate_project_config(
         original = path.read_bytes()
         if backup.exists() and backup.read_bytes() != original:
             raise ValueError(
-                "migration backup already exists with different content: "
-                f"{backup}"
+                f"migration backup already exists with different content: {backup}"
             )
         if not backup.exists():
             _atomic_write_text(backup, original.decode("utf-8"))
@@ -797,9 +794,7 @@ def doctor_project(root_or_child: str | Path = ".") -> ProjectDoctorReport:
     )
 
     state_dir = root / ".claim-plane"
-    writable = state_dir.is_dir() and os.access(
-        state_dir, os.R_OK | os.W_OK | os.X_OK
-    )
+    writable = state_dir.is_dir() and os.access(state_dir, os.R_OK | os.W_OK | os.X_OK)
     checks.append(
         {
             "name": "state_directory",
@@ -840,9 +835,7 @@ def doctor_project(root_or_child: str | Path = ".") -> ProjectDoctorReport:
 
         acceptance = config.get("acceptance")
         commands = (
-            acceptance.get("commands")
-            if isinstance(acceptance, Mapping)
-            else None
+            acceptance.get("commands") if isinstance(acceptance, Mapping) else None
         )
         if not isinstance(commands, list) or not commands:
             checks.append(
@@ -858,9 +851,7 @@ def doctor_project(root_or_child: str | Path = ".") -> ProjectDoctorReport:
             for command in commands:
                 available, detail = _command_available(root, str(command))
                 if not available:
-                    unavailable.append(
-                        {"command": str(command), "detail": detail}
-                    )
+                    unavailable.append({"command": str(command), "detail": detail})
             checks.append(
                 {
                     "name": "acceptance_commands",

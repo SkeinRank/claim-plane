@@ -548,8 +548,7 @@ def _codex_auth_status(executable: str | None) -> tuple[str, str]:
     if completed.returncode == 0:
         return "ok", "Codex reports an available authentication session"
     if any(
-        item in summary
-        for item in ("not logged", "unauthenticated", "login required")
+        item in summary for item in ("not logged", "unauthenticated", "login required")
     ):
         return "error", "Codex is installed but no authentication session is available"
     return (
@@ -1041,9 +1040,7 @@ def _record_session_handshake(
             else None
         ),
         "controlled_policy_manifest": (
-            EffectivePolicy.from_dict(
-                payload["_claim_plane_policy_manifest"]
-            ).to_dict()
+            EffectivePolicy.from_dict(payload["_claim_plane_policy_manifest"]).to_dict()
             if isinstance(payload.get("_claim_plane_policy_manifest"), Mapping)
             else None
         ),
@@ -2034,9 +2031,7 @@ def _session_effective_policy(
         selected,
         risk=risk if isinstance(risk, Mapping) else None,
         source=(
-            "controlled_run"
-            if session.get("controlled_policy")
-            else "project_config"
+            "controlled_run" if session.get("controlled_policy") else "project_config"
         ),
         metadata={"adapter": "codex"},
     )

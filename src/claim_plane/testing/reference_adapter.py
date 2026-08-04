@@ -74,9 +74,7 @@ class ReferenceAdapter:
     protocol_version = AGENT_ADAPTER_PROTOCOL_VERSION
     supported_protocol_range = ">=1.0,<2.0"
 
-    def capability_manifest(
-        self, project_root: str = "."
-    ) -> AdapterCapabilityManifest:
+    def capability_manifest(self, project_root: str = ".") -> AdapterCapabilityManifest:
         del project_root
         capabilities = {
             "pre_write_blocking": CapabilityLevel.COMPLETE,
@@ -193,9 +191,12 @@ class ReferenceAdapter:
                 events = store.list_events(
                     adapter=self.name, session_id=request.session_id
                 )
-                if events and not store.report(
-                    adapter=self.name, session_id=request.session_id
-                ).valid:
+                if (
+                    events
+                    and not store.report(
+                        adapter=self.name, session_id=request.session_id
+                    ).valid
+                ):
                     raise AdapterProtocolError(
                         AdapterErrorCode.CORRUPT_STATE,
                         "reference lifecycle stream is invalid",
@@ -267,9 +268,8 @@ class ReferenceAdapter:
                 AdapterErrorCode.STALE_INTENT_VERSION,
                 "request intent identity is stale",
             )
-        if (
-            request.intent_version is not None
-            and request.intent_version != int(intent["version"])
+        if request.intent_version is not None and request.intent_version != int(
+            intent["version"]
         ):
             raise AdapterProtocolError(
                 AdapterErrorCode.STALE_INTENT_VERSION,
@@ -434,8 +434,7 @@ class ReferenceAdapter:
             session = self._assert_binding(state, request)
             resource = request.payload.get("resource")
             allowed = (
-                isinstance(resource, str)
-                and resource in session["intent"]["resources"]
+                isinstance(resource, str) and resource in session["intent"]["resources"]
             )
             return (
                 {"allowed": allowed, "resource": resource},

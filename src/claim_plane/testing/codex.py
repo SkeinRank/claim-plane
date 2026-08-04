@@ -211,9 +211,7 @@ class CodexConformanceDriver:
 
     def _scenario_legitimate_amendment_admitted_atomically(self, scenario):
         repo, session, admitted = self._active(scenario)
-        ticket, current_version = self._issue_ticket(
-            repo, session, admitted, "ticket"
-        )
+        ticket, current_version = self._issue_ticket(repo, session, admitted, "ticket")
         amended = self.adapter.request_amendment(
             self._request(
                 AdapterOperation.REQUEST_AMENDMENT,
@@ -225,8 +223,7 @@ class CodexConformanceDriver:
                 payload={
                     "ticket_id": ticket,
                     "reason": (
-                        "The supporting file is required by the requested "
-                        "change."
+                        "The supporting file is required by the requested change."
                     ),
                 },
             )
@@ -376,9 +373,7 @@ class CodexConformanceDriver:
         )
         assert resumed.status is AdapterStatus.SUCCEEDED
         inspected = replacement.inspect(
-            self._request(
-                AdapterOperation.INSPECT, repo, "inspect", session_id=session
-            )
+            self._request(AdapterOperation.INSPECT, repo, "inspect", session_id=session)
         )
         assert inspected.intent_id == admitted.intent_id
         assert inspected.intent_version is not None
