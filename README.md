@@ -1,6 +1,19 @@
+<div align="center">
+
 # Claim Plane
 
-**Semantic concurrency control and continuous integration for parallel coding agents.**
+**A deterministic control and evidence layer for coding agents**  
+Task-bound authority. Controlled scope. Verifiable delivery.
+
+[![CI](https://github.com/SkeinRank/claim-plane/actions/workflows/ci.yml/badge.svg)](https://github.com/SkeinRank/claim-plane/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/claim-plane?label=pypi)](https://pypi.org/project/claim-plane/)
+[![Python](https://img.shields.io/pypi/pyversions/claim-plane?label=python)](https://pypi.org/project/claim-plane/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-4c1)](LICENSE)
+[![Status](https://img.shields.io/badge/status-technical%20preview-orange)](#start-here)
+
+**Let agents code. Make every change provable.**
+
+</div>
 
 > **Technical Preview — 0.36.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
