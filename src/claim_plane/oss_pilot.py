@@ -18,6 +18,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -29,10 +30,11 @@ from claim_plane.project import (
     load_project_config,
     set_adapter_enabled,
 )
+from claim_plane.test_feedback import managed_test_artifact
 
 OSS_PILOT_SELECTION_PROTOCOL = "claim-plane.oss-pilot-selection.v1"
 OSS_PILOT_WORKSPACE_PROTOCOL = "claim-plane.oss-pilot-workspace.v1"
-OSS_PILOT_STATUS_PROTOCOL = "claim-plane.oss-pilot-status.v1"
+OSS_PILOT_STATUS_PROTOCOL = "claim-plane.oss-pilot-status.v2"
 OSS_PILOT_SOURCE_URL = "https://github.com/cooperbench/CooperBench.git"
 OSS_PILOT_SOURCE_REVISION = "d46d9e73fa64159e0428b480f293623de90be1ad"
 OSS_PILOT_DEFAULT_ROOT = Path("/private/tmp/claim-plane-oss-pilot")
@@ -132,7 +134,9 @@ FROZEN_OSS_PILOT_TASKS = (
         initial_scope=("src/jinja2/loaders.py",),
         prompt_suffix=(
             "Keep the implementation focused on the requested behavior. "
-            "Do not run the test suite yourself; Claim Plane will perform final verification."
+            "You may run targeted tests needed to develop and repair the solution. "
+            "Do not run the configured full acceptance command; Claim Plane will "
+            "perform independent final verification."
         ),
     ),
     OssPilotTask(
@@ -144,7 +148,9 @@ FROZEN_OSS_PILOT_TASKS = (
         initial_scope=("src/click/shell_completion.py",),
         prompt_suffix=(
             "Update the appropriate existing test coverage. Keep unrelated modules unchanged. "
-            "Do not run the test suite yourself; Claim Plane will perform final verification."
+            "You may run targeted tests needed to develop and repair the solution. "
+            "Do not run the configured full acceptance command; Claim Plane will "
+            "perform independent final verification."
         ),
     ),
     OssPilotTask(
@@ -156,8 +162,9 @@ FROZEN_OSS_PILOT_TASKS = (
         initial_scope=("dirty_equals/_other.py",),
         prompt_suffix=(
             "Use the smallest task-relevant change. Do not perform adjacent cleanup or broad "
-            "configuration changes. Do not run the test suite yourself; Claim Plane will "
-            "perform final verification."
+            "configuration changes. You may run targeted tests needed to develop and repair "
+            "the solution. Do not run the configured full acceptance command; Claim Plane "
+            "will perform independent final verification."
         ),
     ),
 )
@@ -492,6 +499,88 @@ def run_oss_pilot(
     return payload
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _candidate_identity(root: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
+    repository = manifest.get("repository")
+    repository_payload = repository if isinstance(repository, Mapping) else {}
+    base_commit = str(repository_payload.get("base_commit") or "HEAD")
+    completed = subprocess.run(
+        ("git", "diff", "--binary", base_commit, "--"),
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise OssPilotError("could not compute the OSS pilot candidate diff")
+    digest = hashlib.sha256()
+    digest.update(base_commit.encode("utf-8"))
+    digest.update(b"\0tracked\0")
+    digest.update(completed.stdout)
+    untracked = [
+        item
+        for item in _git(
+            root, "ls-files", "--others", "--exclude-standard"
+        ).splitlines()
+        if item
+        and not item.startswith((".claim-plane/", ".codex/"))
+        and not managed_test_artifact(item)
+    ]
+    for relative in sorted(untracked):
+        path = root / relative
+        if not path.is_file():
+            continue
+        digest.update(b"\0untracked\0")
+        digest.update(relative.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+    return {
+        "protocol": "claim-plane.oss-pilot-candidate.v1",
+        "base_commit": base_commit,
+        "digest": digest.hexdigest(),
+        "untracked_files": sorted(untracked),
+    }
+
+
+def latest_oss_pilot_reverification(root: str | Path) -> dict[str, Any] | None:
+    resolved = Path(root).expanduser().resolve()
+    path = resolved / ".claim-plane" / "oss-pilot" / "acceptance" / "latest.json"
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else None
+
+
+def _current_candidate_verdict(
+    *,
+    current_candidate: Mapping[str, Any],
+    latest_run: Mapping[str, Any] | None,
+    reverification: Mapping[str, Any] | None,
+) -> str:
+    if isinstance(reverification, Mapping):
+        candidate = reverification.get("candidate")
+        if (
+            isinstance(candidate, Mapping)
+            and candidate.get("digest") == current_candidate.get("digest")
+            and candidate.get("base_commit") == current_candidate.get("base_commit")
+        ):
+            classification = str(reverification.get("classification") or "")
+            if classification == "PASS":
+                return "VERIFIED_AFTER_RECHECK"
+            if classification == "TEST_FAILED":
+                return "REJECTED_AFTER_RECHECK"
+            return "UNVERIFIED_EVALUATOR_ERROR"
+        return "STALE_REVERIFICATION"
+    if isinstance(latest_run, Mapping):
+        if latest_run.get("verified") is True:
+            return "VERIFIED"
+        if latest_run.get("outcome") == "REJECTED":
+            return "REJECTED"
+    return "UNVERIFIED"
+
+
 def oss_pilot_status(
     task_id: str,
     *,
@@ -533,7 +622,16 @@ def oss_pilot_status(
                 "classification": payload.get("classification"),
                 "detail": payload.get("detail"),
                 "log_dir": payload.get("log_dir"),
+                "created_at": payload.get("created_at"),
+                "candidate": payload.get("candidate"),
+                "evidence_digest": payload.get("evidence_digest"),
             }
+    current_candidate = _candidate_identity(workspace, manifest)
+    current_verdict = _current_candidate_verdict(
+        current_candidate=current_candidate,
+        latest_run=latest,
+        reverification=latest_acceptance,
+    )
     return {
         "protocol": OSS_PILOT_STATUS_PROTOCOL,
         "task_id": task_id,
@@ -544,6 +642,8 @@ def oss_pilot_status(
         "changed": changed,
         "latest_run": latest,
         "latest_acceptance": latest_acceptance,
+        "current_candidate": current_candidate,
+        "current_verdict": current_verdict,
         "manifest_digest": manifest["digest"],
     }
 
@@ -597,19 +697,28 @@ def _finish_oss_pilot_acceptance(
     stderr: str = "",
     detail: str = "",
 ) -> int:
+    manifest = load_oss_pilot_manifest(root)
+    candidate = _candidate_identity(root, manifest)
     artifact_dir = _acceptance_artifact_dir(root)
     (artifact_dir / "stdout.log").write_text(stdout, encoding="utf-8")
     (artifact_dir / "stderr.log").write_text(stderr, encoding="utf-8")
     relative_dir = artifact_dir.relative_to(root).as_posix()
-    result = {
-        "protocol": "claim-plane.oss-pilot-acceptance-result.v1",
+    unsigned = {
+        "protocol": "claim-plane.oss-pilot-reverification.v1",
+        "attempt_id": artifact_dir.name,
+        "created_at": _utc_now(),
         "classification": classification,
         "returncode": returncode,
         "detail": detail,
+        "manifest_digest": manifest.get("digest"),
+        "candidate": candidate,
         "log_dir": relative_dir,
         "stdout_log": f"{relative_dir}/stdout.log",
         "stderr_log": f"{relative_dir}/stderr.log",
+        "stdout_sha256": hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
+        "stderr_sha256": hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
     }
+    result = {**unsigned, "evidence_digest": _sha256(unsigned)}
     (artifact_dir / "result.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -814,7 +923,6 @@ def run_oss_pilot_acceptance(
             ("git", "worktree", "add", "--detach", str(official_tree), "HEAD"),
             cwd=root,
         )
-
         official_result = _apply_git_patch(official_tree, tests_patch)
         preparation_stdout.append(official_result.stdout)
         preparation_stderr.append(official_result.stderr)

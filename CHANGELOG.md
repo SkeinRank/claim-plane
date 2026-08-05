@@ -8,6 +8,25 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.36.8] — 2026-08-05
+
+### Added
+
+- Allow bounded targeted test feedback during an admitted Codex task while keeping the configured authoritative acceptance command reserved for Claim Plane's independent final verifier.
+- Recognize common project-native test runners, including pytest, tox, nox, Cargo, Go, npm-family commands, and Airflow Breeze testing.
+- Classify untracked caches and build products from test feedback as managed artifacts without hiding tracked source, configuration, snapshot, or golden-file changes.
+- Seal OSS pilot re-verification records to the frozen base commit, current candidate digest, manifest digest, logs, result classification, and evidence digest.
+- Surface one current candidate verdict in OSS pilot status, evidence reports, and replay output.
+
+### Fixed
+
+- Remove the ambiguous `REJECTED` plus later `PASS` presentation by preserving the original run outcome while reporting `VERIFIED_AFTER_RECHECK`, `REJECTED_AFTER_RECHECK`, stale, or evaluator-error state for the current candidate.
+- Preserve independent final acceptance even when Codex uses targeted tests to repair its implementation during the interactive session.
+
+### Changed
+
+- Bump the Codex connector revision to 12 so existing enrollments refresh the test-feedback authority and metrics contract.
+
 ## [0.36.7] — 2026-08-05
 
 ### Added

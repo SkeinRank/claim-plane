@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import fnmatch
 import hashlib
+import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -15,6 +16,7 @@ from claim_plane.integration.snapshot import (
     capture_worktree_tree,
     changed_worktree_paths,
 )
+from claim_plane.test_feedback import TEST_FEEDBACK_PROTOCOL, managed_test_artifact
 
 CODEX_COMPLETION_PROTOCOL = "claim-plane.codex-completion.v1"
 
@@ -217,6 +219,56 @@ def _without_unchanged_connector_control_changes(
     )
 
 
+def _untracked_paths(root: Path) -> set[str]:
+    completed = subprocess.run(
+        ("git", "ls-files", "--others", "--exclude-standard"),
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return set()
+    return {
+        line.strip().replace("\\", "/")
+        for line in completed.stdout.splitlines()
+        if line.strip()
+    }
+
+
+def _without_managed_test_artifacts(manifest: Any, *, root: Path) -> Any:
+    untracked = _untracked_paths(root)
+    ignored = tuple(
+        path
+        for path in manifest.changed_files
+        if path in untracked and managed_test_artifact(path)
+    )
+    if not ignored:
+        return manifest
+    ignored_set = set(ignored)
+    return replace(
+        manifest,
+        changed_files=tuple(
+            path for path in manifest.changed_files if path not in ignored_set
+        ),
+        changed_regions=tuple(
+            region
+            for region in manifest.changed_regions
+            if region.path not in ignored_set
+        ),
+        artifacts=tuple(
+            artifact
+            for artifact in manifest.artifacts
+            if artifact.path not in ignored_set
+        ),
+        metadata={
+            **manifest.metadata,
+            "managed_test_artifacts_ignored": list(ignored),
+            "test_feedback_protocol": TEST_FEEDBACK_PROTOCOL,
+        },
+    )
+
+
 def verify_completion(
     root: Path,
     *,
@@ -241,6 +293,7 @@ def verify_completion(
             root=root,
             baseline=preexisting_worktree_baseline or {},
         )
+        manifest = _without_managed_test_artifacts(manifest, root=root)
         if run_acceptance:
             intent = plane.intent(intent_id)
             if intent is None:
@@ -327,6 +380,9 @@ def verify_completion(
         "warnings": int(metrics.get("warnings") or 0),
         "findings": findings,
         "task_obligations": task_obligation_summary,
+        "managed_test_artifacts": list(
+            manifest.metadata.get("managed_test_artifacts_ignored") or ()
+        ),
         "report": report,
     }
 

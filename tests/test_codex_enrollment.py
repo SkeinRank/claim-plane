@@ -574,6 +574,7 @@ def test_shell_inspection_friction_metrics_record_denial_and_recovery(
         "unclassified_denied": 1,
         "recovered_after_denial": 1,
         "pending_denials": 0,
+        "test_feedback_allowed": 0,
         "last_denial": {
             "at": inspection["last_denial"]["at"],
             "reason_code": "unsupported_shell_executable",
@@ -623,6 +624,21 @@ def test_project_acceptance_is_mandatory_and_reserved_for_final_verifier(
         assert "trusted final verifier" in decision["permissionDecisionReason"]
 
     for command in (
+        "pytest tests/test_app.py",
+        "python -m pytest -q tests/test_app.py::test_farewell",
+        "breeze testing tests tests/test_app.py",
+    ):
+        assert (
+            _pretool(
+                repo,
+                session_id,
+                tool_name="exec_command",
+                tool_input={"command": command},
+            )
+            == ""
+        )
+
+    for command in (
         "git diff -- README.md",
         "git status --short",
         "claim-plane --help",
@@ -640,6 +656,7 @@ def test_project_acceptance_is_mandatory_and_reserved_for_final_verifier(
 
     status = codex.codex_intent_status(repo, session_id=session_id)
     assert status["guard"]["denied_calls"] == 3
+    assert status["guard"]["inspection"]["test_feedback_allowed"] == 3
     assert status["guard"].get("denied_mutation_calls", 0) == 0
 
 

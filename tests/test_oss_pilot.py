@@ -211,6 +211,15 @@ def test_acceptance_runs_in_isolated_worktree(tmp_path: Path) -> None:
     assert oss_pilot.run_oss_pilot_acceptance(repo) == 0
     assert (repo / "src" / "value.py").read_text(encoding="utf-8") == "VALUE = 2\n"
     assert _git(repo, "rev-parse", "HEAD") == base
+    recheck = oss_pilot.latest_oss_pilot_reverification(repo)
+    assert recheck is not None
+    assert recheck["protocol"] == "claim-plane.oss-pilot-reverification.v1"
+    assert recheck["classification"] == "PASS"
+    assert recheck["candidate"]["base_commit"] == base
+    assert len(recheck["candidate"]["digest"]) == 64
+    assert len(recheck["stdout_sha256"]) == 64
+    assert len(recheck["stderr_sha256"]) == 64
+    assert len(recheck["evidence_digest"]) == 64
 
 
 def test_manifest_digest_rejects_tampering(tmp_path: Path) -> None:

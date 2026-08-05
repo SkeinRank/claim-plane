@@ -61,6 +61,7 @@ from claim_plane.project import (
     resolve_project_root as resolve_enrolled_project_root,
     set_adapter_enabled,
 )
+from claim_plane.test_feedback import TEST_FEEDBACK_PROTOCOL
 
 PROJECT_PROTOCOL = PROJECT_STATE_PROTOCOL
 CODEX_ENROLLMENT_PROTOCOL = "claim-plane.codex-enrollment.v1"
@@ -70,7 +71,7 @@ CODEX_INTENT_ADMISSION_PROTOCOL = "claim-plane.codex-intent-admission.v1"
 CODEX_HOOK_COMMAND = "claim-plane codex-hook"
 CODEX_MIN_GUARD_VERSION = (0, 123, 0)
 CODEX_COMPLETION_ACCEPTANCE_TIMEOUT = 300
-CODEX_CONNECTOR_REVISION = 11
+CODEX_CONNECTOR_REVISION = 12
 CODEX_HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -2194,6 +2195,9 @@ def codex_intent_status(
                 "pending_denials": len(
                     session.get("guard_pending_shell_denials") or ()
                 ),
+                "test_feedback_allowed": int(
+                    session.get("guard_test_feedback_allowed") or 0
+                ),
                 "last_denial": dict(session.get("guard_last_shell_denial") or {}),
             },
         },
@@ -2639,6 +2643,11 @@ def _record_guard_evaluation(
             )
     if promoted:
         session["guard_promotions"] = int(session.get("guard_promotions") or 0) + 1
+    if evaluation.allowed and evaluation.reason_code == "test_feedback":
+        session["guard_test_feedback_allowed"] = (
+            int(session.get("guard_test_feedback_allowed") or 0) + 1
+        )
+        session["guard_test_feedback_protocol"] = TEST_FEEDBACK_PROTOCOL
 
     is_read_only_shell = bool(
         evaluation.allowed

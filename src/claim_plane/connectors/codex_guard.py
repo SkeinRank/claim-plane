@@ -370,27 +370,6 @@ def _shell_argv(command: str) -> list[str] | None:
     return argv
 
 
-def _pytest_invocation(argv: Sequence[str]) -> bool:
-    if not argv:
-        return False
-    executable = posixpath.basename(argv[0]).casefold()
-    if executable in {"pytest", "py.test"}:
-        return True
-    return (
-        executable
-        in {
-            "python",
-            "python3",
-            "python3.10",
-            "python3.11",
-            "python3.12",
-            "python3.13",
-        }
-        and len(argv) >= 3
-        and argv[1:3] == ["-m", "pytest"]
-    )
-
-
 def _configured_acceptance_commands(root: Path) -> tuple[str, ...]:
     try:
         config = load_project_config(root)
@@ -405,25 +384,135 @@ def _configured_acceptance_commands(root: Path) -> tuple[str, ...]:
     )
 
 
-def _reserved_acceptance_shell(root: Path, command: str) -> bool:
+def _authoritative_acceptance_shell(root: Path, command: str) -> bool:
     argv = _shell_argv(command)
     if argv is None or not argv:
         return False
     configured = _configured_acceptance_commands(root)
-    if not configured:
-        return False
-    normalized = tuple(argv)
     for required in configured:
         required_argv = _shell_argv(required)
-        if required_argv is not None and normalized == tuple(required_argv):
+        if required_argv is None:
+            continue
+        if tuple(argv) == tuple(required_argv):
             return True
         if (
-            required_argv is not None
-            and _pytest_invocation(required_argv)
-            and _pytest_invocation(argv)
+            _pytest_arguments(required_argv) is not None
+            and _pytest_arguments(argv) is not None
+            and not _targeted_pytest(argv)
         ):
             return True
     return False
+
+
+def _pytest_arguments(argv: Sequence[str]) -> tuple[str, ...] | None:
+    if not argv:
+        return None
+    executable = posixpath.basename(argv[0]).casefold()
+    if executable in {"pytest", "py.test"}:
+        return tuple(argv[1:])
+    if (
+        executable
+        in {
+            "python",
+            "python3",
+            "python3.10",
+            "python3.11",
+            "python3.12",
+            "python3.13",
+        }
+        and len(argv) >= 3
+        and argv[1:3] == ["-m", "pytest"]
+    ):
+        return tuple(argv[3:])
+    if executable in {"uv", "poetry", "pipenv"} and len(argv) >= 3 and argv[1] == "run":
+        return _pytest_arguments(argv[2:])
+    return None
+
+
+def _targeted_pytest(argv: Sequence[str]) -> bool:
+    arguments = _pytest_arguments(argv)
+    if arguments is None:
+        return False
+    narrowing_flags = {
+        "-k",
+        "-m",
+        "--lf",
+        "--ff",
+        "--last-failed",
+        "--failed-first",
+        "--stepwise",
+    }
+    if any(item in narrowing_flags for item in arguments):
+        return True
+    for item in arguments:
+        if item.startswith("-"):
+            continue
+        if (
+            "::" in item
+            or "/" in item
+            or item.endswith(".py")
+            or item.startswith("tests")
+        ):
+            return True
+    return False
+
+
+def _configured_test_feedback_prefixes(root: Path) -> tuple[tuple[str, ...], ...]:
+    try:
+        config = load_project_config(root)
+    except (FileNotFoundError, OSError, ValueError):
+        return ()
+    value = config.get("test_feedback")
+    if not isinstance(value, Mapping) or value.get("enabled", True) is False:
+        return ()
+    commands = value.get("commands") or ()
+    if isinstance(commands, (str, bytes)) or not isinstance(commands, Sequence):
+        return ()
+    result: list[tuple[str, ...]] = []
+    for command in commands:
+        if not isinstance(command, str):
+            continue
+        argv = _shell_argv(command)
+        if argv:
+            result.append(tuple(argv))
+    return tuple(result)
+
+
+def _test_feedback_shell(root: Path, command: str) -> bool:
+    argv = _shell_argv(command)
+    if argv is None or not argv:
+        return False
+    if _authoritative_acceptance_shell(root, command):
+        return False
+    pytest_args = _pytest_arguments(argv)
+    if pytest_args is not None:
+        return _targeted_pytest(argv)
+    executable = posixpath.basename(argv[0]).casefold()
+    built_in = (
+        executable in {"tox", "nox"}
+        or (executable == "cargo" and len(argv) >= 2 and argv[1] == "test")
+        or (executable == "go" and len(argv) >= 2 and argv[1] == "test")
+        or (
+            executable in {"npm", "pnpm", "yarn", "bun"}
+            and len(argv) >= 2
+            and (
+                argv[1] == "test"
+                or (argv[1] == "run" and len(argv) >= 3 and argv[2].startswith("test"))
+            )
+        )
+        or (
+            executable == "breeze"
+            and len(argv) >= 3
+            and argv[1:3] == ["testing", "tests"]
+        )
+    )
+    if built_in:
+        return True
+    normalized = tuple(argv)
+    return any(
+        len(normalized) >= len(prefix) and normalized[: len(prefix)] == prefix
+        for prefix in _configured_test_feedback_prefixes(root)
+    )
 
 
 def _shell_failure(
@@ -1047,8 +1136,10 @@ def classify_tool_call(
         session_id = session_value if isinstance(session_value, str) else None
         if _claim_plane_control_command(command, session_id=session_id):
             return "control_plane", ()
-        if _reserved_acceptance_shell(root, command):
+        if _authoritative_acceptance_shell(root, command):
             return "acceptance_reserved", ()
+        if _test_feedback_shell(root, command):
+            return "test_feedback", ()
         if _simple_read_only_shell(command):
             return "read_only", ()
         mutations = _parse_simple_shell_mutation(root, cwd, command)
@@ -1115,6 +1206,43 @@ def evaluate_pre_tool_use(
             classification=classification,
             reason_code="control_plane",
             reason="connector-owned Claim Plane control command",
+        )
+
+    if classification == "test_feedback":
+        if intent is None or not intent_is_active:
+            return GuardEvaluation(
+                allowed=False,
+                mutating=False,
+                tool_name=tool_name,
+                classification=classification,
+                reason_code="test_feedback_requires_intent",
+                reason=(
+                    "Targeted test feedback is available after the task ChangeIntent "
+                    "is admitted. Admit the task, then retry the test command."
+                ),
+            )
+        if not base_commit_matches:
+            return GuardEvaluation(
+                allowed=False,
+                mutating=False,
+                tool_name=tool_name,
+                classification=classification,
+                reason_code="base_changed",
+                reason=(
+                    "Repository HEAD no longer matches the task base; start a fresh "
+                    "task before running test feedback."
+                ),
+            )
+        return GuardEvaluation(
+            allowed=True,
+            mutating=False,
+            tool_name=tool_name,
+            classification=classification,
+            reason_code="test_feedback",
+            reason=(
+                "bounded targeted test feedback is allowed; Claim Plane will still "
+                "run independent authoritative acceptance after the agent exits"
+            ),
         )
 
     if classification == "acceptance_reserved":

@@ -280,7 +280,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.36.7"
+__version__ = "0.36.8"
 
 __all__ = [
     "DOGFOOD_ARMS",

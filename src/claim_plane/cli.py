@@ -902,6 +902,15 @@ def _print_evidence_report(payload: Mapping[str, Any]) -> None:
             final_line = tail.splitlines()[-1]
             shown = final_line if len(final_line) <= 100 else final_line[:97] + "..."
             print(f"  Last output: {shown}")
+    reverification = payload.get("reverification")
+    if isinstance(reverification, Mapping):
+        print(
+            "Reverification: "
+            f"{reverification.get('classification')} · "
+            f"current={payload.get('current_candidate_verdict')}"
+        )
+        if reverification.get("log_dir"):
+            print(f"  Logs: {reverification.get('log_dir')}")
     execution = payload.get("execution") or {}
     print(
         f"Execution: {execution.get('duration_seconds')}s · "
@@ -1023,6 +1032,7 @@ def cmd_oss_pilot_status(args: argparse.Namespace) -> int:
             print(f"Latest run: {latest.get('run_id')} · {latest.get('outcome')}")
         else:
             print("Latest run: none")
+        print(f"Current candidate: {payload.get('current_verdict')}")
         latest_acceptance = payload.get("latest_acceptance")
         if isinstance(latest_acceptance, Mapping):
             print(

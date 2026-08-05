@@ -914,6 +914,7 @@ def _inspection_summary(adapter_status: Mapping[str, Any]) -> dict[str, Any]:
         "unclassified_denied": int(source.get("unclassified_denied") or 0),
         "recovered_after_denial": int(source.get("recovered_after_denial") or 0),
         "pending_denials": int(source.get("pending_denials") or 0),
+        "test_feedback_allowed": int(source.get("test_feedback_allowed") or 0),
         "last_denial": dict(source.get("last_denial") or {}),
     }
 

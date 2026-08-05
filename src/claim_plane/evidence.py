@@ -19,6 +19,12 @@ from claim_plane.controlled_run import (
     ControlledRunError,
     load_controlled_run,
 )
+from claim_plane.oss_pilot import (
+    _candidate_identity,
+    _current_candidate_verdict,
+    latest_oss_pilot_reverification,
+    load_oss_pilot_manifest,
+)
 from claim_plane.project import resolve_project_root
 from claim_plane.protocol import (
     LifecycleEvent,
@@ -261,6 +267,33 @@ def _guarantee_summary(
     }
 
 
+def _matching_oss_reverification(
+    root: Path, run: Mapping[str, Any]
+) -> tuple[dict[str, Any] | None, str | None]:
+    manifest_path = root / ".claim-plane" / "oss-pilot.json"
+    if not manifest_path.exists():
+        return None, None
+    try:
+        manifest = load_oss_pilot_manifest(root)
+        current = _candidate_identity(root, manifest)
+        latest = latest_oss_pilot_reverification(root)
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError):
+        return None, "UNVERIFIED"
+    verdict = _current_candidate_verdict(
+        current_candidate=current,
+        latest_run=run,
+        reverification=latest,
+    )
+    if not isinstance(latest, Mapping):
+        return None, verdict
+    candidate = latest.get("candidate")
+    if not isinstance(candidate, Mapping) or candidate.get("digest") != current.get(
+        "digest"
+    ):
+        return None, verdict
+    return dict(latest), verdict
+
+
 def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
     events = _events_for_run(root, run)
     lifecycle = build_lifecycle_report(events) if events else None
@@ -321,6 +354,7 @@ def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
         "runtime_events": dict((run.get("runtime") or {}).get("event_counts") or {}),
         "runtime_errors": int((run.get("runtime") or {}).get("errors") or 0),
     }
+    reverification, current_candidate_verdict = _matching_oss_reverification(root, run)
     lifecycle_payload: dict[str, Any] | None
     if lifecycle is None:
         lifecycle_payload = None
@@ -368,6 +402,8 @@ def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
         "scope": dict(run.get("scope") or {}),
         "acceptance": dict(acceptance),
         "verification": dict(run.get("completion") or {}),
+        "reverification": reverification,
+        "current_candidate_verdict": current_candidate_verdict,
         "decisions": _decision_summary(events),
         "execution": execution,
         "lifecycle": lifecycle_payload,
@@ -470,6 +506,9 @@ def build_evidence_replay(root: str | Path, selector: str = "latest") -> dict[st
         )
         for event in events
     )
+    reverification, current_candidate_verdict = _matching_oss_reverification(
+        resolved_root, run
+    )
     unsigned = {
         "protocol": EVIDENCE_REPLAY_PROTOCOL,
         "run_id": run.get("run_id"),
@@ -479,6 +518,8 @@ def build_evidence_replay(root: str | Path, selector: str = "latest") -> dict[st
         "event_count": len(entries),
         "head_digest": report.head_digest,
         "entries": [item.to_dict() for item in entries],
+        "reverification": reverification,
+        "current_candidate_verdict": current_candidate_verdict,
     }
     return {**unsigned, "replay_digest": _sha256(unsigned)}
 
@@ -501,5 +542,16 @@ def render_evidence_replay(payload: Mapping[str, Any]) -> tuple[str, ...]:
             f"{int(entry.get('sequence') or 0):04d} {clock} "
             f"{entry.get('message')}{intent}"
         )
+    reverification = payload.get("reverification")
+    if isinstance(reverification, Mapping):
+        timestamp = str(reverification.get("created_at") or "")
+        clock = timestamp[11:19] if len(timestamp) >= 19 else timestamp
+        lines.append(
+            f"RECHECK {clock} {reverification.get('classification')} "
+            f"— {reverification.get('detail')}"
+        )
+        if reverification.get("log_dir"):
+            lines.append(f"  logs {reverification.get('log_dir')}")
+        lines.append(f"Current candidate: {payload.get('current_candidate_verdict')}")
     lines.append(f"Replay digest: {payload.get('replay_digest')}")
     return tuple(lines)

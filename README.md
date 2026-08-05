@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.36.7.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.36.8.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -62,7 +62,7 @@ claim-plane swarm replace-codex <session-id> --work-id <work-id> --run-id <run-i
 
 ## Frozen OSS pilot
 
-Version `0.36.7` includes a three-task real-repository pilot for the interactive
+Version `0.36.8` includes a three-task real-repository pilot for the interactive
 Codex workflow. It prepares exact Jinja, Click, and dirty-equals repository states
 from a frozen CooperBench revision, runs each arm in an independent directory, and
 executes authoritative acceptance in an isolated temporary worktree. The evaluator
@@ -95,6 +95,18 @@ git diff --check; git status --short
 `claim-plane codex-intent status` reports allowed compound inspections, pipelines,
 unclassified shell denials, and subsequent read-only recoveries. The same summary is
 bound into controlled-run evidence for comparative Bare, Observe, and Guarded runs.
+
+## Targeted test feedback and current verdict
+
+During an admitted interactive task, Codex may run bounded targeted tests and common
+project-native test commands to repair its work. The project-configured full acceptance
+command remains reserved for Claim Plane and runs independently after the agent exits.
+Untracked test caches and build outputs are treated as managed artifacts; tracked source,
+configuration, snapshots, and golden files remain subject to normal authority checks.
+
+OSS pilot re-verification is sealed to the current candidate digest. `oss-pilot status`,
+`report`, and `replay` distinguish the immutable original run outcome from the current
+candidate verdict, including `VERIFIED_AFTER_RECHECK`.
 
 ## Research paper
 
