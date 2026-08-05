@@ -900,6 +900,24 @@ def _scope_summary(
     }
 
 
+def _inspection_summary(adapter_status: Mapping[str, Any]) -> dict[str, Any]:
+    guard = adapter_status.get("guard")
+    guard_map = guard if isinstance(guard, Mapping) else {}
+    inspection = guard_map.get("inspection")
+    source = inspection if isinstance(inspection, Mapping) else {}
+    return {
+        "protocol": "claim-plane.inspection-friction.v1",
+        "shell_calls": int(source.get("shell_calls") or 0),
+        "read_only_allowed": int(source.get("read_only_allowed") or 0),
+        "compound_allowed": int(source.get("compound_allowed") or 0),
+        "pipelines_allowed": int(source.get("pipelines_allowed") or 0),
+        "unclassified_denied": int(source.get("unclassified_denied") or 0),
+        "recovered_after_denial": int(source.get("recovered_after_denial") or 0),
+        "pending_denials": int(source.get("pending_denials") or 0),
+        "last_denial": dict(source.get("last_denial") or {}),
+    }
+
+
 def _codex_command(
     *,
     root: Path,
@@ -1618,6 +1636,7 @@ def run_controlled_task(
             **runtime.to_dict(),
             "doctor_ready": bool(doctor.get("ready")),
             "model_override": model,
+            "inspection": _inspection_summary(adapter_status),
         },
         completion=completion,
         changes=changes,
@@ -1985,6 +2004,7 @@ def run_interactive_codex(
             "model_override": model,
             "interactive": True,
             "launcher": "codex_tui",
+            "inspection": _inspection_summary(adapter_status),
         },
         completion=completion,
         changes=changes,

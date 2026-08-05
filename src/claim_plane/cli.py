@@ -824,6 +824,17 @@ def _print_evidence_report(payload: Mapping[str, Any]) -> None:
     print(f"Task: sha256:{task.get('sha256')} ({task.get('length')} chars)")
     agent = payload.get("agent") or {}
     print(f"Agent: {agent.get('adapter')} session={agent.get('session_id')}")
+    agent_runtime = agent.get("runtime") or {}
+    inspection = agent_runtime.get("inspection") or {}
+    if inspection.get("shell_calls") or inspection.get("unclassified_denied"):
+        print(
+            "Inspection: "
+            f"{inspection.get('read_only_allowed', 0)} allowed, "
+            f"{inspection.get('compound_allowed', 0)} compound, "
+            f"{inspection.get('pipelines_allowed', 0)} pipelines, "
+            f"{inspection.get('unclassified_denied', 0)} denied, "
+            f"{inspection.get('recovered_after_denial', 0)} recovered"
+        )
     intent = payload.get("intent") or {}
     print(f"Intent: {intent.get('id')}@{intent.get('version')}")
     policy = payload.get("policy") or {}
@@ -1302,6 +1313,23 @@ def cmd_codex_intent_status(args: argparse.Namespace) -> int:
             f"{guard.get('denied_calls', 0)} denied, "
             f"{guard.get('promotions', 0)} promotions"
         )
+        inspection = guard.get("inspection") or {}
+        if inspection.get("shell_calls") or inspection.get("unclassified_denied"):
+            print(
+                "Inspection: "
+                f"{inspection.get('read_only_allowed', 0)} allowed, "
+                f"{inspection.get('compound_allowed', 0)} compound, "
+                f"{inspection.get('pipelines_allowed', 0)} pipelines, "
+                f"{inspection.get('unclassified_denied', 0)} denied, "
+                f"{inspection.get('recovered_after_denial', 0)} recovered"
+            )
+            last_denial = inspection.get("last_denial") or {}
+            if last_denial.get("reason_code"):
+                executable = str(last_denial.get("segment_executable") or "").strip()
+                suffix = f" · {executable}" if executable else ""
+                print(
+                    f"Last inspection denial: {last_denial.get('reason_code')}{suffix}"
+                )
         amendment = result.get("scope_amendment") or {}
         print(
             "Scope amendments: "

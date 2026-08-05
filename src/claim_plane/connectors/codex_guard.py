@@ -147,6 +147,13 @@ class GuardEvaluation:
     reason: str
     mutations: tuple[MutationRequest, ...] = ()
     promotion: MutationRequest | None = None
+    diagnostic_code: str | None = None
+    diagnostic_segment: str | None = None
+    diagnostic_segment_index: int | None = None
+    shell_command_count: int = 0
+    shell_pipeline_count: int = 0
+    shell_compound: bool = False
+    shell_pipeline: bool = False
 
     @property
     def paths(self) -> tuple[str, ...]:
@@ -157,6 +164,21 @@ class GuardEvaluation:
             if mutation.target_path and mutation.target_path not in result:
                 result.append(mutation.target_path)
         return tuple(result)
+
+
+@dataclass(frozen=True, slots=True)
+class ShellReadOnlyAnalysis:
+    """Structured proof or denial reason for one shell inspection command."""
+
+    allowed: bool
+    reason_code: str
+    detail: str
+    segment: str | None = None
+    segment_index: int | None = None
+    command_count: int = 0
+    pipeline_count: int = 0
+    compound: bool = False
+    pipeline: bool = False
 
 
 def _normalized_tool_name(value: Any) -> str:
@@ -264,11 +286,49 @@ def _has_shell_metacharacters(command: str) -> bool:
     return _SHELL_CONTROL_CHARS.search(command) is not None
 
 
-def _git_read_only(argv: Sequence[str]) -> bool:
+def _git_subcommand(argv: Sequence[str]) -> str | None:
     if len(argv) < 2:
-        return False
-    subcommand = argv[1]
+        return None
+    index = 1
+    value_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+    flag_options = {
+        "--no-pager",
+        "--paginate",
+        "--no-replace-objects",
+        "--literal-pathspecs",
+        "--no-literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+    }
+    while index < len(argv):
+        item = argv[index]
+        if item in {"--version", "--help"}:
+            return item
+        if item in value_options:
+            index += 2
+            continue
+        if any(
+            item.startswith(f"{option}=")
+            for option in value_options
+            if option.startswith("--")
+        ):
+            index += 1
+            continue
+        if item in flag_options:
+            index += 1
+            continue
+        if item.startswith("-"):
+            return None
+        return item
+    return None
+
+
+def _git_read_only(argv: Sequence[str]) -> bool:
+    subcommand = _git_subcommand(argv)
     safe = {
+        "--help",
+        "--version",
         "status",
         "diff",
         "log",
@@ -366,29 +426,84 @@ def _reserved_acceptance_shell(root: Path, command: str) -> bool:
     return False
 
 
-def _read_only_shell_segments(command: str) -> tuple[str, ...] | None:
-    """Split a bounded read-only shell chain without evaluating shell syntax.
+def _shell_failure(
+    reason_code: str,
+    detail: str,
+    *,
+    segment: str | None = None,
+    segment_index: int | None = None,
+    command_count: int = 0,
+    pipeline_count: int = 0,
+    compound: bool = False,
+    pipeline: bool = False,
+) -> ShellReadOnlyAnalysis:
+    return ShellReadOnlyAnalysis(
+        allowed=False,
+        reason_code=reason_code,
+        detail=detail,
+        segment=segment,
+        segment_index=segment_index,
+        command_count=command_count,
+        pipeline_count=pipeline_count,
+        compound=compound,
+        pipeline=pipeline,
+    )
 
-    Only ``;`` and ``&&`` are accepted as separators. Every other control surface
-    remains fail-closed, including pipes, redirects, background execution, command
-    substitution, newlines, and malformed or empty segments. Quotes are tracked only
-    to avoid treating a separator inside a quoted argument as shell structure; the
-    existing single-command parser still performs the final conservative validation.
-    """
 
-    segments: list[str] = []
+def _split_read_only_shell(
+    command: str,
+) -> tuple[tuple[tuple[str, ...], ...] | None, ShellReadOnlyAnalysis | None]:
+    """Parse a bounded chain of read-only pipelines without evaluating shell syntax."""
+
+    pipelines: list[tuple[str, ...]] = []
+    stages: list[str] = []
     current: list[str] = []
     quote: str | None = None
     escaped = False
     index = 0
+    saw_chain = False
+    saw_pipeline = False
 
-    def finish_segment() -> bool:
-        segment = "".join(current).strip()
+    def current_text() -> str:
+        return "".join(current).strip()
+
+    def parse_failure(
+        reason_code: str,
+        detail: str,
+        *,
+        segment: str | None = None,
+        segment_index: int | None = None,
+    ) -> ShellReadOnlyAnalysis:
+        return _shell_failure(
+            reason_code,
+            detail,
+            segment=segment,
+            segment_index=segment_index,
+            command_count=sum(len(item) for item in pipelines) + len(stages),
+            pipeline_count=len(pipelines) + (1 if stages else 0),
+            compound=saw_chain or saw_pipeline,
+            pipeline=saw_pipeline,
+        )
+
+    def finish_stage() -> ShellReadOnlyAnalysis | None:
+        segment = current_text()
         if not segment:
-            return False
-        segments.append(segment)
+            return parse_failure(
+                "empty_shell_segment",
+                "the shell expression contains an empty command segment",
+                segment_index=sum(len(item) for item in pipelines) + len(stages) + 1,
+            )
+        stages.append(segment)
         current.clear()
-        return True
+        return None
+
+    def finish_pipeline() -> ShellReadOnlyAnalysis | None:
+        failure = finish_stage()
+        if failure is not None:
+            return failure
+        pipelines.append(tuple(stages))
+        stages.clear()
+        return None
 
     while index < len(command):
         character = command[index]
@@ -418,7 +533,14 @@ def _read_only_shell_segments(command: str) -> tuple[str, ...] | None:
                 index += 1
                 continue
             if character == "`" or command.startswith(("$(", "${"), index):
-                return None
+                return None, parse_failure(
+                    "command_substitution",
+                    "command substitution is not permitted in a read-only inspection",
+                    segment=current_text() or None,
+                    segment_index=sum(len(item) for item in pipelines)
+                    + len(stages)
+                    + 1,
+                )
             current.append(character)
             index += 1
             continue
@@ -433,64 +555,212 @@ def _read_only_shell_segments(command: str) -> tuple[str, ...] | None:
             quote = character
             index += 1
             continue
-        if character in {"\n", "\r", "|", "<", ">", "`"}:
-            return None
-        if character == "$" and index + 1 < len(command):
-            if command[index + 1] in {"(", "{"}:
-                return None
+        if character in {"\n", "\r"}:
+            return None, parse_failure(
+                "shell_newline",
+                "newlines are not permitted in one inspected shell command",
+                segment=current_text() or None,
+                segment_index=sum(len(item) for item in pipelines) + len(stages) + 1,
+            )
+        if character in {"<", ">"}:
+            return None, parse_failure(
+                "shell_redirection",
+                "shell redirection can write outside the admitted resource model",
+                segment=current_text() or None,
+                segment_index=sum(len(item) for item in pipelines) + len(stages) + 1,
+            )
+        if character == "`" or command.startswith(("$(", "${"), index):
+            return None, parse_failure(
+                "command_substitution",
+                "command substitution is not permitted in a read-only inspection",
+                segment=current_text() or None,
+                segment_index=sum(len(item) for item in pipelines) + len(stages) + 1,
+            )
+        if character == "|":
+            if index + 1 < len(command) and command[index + 1] == "|":
+                return None, parse_failure(
+                    "conditional_or",
+                    "the || control operator is not part of the bounded inspection grammar",
+                    segment=current_text() or None,
+                    segment_index=sum(len(item) for item in pipelines)
+                    + len(stages)
+                    + 1,
+                )
+            failure = finish_stage()
+            if failure is not None:
+                return None, failure
+            saw_pipeline = True
+            index += 1
+            continue
         if character == "&":
             if index + 1 >= len(command) or command[index + 1] != "&":
-                return None
-            if not finish_segment():
-                return None
+                return None, parse_failure(
+                    "background_execution",
+                    "background execution is not permitted in a read-only inspection",
+                    segment=current_text() or None,
+                    segment_index=sum(len(item) for item in pipelines)
+                    + len(stages)
+                    + 1,
+                )
+            failure = finish_pipeline()
+            if failure is not None:
+                return None, failure
+            saw_chain = True
             index += 2
             continue
         if character == ";":
-            if not finish_segment():
-                return None
+            failure = finish_pipeline()
+            if failure is not None:
+                return None, failure
+            saw_chain = True
             index += 1
             continue
 
         current.append(character)
         index += 1
 
-    if quote is not None or escaped or not finish_segment():
-        return None
-    return tuple(segments)
+    if quote is not None:
+        return None, parse_failure(
+            "unclosed_shell_quote",
+            "the shell expression contains an unclosed quote",
+            segment=current_text() or None,
+            segment_index=sum(len(item) for item in pipelines) + len(stages) + 1,
+        )
+    if escaped:
+        return None, parse_failure(
+            "dangling_shell_escape",
+            "the shell expression ends with an incomplete escape",
+            segment=current_text() or None,
+            segment_index=sum(len(item) for item in pipelines) + len(stages) + 1,
+        )
+    failure = finish_pipeline()
+    if failure is not None:
+        return None, failure
+    return tuple(pipelines), None
+
+
+def _single_read_only_shell_diagnostic(
+    command: str, *, segment_index: int
+) -> tuple[bool, str, str]:
+    argv = _shell_argv(command)
+    if argv is None:
+        return (
+            False,
+            "unparseable_shell_segment",
+            "the command segment cannot be parsed safely",
+        )
+    if not argv:
+        return True, "read_only", "empty environment prefix"
+    executable = posixpath.basename(argv[0]).casefold()
+    if executable not in _READ_ONLY_SHELL:
+        return (
+            False,
+            "unsupported_shell_executable",
+            f"executable {executable!r} is not in the bounded read-only command set",
+        )
+    if executable == "git" and not _git_read_only(argv):
+        subcommand = _git_subcommand(argv)
+        detail = (
+            f"git subcommand {subcommand!r} is not classified as read-only"
+            if subcommand
+            else "git global options or subcommand could not be classified safely"
+        )
+        return False, "git_command_not_read_only", detail
+    if executable == "rg" and not _rg_read_only(argv):
+        return (
+            False,
+            "rg_preprocessor_not_read_only",
+            "ripgrep preprocessor options can execute external commands",
+        )
+    if executable == "find":
+        dangerous = {
+            "-delete",
+            "-exec",
+            "-execdir",
+            "-ok",
+            "-okdir",
+            "-fprint",
+            "-fprint0",
+            "-fprintf",
+            "-fls",
+        }
+        if any(item in dangerous for item in argv[1:]):
+            return (
+                False,
+                "find_action_not_read_only",
+                "the find expression contains an action that can mutate files "
+                "or write output files",
+            )
+    if executable == "sed" and any(
+        item in {"-i", "--in-place"}
+        or item.startswith("-i")
+        or item.startswith("--in-place=")
+        for item in argv[1:]
+    ):
+        return False, "sed_in_place", "sed in-place editing is a repository mutation"
+    if executable == "command" and not (
+        len(argv) == 3
+        and argv[1] in {"-v", "-V"}
+        and re.fullmatch(r"[A-Za-z0-9_.+-]+", argv[2]) is not None
+    ):
+        return (
+            False,
+            "command_lookup_not_read_only",
+            "only command -v NAME and command -V NAME are admitted as inspection",
+        )
+    if executable == "claim-plane" and argv[1:] not in (
+        ["--help"],
+        ["-h"],
+        ["--version"],
+        ["help"],
+    ):
+        return (
+            False,
+            "claim_plane_command_not_read_only",
+            "only Claim Plane help and version commands are read-only shell inspection",
+        )
+    return True, "read_only", f"segment {segment_index} is independently read-only"
+
+
+def _analyze_read_only_shell(command: str) -> ShellReadOnlyAnalysis:
+    pipelines, failure = _split_read_only_shell(command)
+    if failure is not None:
+        return failure
+    assert pipelines is not None
+    flattened = [segment for pipeline in pipelines for segment in pipeline]
+    for index, segment in enumerate(flattened, start=1):
+        allowed, reason_code, detail = _single_read_only_shell_diagnostic(
+            segment, segment_index=index
+        )
+        if not allowed:
+            return _shell_failure(
+                reason_code,
+                detail,
+                segment=segment,
+                segment_index=index,
+                command_count=len(flattened),
+                pipeline_count=len(pipelines),
+                compound=len(flattened) > 1 or len(pipelines) > 1,
+                pipeline=any(len(item) > 1 for item in pipelines),
+            )
+    return ShellReadOnlyAnalysis(
+        allowed=True,
+        reason_code="read_only",
+        detail="every shell segment is independently read-only",
+        command_count=len(flattened),
+        pipeline_count=len(pipelines),
+        compound=len(flattened) > 1 or len(pipelines) > 1,
+        pipeline=any(len(item) > 1 for item in pipelines),
+    )
 
 
 def _single_read_only_shell(command: str) -> bool:
-    argv = _shell_argv(command)
-    if argv is None or not argv:
-        return argv == []
-    executable = posixpath.basename(argv[0])
-    if executable not in _READ_ONLY_SHELL:
-        return False
-    if executable == "git":
-        return _git_read_only(argv)
-    if executable == "rg":
-        return _rg_read_only(argv)
-    if executable == "find":
-        dangerous = {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
-        return not any(item in dangerous for item in argv[1:])
-    if executable == "sed":
-        return not any(item == "-i" or item.startswith("-i") for item in argv[1:])
-    if executable == "command":
-        return (
-            len(argv) == 3
-            and argv[1] in {"-v", "-V"}
-            and re.fullmatch(r"[A-Za-z0-9_.+-]+", argv[2]) is not None
-        )
-    if executable == "claim-plane":
-        return argv[1:] in (["--help"], ["-h"], ["--version"], ["help"])
-    return True
+    analysis = _analyze_read_only_shell(command)
+    return analysis.allowed and analysis.command_count <= 1
 
 
 def _simple_read_only_shell(command: str) -> bool:
-    segments = _read_only_shell_segments(command)
-    return segments is not None and all(
-        _single_read_only_shell(segment) for segment in segments
-    )
+    return _analyze_read_only_shell(command).allowed
 
 
 def _parse_simple_shell_mutation(
@@ -803,6 +1073,12 @@ def evaluate_pre_tool_use(
     """Classify one Codex tool call and evaluate it against the current intent."""
 
     tool_name = str(payload.get("tool_name") or payload.get("toolName") or "unknown")
+    normalized_tool = _normalized_tool_name(tool_name)
+    shell_analysis: ShellReadOnlyAnalysis | None = None
+    if normalized_tool in _SHELL_TOOLS:
+        shell_command = _command_from_input(payload)
+        if shell_command is not None:
+            shell_analysis = _analyze_read_only_shell(shell_command)
     try:
         classification, mutations = classify_tool_call(root, payload)
     except ValueError as exc:
@@ -823,6 +1099,12 @@ def evaluate_pre_tool_use(
             classification=classification,
             reason_code="read_only",
             reason="read-only tool call",
+            shell_command_count=(shell_analysis.command_count if shell_analysis else 0),
+            shell_pipeline_count=(
+                shell_analysis.pipeline_count if shell_analysis else 0
+            ),
+            shell_compound=bool(shell_analysis and shell_analysis.compound),
+            shell_pipeline=bool(shell_analysis and shell_analysis.pipeline),
         )
 
     if classification == "control_plane":
@@ -851,6 +1133,17 @@ def evaluate_pre_tool_use(
         )
 
     if classification == "opaque_shell":
+        diagnostic = shell_analysis or _shell_failure(
+            "unclassified_shell",
+            "the shell command could not be classified by the bounded "
+            "inspection grammar",
+        )
+        location = ""
+        if diagnostic.segment_index is not None:
+            location = f" at segment {diagnostic.segment_index}"
+        segment = ""
+        if diagnostic.segment:
+            segment = f" `{diagnostic.segment}`"
         return GuardEvaluation(
             allowed=False,
             mutating=True,
@@ -858,10 +1151,21 @@ def evaluate_pre_tool_use(
             classification=classification,
             reason_code="opaque_shell",
             reason=(
-                "Claim Plane cannot prove this shell command is read-only or map its "
-                "repository writes to admitted resources. Use the built-in edit path, "
-                "a supported direct file operation, or re-plan through a brokered command."
+                f"Claim Plane blocked this shell command{location}{segment}: "
+                f"{diagnostic.detail}. Every command in a chain or pipeline must be "
+                "independently provable as read-only; redirection, background "
+                "execution, "
+                "command substitution, and unknown executables remain fail-closed. "
+                "Split the inspection into supported commands or use a built-in "
+                "read tool."
             ),
+            diagnostic_code=diagnostic.reason_code,
+            diagnostic_segment=diagnostic.segment,
+            diagnostic_segment_index=diagnostic.segment_index,
+            shell_command_count=diagnostic.command_count,
+            shell_pipeline_count=diagnostic.pipeline_count,
+            shell_compound=diagnostic.compound,
+            shell_pipeline=diagnostic.pipeline,
         )
 
     if classification == "unknown_tool":

@@ -8,6 +8,25 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.36.7] — 2026-08-05
+
+### Added
+
+- Add bounded read-only shell pipelines for Codex inspection when every stage is independently classified as non-mutating.
+- Add `scripts/check-inspection-friction.sh` as a focused regression gate for shell classification, privacy, diagnostics, and recovery metrics.
+- Record shell-inspection friction metrics for allowed compound commands, admitted pipelines, unclassified denials, and later read-only recovery.
+- Surface inspection metrics in `claim-plane codex-intent status` and durable evidence reports.
+
+### Fixed
+
+- Identify the exact shell segment and deterministic reason code that caused an inspection command to fail closed instead of returning one opaque repository-path message.
+- Admit common repository-inspection forms such as `git show | head`, `rg | head`, `git log | tail`, and mixed `;` / `&&` chains without broadening mutation authority.
+- Keep redirection, background execution, command substitution, mutating Git operations, in-place `sed`, mutating `find` actions, and unknown pipeline stages denied.
+
+### Changed
+
+- Bump the Codex connector revision to 11 so existing enrollments refresh the strengthened inspection grammar and diagnostics.
+
 ## [0.36.6] — 2026-08-05
 
 ### Added

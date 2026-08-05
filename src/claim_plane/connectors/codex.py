@@ -70,7 +70,7 @@ CODEX_INTENT_ADMISSION_PROTOCOL = "claim-plane.codex-intent-admission.v1"
 CODEX_HOOK_COMMAND = "claim-plane codex-hook"
 CODEX_MIN_GUARD_VERSION = (0, 123, 0)
 CODEX_COMPLETION_ACCEPTANCE_TIMEOUT = 300
-CODEX_CONNECTOR_REVISION = 10
+CODEX_CONNECTOR_REVISION = 11
 CODEX_HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -2174,6 +2174,28 @@ def codex_intent_status(
             "last_reason_code": session.get("guard_last_reason_code"),
             "last_tool": session.get("guard_last_tool"),
             "last_paths": list(session.get("guard_last_paths") or ()),
+            "inspection": {
+                "shell_calls": int(session.get("guard_shell_calls") or 0),
+                "read_only_allowed": int(
+                    session.get("guard_read_only_shell_allowed") or 0
+                ),
+                "compound_allowed": int(
+                    session.get("guard_compound_shell_allowed") or 0
+                ),
+                "pipelines_allowed": int(
+                    session.get("guard_pipeline_shell_allowed") or 0
+                ),
+                "unclassified_denied": int(
+                    session.get("guard_unclassified_shell_denied") or 0
+                ),
+                "recovered_after_denial": int(
+                    session.get("guard_shell_recovered_after_denial") or 0
+                ),
+                "pending_denials": len(
+                    session.get("guard_pending_shell_denials") or ()
+                ),
+                "last_denial": dict(session.get("guard_last_shell_denial") or {}),
+            },
         },
         "scope_amendment": {
             "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
@@ -2260,9 +2282,9 @@ def _task_context(session: dict[str, Any]) -> str:
                 "Do not run configured acceptance commands through the agent shell. "
                 "Finish the admitted edits and stop; Claim Plane will execute acceptance "
                 "after the Codex process exits and bind the result to the final Git state.",
-                "Read-only shell commands may be chained with ; or && only when "
-                "every segment is independently read-only. Pipes, redirection, "
-                "background execution, ||, and command substitution remain denied.",
+                "Read-only shell commands may be chained with ; or && and may use pipes "
+                "when every stage is independently read-only. Redirection, background "
+                "execution, ||, command substitution, and unknown stages remain denied.",
                 "Treat this admitted ChangeIntent as the authority boundary for the task.",
                 "If a required repository mutation is denied as outside scope, use only "
                 "the one-time Claim Plane scope-amendment ticket returned by the guard. "
@@ -2310,9 +2332,9 @@ def _task_context(session: dict[str, Any]) -> str:
             "Project-required acceptance is executed by Claim Plane's trusted final "
             "verifier after the Codex process exits. Do not run it through the agent "
             "shell; Claim Plane adds it to the admitted intent automatically.",
-            "Read-only shell inspection may chain commands with ; or && only when "
-            "every segment is independently read-only. Pipes, redirection, background "
-            "execution, ||, and command substitution remain denied.",
+            "Read-only shell inspection may chain commands with ; or && and may use pipes "
+            "when every stage is independently read-only. Redirection, background "
+            "execution, ||, command substitution, and unknown stages remain denied.",
             "Proposal shape:",
             json.dumps(
                 {
@@ -2617,6 +2639,67 @@ def _record_guard_evaluation(
             )
     if promoted:
         session["guard_promotions"] = int(session.get("guard_promotions") or 0) + 1
+
+    is_read_only_shell = bool(
+        evaluation.allowed
+        and evaluation.reason_code == "read_only"
+        and evaluation.shell_command_count > 0
+    )
+    is_unclassified_shell = evaluation.reason_code == "opaque_shell"
+    if is_read_only_shell or is_unclassified_shell:
+        session["guard_shell_calls"] = int(session.get("guard_shell_calls") or 0) + 1
+    if is_read_only_shell:
+        session["guard_read_only_shell_allowed"] = (
+            int(session.get("guard_read_only_shell_allowed") or 0) + 1
+        )
+        if evaluation.shell_compound:
+            session["guard_compound_shell_allowed"] = (
+                int(session.get("guard_compound_shell_allowed") or 0) + 1
+            )
+        if evaluation.shell_pipeline:
+            session["guard_pipeline_shell_allowed"] = (
+                int(session.get("guard_pipeline_shell_allowed") or 0) + 1
+            )
+        pending = session.get("guard_pending_shell_denials") or []
+        if isinstance(pending, list) and pending:
+            session["guard_shell_recovered_after_denial"] = int(
+                session.get("guard_shell_recovered_after_denial") or 0
+            ) + len(pending)
+            session["guard_last_shell_recovery"] = {
+                "recovered_at": _utc_now(),
+                "denials": [
+                    dict(item) for item in pending if isinstance(item, Mapping)
+                ],
+            }
+            session["guard_pending_shell_denials"] = []
+    elif is_unclassified_shell:
+        session["guard_unclassified_shell_denied"] = (
+            int(session.get("guard_unclassified_shell_denied") or 0) + 1
+        )
+        raw_segment = evaluation.diagnostic_segment or ""
+        try:
+            segment_argv = shlex.split(raw_segment, posix=True) if raw_segment else []
+        except ValueError:
+            segment_argv = []
+        segment_executable = (
+            posixpath.basename(segment_argv[0]).casefold() if segment_argv else None
+        )
+        denial = {
+            "at": _utc_now(),
+            "reason_code": evaluation.diagnostic_code or evaluation.reason_code,
+            "segment_executable": segment_executable,
+            "segment_sha256": _sha256_text(raw_segment) if raw_segment else None,
+            "segment_index": evaluation.diagnostic_segment_index,
+            "command_count": evaluation.shell_command_count,
+            "pipeline_count": evaluation.shell_pipeline_count,
+        }
+        pending = session.get("guard_pending_shell_denials") or []
+        if not isinstance(pending, list):
+            pending = []
+        pending.append(denial)
+        session["guard_pending_shell_denials"] = pending[-20:]
+        session["guard_last_shell_denial"] = denial
+
     session["guard_last_decision"] = "allow" if evaluation.allowed else "deny"
     session["guard_last_reason_code"] = evaluation.reason_code
     session["guard_last_classification"] = evaluation.classification

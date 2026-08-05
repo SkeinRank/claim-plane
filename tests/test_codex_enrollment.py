@@ -537,6 +537,55 @@ def test_pretool_read_only_is_allowed_before_intent_admission(tmp_path: Path) ->
     assert status["guard"]["denied_calls"] == 0
 
 
+def test_shell_inspection_friction_metrics_record_denial_and_recovery(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    session_id = "thr_guard_inspection_friction"
+    _bootstrap_task(repo, session_id)
+
+    denied_raw = _pretool(
+        repo,
+        session_id,
+        tool_name="exec_command",
+        tool_input={"command": "git diff --check | tee diff.txt"},
+    )
+    denial = json.loads(denied_raw)["hookSpecificOutput"]
+    assert denial["permissionDecision"] == "deny"
+    assert "segment 2 `tee diff.txt`" in denial["permissionDecisionReason"]
+
+    assert (
+        _pretool(
+            repo,
+            session_id,
+            tool_name="exec_command",
+            tool_input={"command": "git diff --check | head -20"},
+        )
+        == ""
+    )
+
+    status = codex.codex_intent_status(repo, session_id=session_id)
+    inspection = status["guard"]["inspection"]
+    assert inspection == {
+        "shell_calls": 2,
+        "read_only_allowed": 1,
+        "compound_allowed": 1,
+        "pipelines_allowed": 1,
+        "unclassified_denied": 1,
+        "recovered_after_denial": 1,
+        "pending_denials": 0,
+        "last_denial": {
+            "at": inspection["last_denial"]["at"],
+            "reason_code": "unsupported_shell_executable",
+            "segment_executable": "tee",
+            "segment_sha256": inspection["last_denial"]["segment_sha256"],
+            "segment_index": 2,
+            "command_count": 2,
+            "pipeline_count": 1,
+        },
+    }
+
+
 def test_project_acceptance_is_mandatory_and_reserved_for_final_verifier(
     tmp_path: Path,
 ) -> None:
