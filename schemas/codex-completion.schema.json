@@ -150,6 +150,76 @@
           }
         }
       }
+    },
+    "task_obligations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "required",
+        "satisfied",
+        "unsatisfied",
+        "all_satisfied"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "claim-plane.task-obligations.v1"
+        },
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "description",
+              "patterns"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "const": "changed_path_any"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "patterns": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "satisfied": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "unsatisfied": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "all_satisfied": {
+          "type": "boolean"
+        }
+      }
     }
   }
 }

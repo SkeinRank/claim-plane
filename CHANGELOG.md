@@ -8,6 +8,28 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.36.5] — 2026-08-05
+
+### Added
+
+- Add a provider-free interactive authority safety suite covering locked scope, legitimate and rejected amendments, acceptance failure, high-risk review, pre-existing user work, cancellation, timeout, and multi-turn finalization.
+- Add `scripts/check-interactive-safety.sh` as a focused reproducible gate for Codex authority and lifecycle behavior.
+- Record aggregate acceptance duration in controlled-run evidence and show it in the terminal verification card.
+
+### Fixed
+
+- Reject vague or non-causal scope-amendment rationales before authority expansion while consuming the exact one-time ticket and preserving the previously active intent.
+- Preserve normalized `AgentStopped` evidence for every interactive Codex turn and allow a later prompt to continue under the same admitted intent without sealing the session early.
+- Revoke unfinished authority on interactive cancellation and timeout, and keep final verification and `SessionEnded` emission launcher-owned and single-shot.
+- Exclude unchanged pre-existing user paths from controlled-run change attribution and risk summaries without granting the agent mutation authority over those paths.
+- Keep operator-requested test coverage as a structured completion obligation, so a scope-clean change cannot be marked verified merely because older tests still pass while the requested test update is missing.
+- Present cancellation and timeout as skipped final verification with explicit authority revocation instead of failed scope and acceptance checks.
+- Keep project-configured acceptance authoritative when Codex proposes different criteria; model-proposed checks remain audit metadata and cannot weaken or extend the trusted final-verification command set.
+
+### Changed
+
+- Bump the Codex connector revision to 10 and the built-in adapter revision to 4 so enrolled projects explicitly refresh the strengthened authority, acceptance, and lifecycle contracts.
+
 ## [0.36.4] — 2026-08-04
 
 ### Fixed

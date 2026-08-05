@@ -4,13 +4,43 @@
   "title": "Claim Plane acceptance summary",
   "type": "object",
   "additionalProperties": false,
-  "required": ["protocol", "commands", "command_count", "passed", "errors", "warnings"],
+  "required": [
+    "protocol",
+    "commands",
+    "command_count",
+    "passed",
+    "errors",
+    "warnings"
+  ],
   "properties": {
-    "protocol": {"const": "claim-plane.acceptance-summary.v1"},
-    "commands": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "command_count": {"type": "integer", "minimum": 0},
-    "passed": {"type": "boolean"},
-    "errors": {"type": "integer", "minimum": 0},
-    "warnings": {"type": "integer", "minimum": 0}
+    "protocol": {
+      "const": "claim-plane.acceptance-summary.v1"
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "command_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "errors": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    }
   }
 }

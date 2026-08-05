@@ -275,6 +275,8 @@ class ConsoleRenderer:
         acceptance_map = acceptance if isinstance(acceptance, Mapping) else {}
         risk = result.get("risk")
         risk_map = risk if isinstance(risk, Mapping) else {}
+        outcome = str(result.get("outcome") or "FAILED")
+        interrupted = outcome in {"CANCELLED", "TIMED_OUT"}
 
         findings = completion_map.get("findings")
         finding_codes = {
@@ -300,13 +302,21 @@ class ConsoleRenderer:
             and not scope_failure
         )
         changed_files = int(changes_map.get("file_count") or 0)
-        scope_label = "Scope verified" if scope_clean else "Scope not verified"
-        self.step(
-            scope_label,
-            detail=f"{changed_files} file{'s' if changed_files != 1 else ''}",
-            state="passed" if scope_clean else "failed",
-            dedupe_key="verification:scope",
-        )
+        if interrupted:
+            self.step(
+                "Scope verification skipped",
+                detail="session ended before a delivery candidate was sealed",
+                state="info",
+                dedupe_key="verification:scope",
+            )
+        else:
+            scope_label = "Scope verified" if scope_clean else "Scope not verified"
+            self.step(
+                scope_label,
+                detail=f"{changed_files} file{'s' if changed_files != 1 else ''}",
+                state="passed" if scope_clean else "failed",
+                dedupe_key="verification:scope",
+            )
 
         scope = result.get("scope")
         scope_map = scope if isinstance(scope, Mapping) else {}
@@ -382,23 +392,79 @@ class ConsoleRenderer:
         )
         if not command_list:
             acceptance_detail = "no configured checks"
-        self.step(
-            "Acceptance passed" if acceptance_passed else "Acceptance not verified",
-            detail=acceptance_detail,
-            state="passed" if acceptance_passed else "failed",
-            dedupe_key="verification:acceptance",
-        )
+        acceptance_duration_ms = int(acceptance_map.get("duration_ms") or 0)
+        if acceptance_duration_ms > 0:
+            acceptance_detail += " · " + _elapsed(acceptance_duration_ms / 1000.0)
+        if interrupted:
+            self.step(
+                "Acceptance skipped",
+                detail="no final delivery candidate",
+                state="info",
+                dedupe_key="verification:acceptance",
+            )
+            cancellation = result.get("cancellation")
+            cancellation_map = cancellation if isinstance(cancellation, Mapping) else {}
+            cancellation_status = str(cancellation_map.get("status") or "")
+            if cancellation_status and cancellation_status != "failed":
+                authority_label = (
+                    "Authority revoked"
+                    if cancellation_map.get("intent_id")
+                    else "No active authority remained"
+                )
+                self.step(
+                    authority_label,
+                    state="passed",
+                    dedupe_key="verification:authority:cancelled",
+                )
+        else:
+            self.step(
+                "Acceptance passed" if acceptance_passed else "Acceptance not verified",
+                detail=acceptance_detail,
+                state="passed" if acceptance_passed else "failed",
+                dedupe_key="verification:acceptance",
+            )
+
+        obligations = completion_map.get("task_obligations")
+        obligations_map = obligations if isinstance(obligations, Mapping) else {}
+        required_obligations = obligations_map.get("required") or ()
+        unsatisfied_obligations = obligations_map.get("unsatisfied") or ()
+        if required_obligations and not interrupted:
+            if unsatisfied_obligations:
+                labels = ", ".join(str(item) for item in unsatisfied_obligations)
+                self.step(
+                    "Task incomplete",
+                    detail=labels,
+                    state="failed",
+                    dedupe_key="verification:task-obligations",
+                )
+            else:
+                self.step(
+                    "Task obligations satisfied",
+                    detail=f"{len(required_obligations)} required outcome",
+                    state="passed",
+                    dedupe_key="verification:task-obligations",
+                )
 
         risk_name = str(risk_map.get("highest_risk") or "unknown")
         action = str(risk_map.get("final_action") or "unknown")
-        risk_state = "passed" if action == "ALLOW" else "warning"
-        risk_label = "Risk allowed" if action == "ALLOW" else "Risk requires attention"
-        self.step(
-            risk_label,
-            detail=f"{risk_name} · {action}",
-            state=risk_state,
-            dedupe_key="verification:risk",
-        )
+        if interrupted and changed_files == 0:
+            self.step(
+                "Risk evaluation skipped",
+                detail="no repository changes attributed to the run",
+                state="info",
+                dedupe_key="verification:risk",
+            )
+        else:
+            risk_state = "passed" if action == "ALLOW" else "warning"
+            risk_label = (
+                "Risk allowed" if action == "ALLOW" else "Risk requires attention"
+            )
+            self.step(
+                risk_label,
+                detail=f"{risk_name} · {action}",
+                state=risk_state,
+                dedupe_key="verification:risk",
+            )
 
         files = changes_map.get("files")
         if isinstance(files, list) and files:
@@ -430,11 +496,13 @@ class ConsoleRenderer:
             except ValueError:
                 duration = ""
 
-        outcome = str(result.get("outcome") or "FAILED")
         error_value = result.get("error")
-        if outcome not in {"VERIFIED", "REVIEW_REQUIRED"} and isinstance(
-            error_value, Mapping
-        ):
+        if outcome not in {
+            "VERIFIED",
+            "REVIEW_REQUIRED",
+            "CANCELLED",
+            "TIMED_OUT",
+        } and isinstance(error_value, Mapping):
             error_code = str(error_value.get("code") or "verification_failed")
             self.step(
                 "Run requires attention",

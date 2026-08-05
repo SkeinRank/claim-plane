@@ -380,6 +380,63 @@ def capture_git_state(root_or_child: str | Path) -> GitState:
     )
 
 
+def _path_fingerprint(path: Path) -> str:
+    try:
+        stat = path.lstat()
+    except FileNotFoundError:
+        return "missing"
+    if path.is_symlink():
+        target = os.readlink(path).encode("utf-8")
+        return "symlink:" + hashlib.sha256(target).hexdigest()
+    if path.is_file():
+        return "file:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    if path.is_dir():
+        return "dir"
+    return f"other:{stat.st_mode}"
+
+
+def _dirty_worktree_baseline(root: Path) -> dict[str, str]:
+    """Bind user-authored worktree state that predates a controlled run."""
+
+    tracked = subprocess.run(
+        ["git", "diff", "--name-only", "-z", "HEAD", "--"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if tracked.returncode != 0:
+        detail = tracked.stderr.decode("utf-8", errors="replace").strip()
+        raise ControlledRunError(detail or "could not inspect tracked worktree changes")
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    if untracked.returncode != 0:
+        detail = untracked.stderr.decode("utf-8", errors="replace").strip()
+        raise ControlledRunError(
+            detail or "could not inspect untracked worktree changes"
+        )
+
+    baseline: dict[str, str] = {}
+    for raw in tracked.stdout.split(b"\0") + untracked.stdout.split(b"\0"):
+        if not raw:
+            continue
+        relative = raw.decode("utf-8", errors="surrogateescape").replace("\\", "/")
+        # Claim Plane local evidence is excluded by Git; project-local connector files
+        # can remain visible but are ignored when their exact fingerprint is unchanged.
+        baseline[relative] = _path_fingerprint(root / relative)
+    return dict(sorted(baseline.items()))
+
+
+def _unchanged_from_baseline(
+    root: Path, relative: str, baseline: Mapping[str, str]
+) -> bool:
+    expected = baseline.get(relative)
+    return expected is not None and _path_fingerprint(root / relative) == expected
+
+
 def _request(
     operation: AdapterOperation,
     *,
@@ -465,7 +522,11 @@ def _configured_policy(
 
 
 def _changed_paths(
-    root: Path, start_commit: str, result_git: GitState
+    root: Path,
+    start_commit: str,
+    result_git: GitState,
+    *,
+    preexisting: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     completed = subprocess.run(
         ["git", "diff", "--name-only", "-z", start_commit, "--"],
@@ -481,7 +542,15 @@ def _changed_paths(
         for item in completed.stdout.split(b"\0")
         if item
     }
-    return tuple(sorted(tracked | set(result_git.untracked)))
+    candidates = tracked | set(result_git.untracked)
+    baseline = preexisting or {}
+    return tuple(
+        sorted(
+            path
+            for path in candidates
+            if not _unchanged_from_baseline(root, path, baseline)
+        )
+    )
 
 
 _HUNK_RE = re.compile(
@@ -491,7 +560,11 @@ _HUNK_RE = re.compile(
 
 
 def _change_summary(
-    root: Path, start_git: GitState, result_git: GitState
+    root: Path,
+    start_git: GitState,
+    result_git: GitState,
+    *,
+    preexisting: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Capture final file and hunk metadata without storing source content."""
 
@@ -556,7 +629,12 @@ def _change_summary(
         stats[path] = (added, deleted)
 
     files: list[dict[str, Any]] = []
-    tracked_paths = sorted(set(statuses) | set(stats))
+    baseline = preexisting or {}
+    tracked_paths = sorted(
+        path
+        for path in (set(statuses) | set(stats))
+        if not _unchanged_from_baseline(root, path, baseline)
+    )
     for relative in tracked_paths:
         patch_process = subprocess.run(
             [
@@ -604,6 +682,7 @@ def _change_summary(
         relative_path: descriptor
         for relative_path, descriptor in result_git.untracked.items()
         if start_git.untracked.get(relative_path) != descriptor
+        and not _unchanged_from_baseline(root, relative_path, baseline)
     }
     for relative, descriptor in sorted(changed_untracked.items()):
         untracked_path = root / relative
@@ -669,6 +748,7 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
         "commands": safe_commands,
         "command_count": len(safe_commands),
         "passed": bool(completion.get("acceptance_passed")),
+        "duration_ms": int(completion.get("acceptance_duration_ms") or 0),
         "errors": int(completion.get("errors") or 0),
         "warnings": int(completion.get("warnings") or 0),
     }
@@ -1145,6 +1225,7 @@ def _completion_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         "verified": bool(payload.get("verified")),
         "changed_files": changed_files,
         "acceptance_passed": bool(payload.get("acceptance_passed")),
+        "acceptance_duration_ms": int(payload.get("acceptance_duration_ms") or 0),
         "errors": int(payload.get("errors") or 0),
         "warnings": int(payload.get("warnings") or 0),
         "executed_violations": int(payload.get("executed_violations") or 0),
@@ -1152,6 +1233,7 @@ def _completion_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         "denied_mutation_calls": int(payload.get("denied_mutation_calls") or 0),
         "scope_promotions": int(payload.get("scope_promotions") or 0),
         "scope_expansions": int(payload.get("scope_expansions") or 0),
+        "task_obligations": dict(payload.get("task_obligations") or {}),
         "findings": findings,
     }
 
@@ -1183,6 +1265,28 @@ def _classify_outcome(
     ):
         return ControlledRunOutcome.REJECTED
     return ControlledRunOutcome.REVIEW_REQUIRED
+
+
+def _task_obligation_error(
+    completion: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    obligations = completion.get("task_obligations")
+    if not isinstance(obligations, Mapping):
+        return None
+    unsatisfied = [
+        str(item)
+        for item in obligations.get("unsatisfied") or ()
+        if isinstance(item, str)
+    ]
+    if not unsatisfied:
+        return None
+    return {
+        "code": "task_obligation_unsatisfied",
+        "message": (
+            "required task outcome was not present in the final repository change"
+        ),
+        "obligations": unsatisfied,
+    }
 
 
 def _exit_code(outcome: ControlledRunOutcome) -> int:
@@ -1243,6 +1347,7 @@ def run_controlled_task(
     manifest = adapter.capability_manifest(str(resolved_root))
     compatibility = require_adapter_policy(manifest, selected_policy)
     start_git = capture_git_state(resolved_root)
+    start_worktree_baseline = _dirty_worktree_baseline(resolved_root)
     run_directory = resolved_root / CONTROLLED_RUNS_PATH / run_id
     run_directory.mkdir(parents=True, exist_ok=False)
     os.chmod(run_directory, 0o700)
@@ -1416,7 +1521,12 @@ def run_controlled_task(
             pass
 
     result_git = capture_git_state(resolved_root)
-    changed_paths = _changed_paths(resolved_root, start_git.head_commit, result_git)
+    changed_paths = _changed_paths(
+        resolved_root,
+        start_git.head_commit,
+        result_git,
+        preexisting=start_worktree_baseline,
+    )
     risk = effective_policy.classify_many(changed_paths)
     final_policy_action = PolicyAction(str(risk["final_action"]))
     if outcome is ControlledRunOutcome.VERIFIED:
@@ -1425,7 +1535,14 @@ def run_controlled_task(
         elif final_policy_action is PolicyAction.REVIEW_REQUIRED:
             outcome = ControlledRunOutcome.REVIEW_REQUIRED
     completion = _completion_summary(completion_payload)
-    changes = _change_summary(resolved_root, start_git, result_git)
+    if error is None and outcome is ControlledRunOutcome.REJECTED:
+        error = _task_obligation_error(completion)
+    changes = _change_summary(
+        resolved_root,
+        start_git,
+        result_git,
+        preexisting=start_worktree_baseline,
+    )
     acceptance = _acceptance_summary(resolved_root, completion)
     lifecycle = _lifecycle_summary(resolved_root, session_id)
     result = ControlledRunResult(
@@ -1535,6 +1652,7 @@ def run_interactive_codex(
     manifest = adapter.capability_manifest(str(resolved_root))
     compatibility = require_adapter_policy(manifest, selected_policy)
     start_git = capture_git_state(resolved_root)
+    start_worktree_baseline = _dirty_worktree_baseline(resolved_root)
     run_directory = resolved_root / CONTROLLED_RUNS_PATH / run_id
     run_directory.mkdir(parents=True, exist_ok=False)
     os.chmod(run_directory, 0o700)
@@ -1740,7 +1858,12 @@ def run_interactive_codex(
             signal.signal(signal.SIGINT, previous_sigint)
 
     result_git = capture_git_state(resolved_root)
-    changed_paths = _changed_paths(resolved_root, start_git.head_commit, result_git)
+    changed_paths = _changed_paths(
+        resolved_root,
+        start_git.head_commit,
+        result_git,
+        preexisting=start_worktree_baseline,
+    )
     if changed_paths and (not session_id or not intent_id):
         outcome = ControlledRunOutcome.REJECTED
         error = {
@@ -1756,7 +1879,14 @@ def run_interactive_codex(
             outcome = ControlledRunOutcome.REVIEW_REQUIRED
 
     completion = _completion_summary(completion_payload)
-    changes = _change_summary(resolved_root, start_git, result_git)
+    if error is None and outcome is ControlledRunOutcome.REJECTED:
+        error = _task_obligation_error(completion)
+    changes = _change_summary(
+        resolved_root,
+        start_git,
+        result_git,
+        preexisting=start_worktree_baseline,
+    )
     acceptance = _acceptance_summary(resolved_root, completion)
     lifecycle = _lifecycle_summary(resolved_root, session_id)
 

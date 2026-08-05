@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.36.4.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.36.5.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -202,10 +202,11 @@ pip install -e ".[dev,signing]"
 pip install -e ../agent-lexicon
 ```
 
-Run the complete checks and example:
+Run the complete checks, the focused interactive authority suite, and the example:
 
 ```bash
 ./scripts/check.sh
+./scripts/check-interactive-safety.sh
 ./scripts/demo.sh
 ```
 
@@ -263,10 +264,13 @@ claim-plane codex "Fix timeout handling and update its regression test" \
 
 Claim Plane owns the working directory, workspace-write sandbox, approval policy,
 model override, initial scope, and final verifier. Codex still owns the interactive
-conversation. When the TUI exits, Claim Plane independently verifies the final Git
-state, runs configured acceptance, seals the controlled-run record, and prints the
-same delivery card used by one-shot execution. Scope remains automatic unless the
-operator supplies `--scope`; `--lock-scope` disables amendments.
+conversation. Each completed turn is recorded without ending the controlled session; a
+follow-up prompt continues under the same admitted intent. When the TUI exits, Claim
+Plane independently verifies the final Git state, runs configured acceptance, records
+its duration, seals the controlled-run record, and prints the same delivery card used
+by one-shot execution. Scope remains automatic unless the operator supplies `--scope`;
+`--lock-scope` disables amendments. Brokered expansion requires a concrete rationale
+that explains why the exact denied resource is necessary for the task. Explicit operator requests to add or update tests are retained as structured completion obligations without storing prompt text. Final verification therefore rejects a delivery when the requested test artifact was not changed, even if the admitted source change is scope-clean and the pre-existing test suite still passes.
 
 ## One-command controlled Codex run
 
@@ -452,7 +456,7 @@ codex
 
 The connector registers one stable dispatcher for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, and `SessionEnd`. Codex discovers these project-local hooks automatically for trusted projects. On the first Codex session, open `/hooks` to review and trust the command hooks; Codex records trust against the hook definition.
 
-For the first task in a session, Claim Plane pins the current Git commit, creates a private session-bound task identity, and injects model-visible coordination context through `UserPromptSubmit`. Codex can inspect the repository read-only, propose the expected committed and contingent scope, preserve requirements, and acceptance checks, then submit that proposal through the local CLI. Claim Plane supplies the intent ID, owner, task ID, and immutable base commit itself before performing normal atomic admission.
+For the first task in a session, Claim Plane pins the current Git commit, creates a private session-bound task identity, and injects model-visible coordination context through `UserPromptSubmit`. Codex can inspect the repository read-only, propose the expected committed and contingent scope, preserve requirements, and advisory acceptance checks, then submit that proposal through the local CLI. Claim Plane supplies the intent ID, owner, task ID, and immutable base commit itself before performing normal atomic admission. Project-configured acceptance remains operator-owned: when configured commands exist, Codex cannot replace or extend the executable final-verification contract, and its proposal is retained only as audit metadata.
 
 The raw user prompt is not stored in connector state. The task record keeps a SHA-256 digest and prompt length for correlation, while the admitted intent stores the explicit goal and execution contract that Codex proposed. Repeated admission of identical content is idempotent, and a changed Git `HEAD` before admission is rejected as a stale bootstrap.
 

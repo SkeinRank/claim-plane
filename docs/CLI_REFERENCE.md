@@ -123,7 +123,7 @@ claim-plane run "Fix timeout handling and update tests" \
 A required write outside explicit initial scope is denied first and may then receive
 a one-time exact-resource amendment ticket. Use `--lock-scope` to disable amendments
 entirely; it requires at least one `--scope` path. Directories are recursive when they
-already exist or when written with a trailing slash.
+already exist or when written with a trailing slash. An explicit request to add or update test coverage is recorded as a structured completion obligation without retaining the prompt text. A run is rejected when that obligation remains unsatisfied, even when scope and configured acceptance are otherwise clean.
 
 Verbose mode preserves raw Codex runtime diagnostics in addition to the human summary.
 `--verbose` and `--json` are mutually exclusive. Redirected output is plain text, and

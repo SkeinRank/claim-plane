@@ -70,7 +70,7 @@ CODEX_INTENT_ADMISSION_PROTOCOL = "claim-plane.codex-intent-admission.v1"
 CODEX_HOOK_COMMAND = "claim-plane codex-hook"
 CODEX_MIN_GUARD_VERSION = (0, 123, 0)
 CODEX_COMPLETION_ACCEPTANCE_TIMEOUT = 300
-CODEX_CONNECTOR_REVISION = 7
+CODEX_CONNECTOR_REVISION = 10
 CODEX_HOOK_EVENTS = (
     "SessionStart",
     "UserPromptSubmit",
@@ -113,6 +113,73 @@ def _utc_now() -> str:
 
 def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+_TASK_OBLIGATION_PROTOCOL = "claim-plane.task-obligations.v1"
+_TEST_CHANGE_PATTERNS = (
+    "tests/**",
+    "test/**",
+    "**/tests/**",
+    "**/test/**",
+    "test_*.py",
+    "*_test.py",
+    "*.test.*",
+    "*.spec.*",
+    "**/test_*.py",
+    "**/*_test.py",
+    "**/*.test.*",
+    "**/*.spec.*",
+)
+_TEST_REQUEST_PATTERNS = (
+    re.compile(
+        r"\b(?:add|create|write|update|extend|include|cover)\b"
+        r"[^.\n]{0,120}\b(?:unit\s+|regression\s+|integration\s+)?tests?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:tests?|test\s+coverage|regression\s+coverage)\b"
+        r"[^.\n]{0,120}\b(?:add|create|write|update|extend|include|cover)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:test|regression)\s+coverage\b", re.IGNORECASE),
+)
+
+
+def _infer_task_obligations(prompt: str) -> list[dict[str, Any]]:
+    """Extract bounded, non-secret completion obligations from an operator prompt.
+
+    Prompt text is never persisted. Only a small structured obligation and the
+    already-recorded prompt digest survive in session state. The initial rule is
+    intentionally narrow: an explicit request to add or update tests requires at
+    least one test artifact to change before delivery can be verified.
+    """
+
+    if not prompt or not any(
+        pattern.search(prompt) for pattern in _TEST_REQUEST_PATTERNS
+    ):
+        return []
+    return [
+        {
+            "protocol": _TASK_OBLIGATION_PROTOCOL,
+            "id": "test_change",
+            "kind": "changed_path_any",
+            "description": "requested test coverage must be updated",
+            "patterns": list(_TEST_CHANGE_PATTERNS),
+            "source_prompt_sha256": _sha256_text(prompt),
+        }
+    ]
+
+
+def _merge_task_obligations(
+    existing: Any, inferred: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for item in existing or ():
+        if isinstance(item, Mapping) and isinstance(item.get("id"), str):
+            merged[str(item["id"])] = dict(item)
+    for item in inferred:
+        merged[str(item["id"])] = dict(item)
+    return [merged[key] for key in sorted(merged)]
 
 
 def _file_sha256(path: Path) -> str | None:
@@ -1145,8 +1212,24 @@ def _ensure_task_bootstrap(
     if session is None:
         return None
     if session.get("task_id"):
+        prompt = payload.get("prompt")
+        if not isinstance(prompt, str):
+            prompt = ""
         session["last_event"] = "UserPromptSubmit"
         session["last_seen_at"] = _utc_now()
+        session["last_prompt_sha256"] = _sha256_text(prompt)
+        session["last_prompt_length"] = len(prompt)
+        session["task_obligations"] = _merge_task_obligations(
+            session.get("task_obligations"), _infer_task_obligations(prompt)
+        )
+        session["prompt_turn_count"] = int(session.get("prompt_turn_count") or 1) + 1
+        if (
+            session.get("controlled_interactive") is True
+            and session.get("task_state") == "awaiting_final_verification"
+            and session.get("active_intent_id")
+        ):
+            session["task_state"] = "active"
+            session["resumed_after_turn_at"] = session["last_seen_at"]
         _write_session(root, session)
         return session
 
@@ -1174,6 +1257,10 @@ def _ensure_task_bootstrap(
             "connector_control_fingerprints": _connector_control_fingerprints(root),
             "prompt_sha256": prompt_digest,
             "prompt_length": len(prompt),
+            "prompt_turn_count": 1,
+            "last_prompt_sha256": prompt_digest,
+            "last_prompt_length": len(prompt),
+            "task_obligations": _infer_task_obligations(prompt),
             "required_acceptance": list(_configured_acceptance_commands(root)),
             "task_bootstrapped_at": _utc_now(),
             "task_state": "awaiting_intent",
@@ -1343,6 +1430,19 @@ def _intent_from_proposal(
     proposal_metadata = proposal.get("metadata") or {}
     if not isinstance(proposal_metadata, dict):
         raise ValueError("Codex intent proposal 'metadata' must be a JSON object")
+    proposed_acceptance = _string_list(proposal.get("acceptance"), field="acceptance")
+    required_acceptance = tuple(
+        str(item).strip()
+        for item in session.get("required_acceptance") or ()
+        if isinstance(item, str) and item.strip()
+    )
+    # Project-configured acceptance is operator-owned authority. A model proposal may
+    # describe additional checks, but it cannot replace or extend the executable final
+    # verification contract when the project already defines one. Keep the proposal in
+    # metadata for auditability without executing arbitrary model-authored text.
+    effective_acceptance = (
+        required_acceptance if required_acceptance else proposed_acceptance
+    )
     metadata = {
         **proposal_metadata,
         "goal": goal,
@@ -1353,17 +1453,12 @@ def _intent_from_proposal(
         "operator_initial_scope": list(_operator_scope(session)),
         "operator_scope_locked": bool(session.get("operator_scope_locked")),
         "operator_scope_omissions": list(scope_omissions),
+        "configured_acceptance": list(required_acceptance),
+        "agent_proposed_acceptance": list(proposed_acceptance),
+        "acceptance_authority": (
+            "project_config" if required_acceptance else "agent_fallback"
+        ),
     }
-
-    proposed_acceptance = _string_list(proposal.get("acceptance"), field="acceptance")
-    required_acceptance = tuple(
-        str(item).strip()
-        for item in session.get("required_acceptance") or ()
-        if isinstance(item, str) and item.strip()
-    )
-    effective_acceptance = tuple(
-        dict.fromkeys((*required_acceptance, *proposed_acceptance))
-    )
 
     intent = ChangeIntent(
         intent_id=str(session["reserved_intent_id"]),
@@ -1454,6 +1549,15 @@ def admit_codex_intent(
         ]
         session["preserves"] = list(intent.preserves)
         session["acceptance"] = list(intent.acceptance)
+        session["configured_acceptance"] = list(
+            intent.metadata.get("configured_acceptance") or ()
+        )
+        session["agent_proposed_acceptance"] = list(
+            intent.metadata.get("agent_proposed_acceptance") or ()
+        )
+        session["acceptance_authority"] = str(
+            intent.metadata.get("acceptance_authority") or "agent_fallback"
+        )
     else:
         session["task_state"] = "blocked"
     _write_session(root, session)
@@ -1476,6 +1580,15 @@ def admit_codex_intent(
         ],
         "preserves": list(intent.preserves),
         "acceptance": list(intent.acceptance),
+        "configured_acceptance": list(
+            intent.metadata.get("configured_acceptance") or ()
+        ),
+        "agent_proposed_acceptance": list(
+            intent.metadata.get("agent_proposed_acceptance") or ()
+        ),
+        "acceptance_authority": str(
+            intent.metadata.get("acceptance_authority") or "agent_fallback"
+        ),
         "decision": decision.to_dict(),
     }
 
@@ -1500,6 +1613,97 @@ def _sync_session_scope(session: dict[str, Any], intent: ChangeIntent) -> None:
     ]
     session["preserves"] = list(intent.preserves)
     session["acceptance"] = list(intent.acceptance)
+
+
+_AMENDMENT_CAUSAL_TERMS = frozenset(
+    {
+        "because",
+        "required",
+        "requires",
+        "needed",
+        "depends",
+        "dependency",
+        "supporting",
+        "coverage",
+        "acceptance",
+        "compile",
+        "import",
+        "test",
+        "tests",
+        "fixture",
+        "schema",
+        "contract",
+        "configuration",
+        "generated",
+        "documentation",
+        "migration",
+        "must",
+        "implemented",
+        "owns",
+        "aligned",
+        "atomically",
+        "invalidation",
+    }
+)
+_AMENDMENT_VAGUE_PHRASES = (
+    "while here",
+    "just in case",
+    "nice to have",
+    "for cleanliness",
+    "for consistency",
+    "cleanup only",
+    "general cleanup",
+)
+
+
+def _grounded_amendment_reason(reason: str) -> tuple[bool, str]:
+    cleaned = " ".join(reason.strip().split())
+    words = tuple(re.findall(r"[A-Za-z0-9_]+", cleaned.lower()))
+    if len(cleaned) < 24 or len(words) < 5:
+        return False, "reason_too_short"
+    lowered = cleaned.lower()
+    if any(phrase in lowered for phrase in _AMENDMENT_VAGUE_PHRASES):
+        return False, "reason_is_vague"
+    if not (_AMENDMENT_CAUSAL_TERMS & set(words)):
+        return False, "reason_has_no_task_dependency"
+    return True, "grounded"
+
+
+def _record_denied_scope_amendment(
+    root: Path,
+    session: dict[str, Any],
+    *,
+    ticket_id: str,
+    reason: str,
+    reason_code: str,
+    operations: list[Any],
+) -> None:
+    now = _utc_now()
+    session.pop("pending_scope_amendment", None)
+    session["scope_amendment_requests"] = (
+        int(session.get("scope_amendment_requests") or 0) + 1
+    )
+    session["scope_amendment_denied"] = (
+        int(session.get("scope_amendment_denied") or 0) + 1
+    )
+    record = {
+        "protocol": CODEX_SCOPE_AMENDMENT_PROTOCOL,
+        "ticket_id": ticket_id,
+        "allowed": False,
+        "reason": reason.strip(),
+        "reason_code": reason_code,
+        "operations": list(operations),
+        "at": now,
+    }
+    session["last_scope_amendment"] = record
+    history = [
+        dict(item)
+        for item in session.get("scope_amendment_history") or ()
+        if isinstance(item, dict)
+    ]
+    history.append(record)
+    session["scope_amendment_history"] = history[-50:]
+    _write_session(root, session)
 
 
 def amend_codex_scope(
@@ -1602,6 +1806,21 @@ def amend_codex_scope(
         ):
             raise ValueError("active Codex intent no longer matches the task base")
 
+        grounded, grounding_code = _grounded_amendment_reason(reason)
+        if not grounded:
+            _record_denied_scope_amendment(
+                root,
+                session,
+                ticket_id=ticket_id,
+                reason=reason,
+                reason_code=grounding_code,
+                operations=raw_mutations,
+            )
+            raise ValueError(
+                "scope-amendment reason is not grounded in a concrete task dependency; "
+                "describe why the exact denied resource is required"
+            )
+
         amended_at = _utc_now()
         candidate, applied = build_scope_amendment(
             current,
@@ -1641,6 +1860,7 @@ def amend_codex_scope(
         "ticket_id": ticket_id,
         "allowed": allowed,
         "reason": reason.strip(),
+        "reason_code": "grounded",
         "operations": list(applied or raw_mutations),
         "at": now,
     }
@@ -1664,6 +1884,7 @@ def amend_codex_scope(
         "intent_id": intent_id,
         "base_commit": expected_base,
         "reason": reason.strip(),
+        "reason_code": "grounded",
         "operations": list(applied or raw_mutations),
         "state": session.get("task_state") or "active",
         "amendment_state": "admitted" if decision.allowed else "rejected",
@@ -1737,6 +1958,11 @@ def verify_codex_completion(
             dict(session.get("connector_control_fingerprints") or {})
         ),
         preexisting_worktree_baseline=(dict(session.get("preexisting_worktree") or {})),
+        task_obligations=tuple(
+            dict(item)
+            for item in session.get("task_obligations") or ()
+            if isinstance(item, Mapping)
+        ),
     )
     now = _utc_now()
     history = [
@@ -1917,6 +2143,11 @@ def codex_intent_status(
         "contingent_scope": list(session.get("contingent_scope") or ()),
         "preserves": list(session.get("preserves") or ()),
         "acceptance": list(session.get("acceptance") or ()),
+        "task_obligations": [
+            dict(item)
+            for item in session.get("task_obligations") or ()
+            if isinstance(item, Mapping)
+        ],
         "worktree_dirty_at_bootstrap": bool(session.get("preexisting_worktree")),
         "hardening": {
             "connector_revision": CODEX_CONNECTOR_REVISION,

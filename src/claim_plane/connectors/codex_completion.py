@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import fnmatch
 import hashlib
 from pathlib import Path
 from typing import Any, Mapping
@@ -27,6 +28,66 @@ _SCOPE_CODES = {
 _CONTRACT_CODES = {"contract_missing", "contract_mismatch"}
 _PRESERVE_CODES = {"preserve_violation"}
 _BASE_CODES = {"stale_base", "owner_mismatch"}
+
+_TASK_OBLIGATION_PROTOCOL = "claim-plane.task-obligations.v1"
+
+
+def _evaluate_task_obligations(
+    changed_paths: tuple[str, ...],
+    obligations: tuple[Mapping[str, Any], ...],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    required: list[dict[str, Any]] = []
+    satisfied: list[str] = []
+    unsatisfied: list[str] = []
+    findings: list[dict[str, Any]] = []
+    normalized_paths = tuple(path.replace("\\", "/") for path in changed_paths)
+
+    for raw in obligations:
+        obligation_id = str(raw.get("id") or "unknown")
+        kind = str(raw.get("kind") or "")
+        description = str(raw.get("description") or obligation_id)
+        patterns = tuple(
+            str(item)
+            for item in raw.get("patterns") or ()
+            if isinstance(item, str) and item
+        )
+        item = {
+            "id": obligation_id,
+            "kind": kind,
+            "description": description,
+            "patterns": list(patterns),
+        }
+        required.append(item)
+        matched = kind == "changed_path_any" and any(
+            fnmatch.fnmatchcase(path, pattern)
+            for path in normalized_paths
+            for pattern in patterns
+        )
+        if matched:
+            satisfied.append(obligation_id)
+            continue
+        unsatisfied.append(obligation_id)
+        findings.append(
+            {
+                "code": "task_obligation_unsatisfied",
+                "severity": "error",
+                "message": description + "; no matching repository change was recorded",
+                "path": None,
+                "identifier": obligation_id,
+            }
+        )
+
+    return (
+        {
+            "protocol": _TASK_OBLIGATION_PROTOCOL,
+            "required": required,
+            "satisfied": satisfied,
+            "unsatisfied": unsatisfied,
+            "all_satisfied": not unsatisfied,
+        },
+        findings,
+    )
+
 
 _EXECUTED_VIOLATION_CODES = {
     "undeclared_change",
@@ -164,8 +225,9 @@ def verify_completion(
     acceptance_timeout: int = 300,
     connector_control_baseline: Mapping[str, Any] | None = None,
     preexisting_worktree_baseline: Mapping[str, Any] | None = None,
+    task_obligations: tuple[Mapping[str, Any], ...] = (),
 ) -> dict[str, Any]:
-    """Verify the current worktree and complete the intent only when evidence is clean."""
+    """Verify the worktree and complete the intent only when evidence is clean."""
 
     plane = Plane.open(root / ".claim-plane/plane.db")
     try:
@@ -206,7 +268,12 @@ def verify_completion(
         report_obj = plane.verify_manifest(manifest)
         report = report_obj.to_dict()
         findings = _finding_summary(report)
-        if report_obj.clean:
+        task_obligation_summary, task_findings = _evaluate_task_obligations(
+            tuple(manifest.changed_files), task_obligations
+        )
+        findings.extend(task_findings)
+        completion_clean = report_obj.clean and task_obligation_summary["all_satisfied"]
+        if completion_clean:
             states = {
                 str(item.get("intent_id")): str(item.get("state"))
                 for item in plane.intents()
@@ -225,9 +292,20 @@ def verify_completion(
         item for item in error_findings if item["code"] in _EXECUTED_VIOLATION_CODES
     ]
     error_codes = {item["code"] for item in error_findings}
+    acceptance_results = [
+        {
+            "command": result.command,
+            "returncode": result.returncode,
+            "passed": result.passed,
+            "duration_ms": result.duration_ms,
+            "sandbox_backend": result.sandbox_backend,
+            "sandbox_enforced": result.sandbox_enforced,
+        }
+        for result in manifest.acceptance_results
+    ]
     return {
         "protocol": CODEX_COMPLETION_PROTOCOL,
-        "verified": bool(report.get("clean")),
+        "verified": completion_clean,
         "scope_verified": not bool(error_codes & _SCOPE_CODES),
         "contracts_verified": not bool(error_codes & _CONTRACT_CODES),
         "preserves_verified": not bool(error_codes & _PRESERVE_CODES),
@@ -238,10 +316,15 @@ def verify_completion(
         "changed_regions": int(metrics.get("changed_regions") or 0),
         "acceptance_commands": int(metrics.get("acceptance_commands") or 0),
         "acceptance_passed": not acceptance_failures,
+        "acceptance_duration_ms": sum(
+            int(item["duration_ms"]) for item in acceptance_results
+        ),
+        "acceptance_results": acceptance_results,
         "executed_violations": len(executed_violations),
         "errors": int(metrics.get("errors") or len(error_findings)),
         "warnings": int(metrics.get("warnings") or 0),
         "findings": findings,
+        "task_obligations": task_obligation_summary,
         "report": report,
     }
 

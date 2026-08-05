@@ -79,7 +79,7 @@ def test_builtin_codex_handshake_negotiates_current_protocol(
 
     assert handshake.compatible is True
     assert handshake.negotiated_protocol_version == "1.0"
-    assert handshake.adapter_version == "3"
+    assert handshake.adapter_version == "4"
     assert handshake.runtime_version == "codex-cli 0.123.0"
     assert handshake.source is AdapterSource.BUILTIN
     assert handshake.findings[0].code is HandshakeCode.COMPATIBLE
@@ -220,7 +220,7 @@ def test_cli_lists_pins_and_reports_handshake(
     assert main(["adapters", "pin", "codex", "--repo", str(repo), "--json"]) == 0
     pin_payload = json.loads(capsys.readouterr().out)
     assert pin_payload["adapter"] == "codex"
-    assert pin_payload["adapter_version_normalized"] == "3.0.0"
+    assert pin_payload["adapter_version_normalized"] == "4.0.0"
     assert pin_payload["protocol_version"] == "1.0"
 
     assert (

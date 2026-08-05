@@ -27,7 +27,9 @@ from claim_plane.protocol import (
     EnforcementLevel,
     GuaranteeDeclaration,
     GuaranteeProvider,
+    LifecycleEventDraft,
     LifecycleEventStore,
+    LifecycleEventType,
     LifecycleStoreError,
     RuntimeIdentity,
     AdapterRegistry,
@@ -36,7 +38,7 @@ from claim_plane.protocol import (
 )
 
 CODEX_ADAPTER_NAME = "codex"
-CODEX_ADAPTER_REVISION = 3
+CODEX_ADAPTER_REVISION = 4
 _REQUEST_CACHE = Path(".claim-plane/adapters/codex/requests")
 _PLANE_DB = Path(".claim-plane/plane.db")
 _LIFECYCLE_DB = Path(".claim-plane/lifecycle/events.sqlite3")
@@ -830,11 +832,44 @@ class CodexAdapter:
             event in {"Stop", "SessionEnd"}
             and payload.get("_claim_plane_interactive") is True
         ):
-            # A Codex TUI Stop event marks the end of one conversational turn, and
-            # SessionEnd is emitted by the runtime before control returns to the
-            # launcher.  Defer normalized final verification and session sealing to
-            # ``claim-plane codex`` so acceptance runs exactly once, after TUI exit.
-            return codex_runtime.handle_codex_hook(dict(payload), output=output)
+            # A Codex TUI Stop event marks one conversational turn boundary, while
+            # SessionEnd is emitted before control returns to the outer launcher.
+            # Preserve AgentStopped evidence for each turn, but defer acceptance,
+            # terminal verification, and SessionEnded sealing to ``claim-plane codex``.
+            exit_code = codex_runtime.handle_codex_hook(dict(payload), output=output)
+            if event == "Stop":
+                interactive_root = codex_runtime.resolve_project_root(
+                    str(payload.get("cwd") or ".")
+                )
+                session_id = payload.get("session_id")
+                if isinstance(session_id, str) and session_id:
+                    request_id, _ = _hook_request_id(payload)
+                    intent_id, intent_version = self._binding(
+                        interactive_root, session_id
+                    )
+                    with LifecycleEventStore.for_project(interactive_root) as store:
+                        store.append_batch(
+                            adapter=self.name,
+                            session_id=session_id,
+                            request_id=request_id,
+                            run_id=(
+                                str(payload.get("_claim_plane_run_id"))
+                                if payload.get("_claim_plane_run_id")
+                                else None
+                            ),
+                            default_intent_id=intent_id,
+                            default_intent_version=intent_version,
+                            drafts=(
+                                LifecycleEventDraft(
+                                    LifecycleEventType.AGENT_STOPPED,
+                                    {
+                                        "source": "interactive_turn_boundary",
+                                        "final_verification_deferred": True,
+                                    },
+                                ),
+                            ),
+                        )
+            return exit_code
         root = str(payload.get("cwd") or ".")
         session_id = payload.get("session_id")
         if session_id is not None and not isinstance(session_id, str):

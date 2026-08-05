@@ -162,3 +162,89 @@ def test_console_renderer_names_blocked_write_and_initial_scope() -> None:
     assert "tests/test_app.py" in rendered
     assert "Outside initial scope: src/app.py." in rendered
     assert "*** Begin Patch" not in rendered
+
+
+def test_console_renderer_marks_cancelled_verification_as_skipped(
+    tmp_path: Path,
+) -> None:
+    output = io.StringIO()
+    renderer = ConsoleRenderer(output, io.StringIO(), colour=False)
+    result = _result()
+    result["outcome"] = "CANCELLED"
+    result["completion"] = {
+        "protocol": None,
+        "errors": 0,
+        "executed_violations": 0,
+        "findings": [],
+    }
+    result["changes"] = {
+        "file_count": 0,
+        "total_additions": 0,
+        "total_deletions": 0,
+        "files": [],
+    }
+    result["acceptance"] = {"passed": False, "commands": ["python -m pytest"]}
+    result["cancellation"] = {
+        "status": "cancelled",
+        "intent_id": "intent-example",
+        "intent_version": 0,
+    }
+    result["error"] = {"code": "cancelled"}
+
+    renderer.finish(
+        result=result,
+        evidence_path=tmp_path / ".claim-plane/runs/cpr_cancelled/run.json",
+        root=tmp_path,
+        final_message=None,
+    )
+
+    rendered = output.getvalue()
+    assert "Scope verification skipped" in rendered
+    assert "Acceptance skipped" in rendered
+    assert "Authority revoked" in rendered
+    assert "Scope not verified" not in rendered
+    assert "Acceptance not verified" not in rendered
+    assert "Run requires attention" not in rendered
+    assert "DELIVERY CANCELLED" in rendered
+
+
+def test_console_renderer_reports_unsatisfied_task_obligation(
+    tmp_path: Path,
+) -> None:
+    output = io.StringIO()
+    renderer = ConsoleRenderer(output, io.StringIO(), colour=False)
+    result = _result()
+    result["outcome"] = "REJECTED"
+    result["completion"] = {
+        "protocol": "claim-plane.codex-completion.v1",
+        "errors": 1,
+        "executed_violations": 0,
+        "findings": [
+            {
+                "code": "task_obligation_unsatisfied",
+                "severity": "error",
+            }
+        ],
+        "task_obligations": {
+            "protocol": "claim-plane.task-obligations.v1",
+            "required": [{"id": "test_change"}],
+            "satisfied": [],
+            "unsatisfied": ["test_change"],
+            "all_satisfied": False,
+        },
+    }
+    result["error"] = {"code": "task_obligation_unsatisfied"}
+
+    renderer.finish(
+        result=result,
+        evidence_path=tmp_path / ".claim-plane/runs/cpr_rejected/run.json",
+        root=tmp_path,
+        final_message=None,
+    )
+
+    rendered = output.getvalue()
+    assert "Scope verified" in rendered
+    assert "Acceptance passed" in rendered
+    assert "Task incomplete" in rendered
+    assert "test_change" in rendered
+    assert "DELIVERY REJECTED" in rendered

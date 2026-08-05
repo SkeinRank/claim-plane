@@ -357,6 +357,7 @@ _ALLOWED_PREVIOUS: dict[LifecycleEventType, frozenset[LifecycleEventType | None]
         {
             LifecycleEventType.SESSION_STARTED,
             LifecycleEventType.VERIFICATION_COMPLETED,
+            LifecycleEventType.AGENT_STOPPED,
         }
     ),
     LifecycleEventType.INTENT_PROPOSED: frozenset(
@@ -378,6 +379,7 @@ _ALLOWED_PREVIOUS: dict[LifecycleEventType, frozenset[LifecycleEventType | None]
         {
             LifecycleEventType.SESSION_STARTED,
             LifecycleEventType.ADMISSION_GRANTED,
+            LifecycleEventType.TASK_SUBMITTED,
             LifecycleEventType.MUTATION_ALLOWED,
             LifecycleEventType.MUTATION_DENIED,
             LifecycleEventType.MUTATION_OBSERVED,
@@ -401,6 +403,7 @@ _ALLOWED_PREVIOUS: dict[LifecycleEventType, frozenset[LifecycleEventType | None]
     LifecycleEventType.SCOPE_EXPANSION_REQUESTED: frozenset(
         {
             LifecycleEventType.SESSION_STARTED,
+            LifecycleEventType.TASK_SUBMITTED,
             LifecycleEventType.ADMISSION_GRANTED,
             LifecycleEventType.MUTATION_ALLOWED,
             LifecycleEventType.MUTATION_DENIED,
@@ -419,6 +422,8 @@ _ALLOWED_PREVIOUS: dict[LifecycleEventType, frozenset[LifecycleEventType | None]
     LifecycleEventType.VERIFICATION_STARTED: frozenset(
         {
             LifecycleEventType.SESSION_STARTED,
+            LifecycleEventType.TASK_SUBMITTED,
+            LifecycleEventType.AGENT_STOPPED,
             LifecycleEventType.ADMISSION_GRANTED,
             LifecycleEventType.MUTATION_ALLOWED,
             LifecycleEventType.MUTATION_DENIED,

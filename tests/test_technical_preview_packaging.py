@@ -52,7 +52,7 @@ def test_preview_version_and_public_contract_are_consistent() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = technical_preview_manifest(ROOT)
 
-    assert __version__ == "0.36.4"
+    assert __version__ == "0.36.5"
     assert project["project"]["version"] == __version__
     assert manifest["version"] == __version__
     assert manifest["channel"] == "single-agent-codex"
@@ -208,14 +208,15 @@ def test_preview_support_files_and_release_validation_are_present() -> None:
         "examples/technical-preview/TASK.md",
         "scripts/technical-preview-demo.sh",
         "scripts/check-technical-preview.sh",
+        "scripts/check-interactive-safety.sh",
         ".github/ISSUE_TEMPLATE/technical-preview.yml",
         ".github/PULL_REQUEST_TEMPLATE.md",
         "MANIFEST.in",
     )
     assert all((ROOT / relative).is_file() for relative in required)
-    assert "./scripts/check-technical-preview.sh" in (
-        ROOT / "scripts/check.sh"
-    ).read_text(encoding="utf-8")
+    gate = (ROOT / "scripts/check.sh").read_text(encoding="utf-8")
+    assert "./scripts/check-technical-preview.sh" in gate
+    assert "./scripts/check-interactive-safety.sh" in gate
 
 
 def test_interactive_codex_command_parses_without_manual_scope() -> None:

@@ -151,7 +151,7 @@ def test_adapters_inspect_exposes_sources_versions_and_policy_result(
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["adapter"] == "codex"
-    assert payload["adapter_version"] == "3"
+    assert payload["adapter_version"] == "4"
     assert payload["runtime"]["version"] == "codex-cli 0.123.0"
     assert payload["guarantees"]["undeclared_tool_write"] == {
         "level": "HARD_BLOCKED",
@@ -218,7 +218,7 @@ def test_session_evidence_binds_effective_manifest(
     )
 
     summary = response.payload["adapter_manifest"]
-    assert summary["adapter_version"] == "3"
+    assert summary["adapter_version"] == "4"
     assert summary["runtime_version"] == "codex-cli 0.123.0"
     assert summary["guarantees"]["undeclared_tool_write"] == {
         "level": "HARD_BLOCKED",

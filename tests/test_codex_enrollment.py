@@ -551,10 +551,13 @@ def test_project_acceptance_is_mandatory_and_reserved_for_final_verifier(
     session_id = "thr_guard_acceptance"
     _bootstrap_task(repo, session_id)
     proposal = _proposal()
-    proposal["acceptance"] = []
+    proposal["acceptance"] = ['farewell() returns "goodbye"']
     admitted = codex.admit_codex_intent(repo, session_id=session_id, proposal=proposal)
 
     assert admitted["acceptance"] == ["python -m pytest"]
+    assert admitted["configured_acceptance"] == ["python -m pytest"]
+    assert admitted["agent_proposed_acceptance"] == ['farewell() returns "goodbye"']
+    assert admitted["acceptance_authority"] == "project_config"
     for command in (
         "pytest",
         "PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider",
