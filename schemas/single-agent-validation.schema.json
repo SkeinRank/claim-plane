@@ -1,0 +1,89 @@
+{
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/single-agent-validation.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "created_at": {
+      "type": "string"
+    },
+    "digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "languages": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "model": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "paths": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "required": [
+        "selection",
+        "suite",
+        "plan",
+        "results",
+        "workspaces"
+      ],
+      "type": "object"
+    },
+    "plan_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "profile": {
+      "enum": [
+        "preview",
+        "release"
+      ]
+    },
+    "protocol": {
+      "const": "claim-plane.single-agent-validation.v1"
+    },
+    "root": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "selection_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "source_revision": {
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "source_root": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "suite_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocol",
+    "created_at",
+    "profile",
+    "model",
+    "languages",
+    "root",
+    "source_root",
+    "source_revision",
+    "selection_digest",
+    "suite_digest",
+    "plan_digest",
+    "paths",
+    "digest"
+  ],
+  "title": "Claim Plane Single-Agent Validation State",
+  "type": "object"
+}

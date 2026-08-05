@@ -362,6 +362,9 @@ def test_one_command_run_verifies_and_persists_git_bound_result(
     assert result.exit_code == 0
     assert result.session_id == "thread_controlled_success"
     assert result.completion["verified"] is True
+    assert result.determinism["completeness"]["complete"] is True
+    assert result.determinism["verdict"]["reason_code"] == "verified"
+    assert result.determinism["verdict"]["digest"]
     assert result.start_git.digest != result.result_git.digest
     assert (repo / "app.py").read_text(encoding="utf-8") == "VALUE = 2\n"
     persisted = load_controlled_run(repo, result.run_id)
@@ -747,6 +750,10 @@ def test_evidence_report_and_replay_are_deterministic_after_restart(
     assert first == second
     assert first["evidence_digest"] == second["evidence_digest"]
     assert first["integrity"]["valid"] is True
+    assert first["determinism"]["verification"]["valid"] is True
+    assert first["determinism"]["record"]["verdict"]["reason_code"] == "verified"
+    assert replay["determinism"]["replay_equivalent"] is True
+    assert replay["determinism"]["decision_digest"]
     assert first["changes"]["file_count"] == 1
     assert first["changes"]["files"][0]["path"] == "app.py"
     assert first["changes"]["files"][0]["hunks"]

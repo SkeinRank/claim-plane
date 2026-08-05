@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/single-agent-validation-gate.schema.json",
+  "title": "Claim Plane Single-Agent Validation Gate",
+  "type": "object",
+  "required": ["protocol", "summary_digest", "base_gate_digest", "evaluated_at", "status", "release_allowed", "thresholds", "comparison", "findings", "digest"],
+  "properties": {
+    "protocol": {"const": "claim-plane.single-agent-validation-gate.v1"},
+    "summary_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "base_gate_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "evaluated_at": {"type": "string"},
+    "status": {"enum": ["PASSED", "BLOCKED", "INCOMPLETE"]},
+    "release_allowed": {"type": "boolean"},
+    "thresholds": {
+      "type": "object",
+      "required": ["max_false_blocks_per_execution", "max_verified_delivery_gap"],
+      "properties": {
+        "max_false_blocks_per_execution": {"type": "number", "minimum": 0},
+        "max_verified_delivery_gap": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "comparison": {
+      "type": "object",
+      "required": ["false_blocks_per_guarded_execution", "guarded_verified_delivery_gap", "missing_guarded_evidence"],
+      "properties": {
+        "false_blocks_per_guarded_execution": {"type": ["number", "null"], "minimum": 0},
+        "guarded_verified_delivery_gap": {"type": ["number", "null"]},
+        "missing_guarded_evidence": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

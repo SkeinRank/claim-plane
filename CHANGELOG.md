@@ -8,6 +8,42 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-08-05
+
+### Added
+
+- Add `claim-plane validation init`, `status`, `prepare`, `run`, `collect`, `report`, and `bundle` as one comparative single-agent validation workflow.
+- Discover runnable feature-level tasks from the frozen CooperBench checkout and select a deterministic repository-diverse preview or release corpus.
+- Freeze identical Bare Codex, Claim Plane Observe, and Claim Plane Guarded plan cells with exact task, prompt, repository state, model, policy, seed label, and acceptance identity.
+- Run one matrix cell end to end, including workspace preparation, interactive Codex execution, isolated official acceptance, measured result binding, and progress advancement.
+- Collect task success, accepted delivery, undeclared and missed mutations, amendments, recovered inspection blocks, timing, token and cost fields, change size, public API drift, dependency drift, and evidence digests.
+- Generate conservative matrix summaries and release gates without inventing missing measurements.
+- Export a reproducible ZIP containing immutable inputs, measured results, summaries, gate decisions, manifests, run records, and acceptance evidence.
+- Package public schemas for validation state, frozen selection, and exported bundles, plus `scripts/check-single-agent-validation.sh`.
+
+### Changed
+
+- Promote the single-agent Codex path from a three-task OSS pilot to a repeatable comparative validation surface suitable for release readiness and external reproduction.
+
+## [0.36.9] — 2026-08-05
+
+### Added
+
+- Bind every new single-agent controlled run to a canonical candidate identity derived from the task digest, frozen base commit and tree, result-state digest, canonical change digest, and normalized changed paths.
+- Seal versioned policy, adapter, acceptance-definition, and lifecycle snapshots into one deterministic input digest and final decision digest.
+- Add fail-closed completeness diagnostics for malformed Git bindings, missing snapshots, base mismatches, invalid lifecycle evidence, and changed paths not covered by the final admitted scope.
+- Surface deterministic verdict reason codes and decision digests in evidence reports and verify replay equivalence against the stored lifecycle head.
+- Package a public `single-agent-determinism.schema.json` contract and add `scripts/check-single-agent-determinism.sh` as a focused regression gate.
+
+### Fixed
+
+- Prevent a nominally verified delivery from remaining green when its deterministic evidence is incomplete; such a run is downgraded to `REVIEW_REQUIRED` with stable machine-readable findings.
+- Detect post-run tampering of candidate, policy, adapter, acceptance, lifecycle, or verdict inputs by recomputing the canonical deterministic record from durable evidence.
+
+### Changed
+
+- Bump the Codex connector revision to 13 so existing enrollments refresh the deterministic evidence contract before the next controlled run.
+
 ## [0.36.8] — 2026-08-05
 
 ### Added

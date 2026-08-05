@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.36.8.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -60,9 +60,17 @@ claim-plane swarm recover <session-id>
 claim-plane swarm replace-codex <session-id> --work-id <work-id> --run-id <run-id>
 ```
 
+## Deterministic single-agent evidence
+
+Version `0.37.0` retains deterministic single-agent candidate and verdict binding.
+Every new controlled run seals the task, base and result repository states, change
+summary, effective policy, adapter contract, acceptance definition, and lifecycle head
+into one reproducible decision digest. Evidence reports recompute that binding and
+replay verifies equivalence without rerunning the provider.
+
 ## Frozen OSS pilot
 
-Version `0.36.8` includes a three-task real-repository pilot for the interactive
+Version `0.37.0` includes a three-task real-repository pilot for the interactive
 Codex workflow. It prepares exact Jinja, Click, and dirty-equals repository states
 from a frozen CooperBench revision, runs each arm in an independent directory, and
 executes authoritative acceptance in an isolated temporary worktree. The evaluator
@@ -107,6 +115,31 @@ configuration, snapshots, and golden files remain subject to normal authority ch
 OSS pilot re-verification is sealed to the current candidate digest. `oss-pilot status`,
 `report`, and `replay` distinguish the immutable original run outcome from the current
 candidate verdict, including `VERIFIED_AFTER_RECHECK`.
+
+## Comparative single-agent validation
+
+Version `0.37.0` turns the frozen OSS pilot and dogfood contracts into one
+operator workflow for identical Bare Codex, Claim Plane Observe, and Claim Plane
+Guarded executions. The preview profile freezes 12 feature-level tasks across at
+least six repository families and expands them into a 36-cell matrix. The release
+profile freezes 20 tasks and two independent execution replicates.
+
+```bash
+claim-plane validation init --profile preview --model gpt-5.6-luna
+claim-plane validation status
+claim-plane validation run --next
+claim-plane validation report
+claim-plane validation bundle --out claim-plane-validation.zip
+```
+
+`validation run --next` prepares the exact repository state, opens the selected
+Codex arm, runs the same isolated official evaluator after the agent exits, and
+binds measured scope, friction, timing, token, drift, and acceptance metrics to
+the immutable plan cell. Aggregation rejects missing, duplicate, unexpected, or
+mismatched cells instead of filling gaps.
+
+See [`benchmark/single-agent-validation/README.md`](benchmark/single-agent-validation/README.md)
+for the full workflow and release gate semantics.
 
 ## Research paper
 

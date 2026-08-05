@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import IO, Any, Callable, Mapping, Protocol, TextIO
 
 from claim_plane.console import ConsoleRenderer
+from claim_plane.determinism import build_determinism_record
 from claim_plane.exit_codes import ExitCode
 from claim_plane.policy import EffectivePolicy, PolicyAction, resolve_policy
 from claim_plane.project import load_project_config, resolve_project_root
@@ -190,6 +191,7 @@ class ControlledRunResult:
     acceptance: Mapping[str, Any]
     scope: Mapping[str, Any]
     lifecycle: Mapping[str, Any] | None
+    determinism: Mapping[str, Any]
     cancellation: Mapping[str, Any] | None = None
     error: Mapping[str, Any] | None = None
     protocol: str = CONTROLLED_RUN_PROTOCOL
@@ -229,6 +231,7 @@ class ControlledRunResult:
             "acceptance": dict(self.acceptance),
             "scope": dict(self.scope),
             "lifecycle": dict(self.lifecycle) if self.lifecycle is not None else None,
+            "determinism": dict(self.determinism),
             "cancellation": (
                 dict(self.cancellation) if self.cancellation is not None else None
             ),
@@ -779,13 +782,16 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
             "stderr_tail": str(raw.get("stderr_tail") or ""),
         }
         if metadata is not None:
-            item["classification"] = str(metadata.get("classification") or "")
-            item["detail"] = str(metadata.get("detail") or "")
-            item["log_dir"] = str(metadata.get("log_dir") or "")
+            metadata_classification = str(metadata.get("classification") or "")
+            metadata_detail = str(metadata.get("detail") or "")
+            metadata_log_dir = str(metadata.get("log_dir") or "")
+            item["classification"] = metadata_classification
+            item["detail"] = metadata_detail
+            item["log_dir"] = metadata_log_dir
             if not item["passed"]:
-                classification = item["classification"] or classification
-            if item["log_dir"]:
-                log_dir = item["log_dir"]
+                classification = metadata_classification or classification
+            if metadata_log_dir:
+                log_dir = metadata_log_dir
         result_items.append(item)
     return {
         "protocol": "claim-plane.acceptance-summary.v1",
@@ -1368,6 +1374,82 @@ def _exit_code(outcome: ControlledRunOutcome) -> int:
     )
 
 
+def _apply_deterministic_gate(
+    *,
+    task_sha256: str,
+    adapter_name: str,
+    manifest_digest: str,
+    handshake: Mapping[str, Any],
+    policy_name: str,
+    effective_policy: Mapping[str, Any],
+    start_git: GitState,
+    result_git: GitState,
+    changes: Mapping[str, Any],
+    acceptance: Mapping[str, Any],
+    completion: Mapping[str, Any],
+    scope: Mapping[str, Any],
+    lifecycle: Mapping[str, Any] | None,
+    risk: Mapping[str, Any],
+    outcome: ControlledRunOutcome,
+    error: Mapping[str, Any] | None,
+) -> tuple[ControlledRunOutcome, Mapping[str, Any] | None, dict[str, Any]]:
+    record = build_determinism_record(
+        task_sha256=task_sha256,
+        adapter_name=adapter_name,
+        manifest_digest=manifest_digest,
+        handshake=handshake,
+        policy_name=policy_name,
+        effective_policy=effective_policy,
+        start_git=start_git.to_dict(),
+        result_git=result_git.to_dict(),
+        changes=changes,
+        acceptance=acceptance,
+        completion=completion,
+        scope=scope,
+        lifecycle=lifecycle,
+        risk=risk,
+        outcome=outcome.value,
+        error=error,
+    )
+    completeness = record.get("completeness")
+    complete = bool(isinstance(completeness, Mapping) and completeness.get("complete"))
+    if outcome is ControlledRunOutcome.VERIFIED and not complete:
+        findings = (
+            completeness.get("findings") if isinstance(completeness, Mapping) else ()
+        )
+        outcome = ControlledRunOutcome.REVIEW_REQUIRED
+        error = {
+            "code": "deterministic_evidence_incomplete",
+            "message": "verified delivery lacks complete deterministic evidence",
+            "finding_codes": sorted(
+                {
+                    str(item.get("code"))
+                    for item in findings or ()
+                    if isinstance(item, Mapping) and item.get("code")
+                }
+            ),
+        }
+        record = build_determinism_record(
+            task_sha256=task_sha256,
+            adapter_name=adapter_name,
+            manifest_digest=manifest_digest,
+            handshake=handshake,
+            policy_name=policy_name,
+            effective_policy=effective_policy,
+            start_git=start_git.to_dict(),
+            result_git=result_git.to_dict(),
+            changes=changes,
+            acceptance=acceptance,
+            completion=completion,
+            scope=scope,
+            lifecycle=lifecycle,
+            risk=risk,
+            outcome=outcome.value,
+            error=error,
+        )
+    return outcome, error, record
+
+
 def run_controlled_task(
     task: str,
     *,
@@ -1611,6 +1693,28 @@ def run_controlled_task(
     )
     acceptance = _acceptance_summary(resolved_root, completion)
     lifecycle = _lifecycle_summary(resolved_root, session_id)
+    scope = _scope_summary(
+        normalized_scope, locked=lock_scope, adapter_status=adapter_status
+    )
+    task_sha256 = hashlib.sha256(cleaned_task.encode("utf-8")).hexdigest()
+    outcome, error, determinism = _apply_deterministic_gate(
+        task_sha256=task_sha256,
+        adapter_name=adapter.name,
+        manifest_digest=manifest.digest(),
+        handshake=handshake.evidence_summary(),
+        policy_name=selected_policy,
+        effective_policy=effective_policy.to_dict(),
+        start_git=start_git,
+        result_git=result_git,
+        changes=changes,
+        acceptance=acceptance,
+        completion=completion,
+        scope=scope,
+        lifecycle=lifecycle,
+        risk=risk,
+        outcome=outcome,
+        error=error,
+    )
     result = ControlledRunResult(
         run_id=run_id,
         adapter=adapter.name,
@@ -1621,7 +1725,7 @@ def run_controlled_task(
         outcome=outcome,
         exit_code=_exit_code(outcome),
         runtime_returncode=runtime_returncode,
-        task_sha256=hashlib.sha256(cleaned_task.encode("utf-8")).hexdigest(),
+        task_sha256=task_sha256,
         task_length=len(cleaned_task),
         session_id=session_id,
         intent_id=intent_id,
@@ -1642,10 +1746,9 @@ def run_controlled_task(
         completion=completion,
         changes=changes,
         acceptance=acceptance,
-        scope=_scope_summary(
-            normalized_scope, locked=lock_scope, adapter_status=adapter_status
-        ),
+        scope=scope,
         lifecycle=lifecycle,
+        determinism=determinism,
         cancellation=cancellation,
         error=error,
     )
@@ -1967,6 +2070,32 @@ def run_interactive_codex(
         if isinstance(raw_length, int):
             prompt_length = raw_length
     fallback_task = cleaned_task or "interactive Codex session"
+    task_sha256 = (
+        prompt_sha or hashlib.sha256(fallback_task.encode("utf-8")).hexdigest()
+    )
+    scope = _scope_summary(
+        normalized_scope,
+        locked=lock_scope,
+        adapter_status=adapter_status,
+    )
+    outcome, error, determinism = _apply_deterministic_gate(
+        task_sha256=task_sha256,
+        adapter_name=adapter.name,
+        manifest_digest=manifest.digest(),
+        handshake=handshake.evidence_summary(),
+        policy_name=selected_policy,
+        effective_policy=effective_policy.to_dict(),
+        start_git=start_git,
+        result_git=result_git,
+        changes=changes,
+        acceptance=acceptance,
+        completion=completion,
+        scope=scope,
+        lifecycle=lifecycle,
+        risk=risk,
+        outcome=outcome,
+        error=error,
+    )
 
     result = ControlledRunResult(
         run_id=run_id,
@@ -1978,9 +2107,7 @@ def run_interactive_codex(
         outcome=outcome,
         exit_code=_exit_code(outcome),
         runtime_returncode=runtime_returncode,
-        task_sha256=(
-            prompt_sha or hashlib.sha256(fallback_task.encode("utf-8")).hexdigest()
-        ),
+        task_sha256=task_sha256,
         task_length=(
             prompt_length if prompt_length is not None else len(fallback_task)
         ),
@@ -2010,12 +2137,9 @@ def run_interactive_codex(
         completion=completion,
         changes=changes,
         acceptance=acceptance,
-        scope=_scope_summary(
-            normalized_scope,
-            locked=lock_scope,
-            adapter_status=adapter_status,
-        ),
+        scope=scope,
         lifecycle=lifecycle,
+        determinism=determinism,
         cancellation=cancellation,
         error=error,
     )

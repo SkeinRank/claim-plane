@@ -56,12 +56,26 @@ from claim_plane.dogfood import (
 from claim_plane.oss_pilot import (
     OSS_PILOT_ARMS,
     OSS_PILOT_DEFAULT_ROOT,
+    OssPilotError,
     oss_pilot_selection,
     oss_pilot_status,
     prepare_oss_pilot_workspace,
     run_oss_pilot,
     run_oss_pilot_acceptance,
     oss_pilot_workspace_path,
+)
+from claim_plane.validation import (
+    VALIDATION_DEFAULT_ROOT,
+    VALIDATION_PROFILES,
+    ValidationError,
+    build_validation_bundle,
+    build_validation_report,
+    collect_validation_execution,
+    initialize_validation,
+    next_validation_execution,
+    prepare_validation_execution,
+    run_validation_execution,
+    validation_status,
 )
 from claim_plane.policy import POLICY_NAMES, EffectivePolicy, resolve_policy
 from claim_plane.protocol import (
@@ -911,6 +925,17 @@ def _print_evidence_report(payload: Mapping[str, Any]) -> None:
         )
         if reverification.get("log_dir"):
             print(f"  Logs: {reverification.get('log_dir')}")
+    determinism = payload.get("determinism") or {}
+    deterministic_record = determinism.get("record") or {}
+    deterministic_verification = determinism.get("verification") or {}
+    verdict = deterministic_record.get("verdict") or {}
+    if deterministic_verification.get("available"):
+        state = "VALID" if deterministic_verification.get("valid") else "INVALID"
+        print(
+            "Determinism: "
+            f"{state} · reason={verdict.get('reason_code')} · "
+            f"decision={verdict.get('digest')}"
+        )
     execution = payload.get("execution") or {}
     print(
         f"Execution: {execution.get('duration_seconds')}s · "
@@ -1042,6 +1067,205 @@ def cmd_oss_pilot_status(args: argparse.Namespace) -> int:
             )
             if latest_acceptance.get("log_dir"):
                 print(f"Acceptance logs: {latest_acceptance.get('log_dir')}")
+    return 0
+
+
+def _print_validation_status(payload: Mapping[str, Any]) -> None:
+    print(f"Claim Plane single-agent validation — {payload.get('profile')}")
+    print(f"Root: {payload.get('root')}")
+    print(
+        f"Progress: {payload.get('completed_count', 0)}/"
+        f"{payload.get('execution_count', 0)} executions"
+    )
+    for arm, metrics in (payload.get("arms") or {}).items():
+        if not isinstance(metrics, Mapping):
+            continue
+        print(
+            f"  {arm}: {metrics.get('completed', 0)}/"
+            f"{metrics.get('expected', 0)} · "
+            f"{metrics.get('passed', 0)} passed"
+        )
+    next_execution = payload.get("next_execution")
+    if isinstance(next_execution, Mapping):
+        print(
+            "Next: "
+            f"{next_execution.get('execution_id')} · "
+            f"{next_execution.get('task_id')} · "
+            f"{next_execution.get('arm')}"
+        )
+    else:
+        print("Matrix complete.")
+
+
+def cmd_validation_init(args: argparse.Namespace) -> int:
+    try:
+        payload = initialize_validation(
+            root=args.root,
+            profile=args.profile,
+            model=args.model,
+            selection_seed=args.selection_seed,
+            cooperbench=args.cooperbench,
+            task_count=args.tasks,
+            minimum_repositories=args.repositories,
+            force=args.force,
+            allow_source_drift=args.allow_source_drift,
+        )
+    except (ValidationError, OssPilotError, OSError, ValueError) as exc:
+        print(f"Validation initialization failed: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Initialized single-agent validation: {payload['root']}")
+        print(
+            f"{payload['task_count']} tasks · "
+            f"{payload['repository_count']} repositories · "
+            f"{payload['execution_count']} executions"
+        )
+        print("Run the next cell with:")
+        print("  claim-plane validation run --next")
+    return 0
+
+
+def cmd_validation_status(args: argparse.Namespace) -> int:
+    try:
+        payload = validation_status(args.root)
+    except (ValidationError, OSError, ValueError) as exc:
+        print(f"Validation status unavailable: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(payload)
+    else:
+        _print_validation_status(payload)
+    return 0
+
+
+def _resolve_validation_execution(args: argparse.Namespace) -> str | None:
+    if getattr(args, "next", False):
+        entry = next_validation_execution(args.root)
+        if entry is None:
+            raise ValidationError("the comparative validation matrix is complete")
+        return entry.execution_id
+    return getattr(args, "execution_id", None)
+
+
+def cmd_validation_prepare(args: argparse.Namespace) -> int:
+    try:
+        execution_id = _resolve_validation_execution(args)
+        if execution_id is None:
+            raise ValidationError("provide an execution_id or pass --next")
+        payload = prepare_validation_execution(
+            execution_id, root=args.root, force=args.force
+        )
+    except (ValidationError, OssPilotError, OSError, ValueError) as exc:
+        print(f"Validation preparation failed: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Prepared {execution_id}")
+        print(f"Workspace: {payload['workspace']}")
+        print(f"Task: {payload['task']['task_id']} · arm {payload['arm']}")
+    return 0
+
+
+def cmd_validation_run(args: argparse.Namespace) -> int:
+    try:
+        execution_id = _resolve_validation_execution(args)
+        if execution_id is None and not args.next:
+            raise ValidationError("provide an execution_id or pass --next")
+        payload = run_validation_execution(
+            execution_id,
+            root=args.root,
+            model=args.model,
+            session_timeout=args.timeout,
+            acceptance_timeout=args.acceptance_timeout,
+            force_prepare=args.force_prepare,
+            dry_run=args.dry_run,
+        )
+    except (ValidationError, OssPilotError, OSError, ValueError) as exc:
+        print(f"Validation execution failed: {exc}", file=sys.stderr)
+        return 2
+    if args.json or args.dry_run:
+        _write_json(payload)
+    else:
+        result = payload.get("result") or {}
+        print(
+            f"Recorded {payload['execution_id']} · "
+            f"task_success={result.get('task_success')} · "
+            f"accepted_delivery={result.get('accepted_delivery')}"
+        )
+        _print_validation_status(validation_status(args.root))
+    if args.dry_run:
+        return 0
+    result = payload.get("result") or {}
+    return 0 if result.get("evaluation_complete") else 3
+
+
+def cmd_validation_collect(args: argparse.Namespace) -> int:
+    try:
+        execution_id = _resolve_validation_execution(args)
+        if execution_id is None:
+            raise ValidationError("provide an execution_id or pass --next")
+        result = collect_validation_execution(
+            execution_id, root=args.root, overwrite=args.overwrite
+        )
+    except (ValidationError, OssPilotError, OSError, ValueError) as exc:
+        print(f"Validation result collection failed: {exc}", file=sys.stderr)
+        return 2
+    payload = result.to_dict()
+    if args.json:
+        _write_json(payload)
+    else:
+        print(
+            f"Collected {payload['execution_id']} · "
+            f"success={payload['task_success']} · "
+            f"files={payload['files_changed']} · "
+            f"undeclared={payload['undeclared_mutations']}"
+        )
+    return 0
+
+
+def cmd_validation_report(args: argparse.Namespace) -> int:
+    try:
+        payload = build_validation_report(args.root)
+    except (ValidationError, OSError, ValueError) as exc:
+        print(f"Validation report unavailable: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(payload)
+    else:
+        summary = payload["summary"]
+        gate = payload["gate"]
+        print("Claim Plane comparative validation report")
+        print(
+            f"Matrix: {summary['completeness']['matched']}/"
+            f"{summary['completeness']['expected']} matched"
+        )
+        for arm, metrics in summary.get("arms", {}).items():
+            success = metrics.get("task_success_rate")
+            rendered = "n/a" if success is None else f"{float(success):.1%}"
+            print(
+                f"  {arm}: success {rendered} · "
+                f"undeclared {metrics.get('undeclared_mutations', 0)} · "
+                f"false blocks {metrics.get('false_blocks', 0)}"
+            )
+        print(f"Gate: {gate['status']}")
+        print(f"Markdown: {Path(args.root).expanduser().resolve() / 'summary.md'}")
+    return 0 if payload["gate"].get("release_allowed") else 3
+
+
+def cmd_validation_bundle(args: argparse.Namespace) -> int:
+    try:
+        payload = build_validation_bundle(args.out, root=args.root)
+    except (ValidationError, OSError, ValueError) as exc:
+        print(f"Validation bundle unavailable: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Wrote validation bundle: {payload['output']}")
+        print(f"SHA-256: {payload['sha256']}")
     return 0
 
 
@@ -2878,6 +3102,87 @@ def build_parser() -> argparse.ArgumentParser:
     policy_classify.add_argument("--policy", choices=POLICY_NAMES)
     policy_classify.add_argument("--json", action="store_true")
     policy_classify.set_defaults(func=cmd_policy_classify)
+
+    validation = sub.add_parser(
+        "validation",
+        help="Run reproducible Bare, Observe, and Guarded single-agent validation.",
+    )
+    validation_sub = validation.add_subparsers(dest="validation_command", required=True)
+
+    validation_init = validation_sub.add_parser(
+        "init", help="Freeze a repository-diverse comparative validation matrix."
+    )
+    validation_init.add_argument(
+        "--profile", choices=tuple(sorted(VALIDATION_PROFILES)), default="preview"
+    )
+    validation_init.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_init.add_argument("--model", default="gpt-5.6-luna")
+    validation_init.add_argument("--selection-seed", type=int, default=42)
+    validation_init.add_argument("--tasks", type=int, default=None)
+    validation_init.add_argument("--repositories", type=int, default=None)
+    validation_init.add_argument("--cooperbench", default=None)
+    validation_init.add_argument("--force", action="store_true")
+    validation_init.add_argument("--allow-source-drift", action="store_true")
+    validation_init.add_argument("--json", action="store_true")
+    validation_init.set_defaults(func=cmd_validation_init)
+
+    validation_status_parser = validation_sub.add_parser(
+        "status", help="Show matrix progress and the next missing execution."
+    )
+    validation_status_parser.add_argument(
+        "--root", default=str(VALIDATION_DEFAULT_ROOT)
+    )
+    validation_status_parser.add_argument("--json", action="store_true")
+    validation_status_parser.set_defaults(func=cmd_validation_status)
+
+    validation_prepare = validation_sub.add_parser(
+        "prepare", help="Prepare one immutable validation workspace."
+    )
+    validation_prepare.add_argument("execution_id", nargs="?")
+    validation_prepare.add_argument("--next", action="store_true")
+    validation_prepare.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_prepare.add_argument("--force", action="store_true")
+    validation_prepare.add_argument("--json", action="store_true")
+    validation_prepare.set_defaults(func=cmd_validation_prepare)
+
+    validation_run = validation_sub.add_parser(
+        "run", help="Run, verify, and collect one comparative matrix cell."
+    )
+    validation_run.add_argument("execution_id", nargs="?")
+    validation_run.add_argument("--next", action="store_true")
+    validation_run.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_run.add_argument("--model", default=None)
+    validation_run.add_argument("--timeout", type=float, default=None)
+    validation_run.add_argument("--acceptance-timeout", type=float, default=1200.0)
+    validation_run.add_argument("--force-prepare", action="store_true")
+    validation_run.add_argument("--dry-run", action="store_true")
+    validation_run.add_argument("--json", action="store_true")
+    validation_run.set_defaults(func=cmd_validation_run)
+
+    validation_collect = validation_sub.add_parser(
+        "collect", help="Collect a measured result from one prepared workspace."
+    )
+    validation_collect.add_argument("execution_id", nargs="?")
+    validation_collect.add_argument("--next", action="store_true")
+    validation_collect.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_collect.add_argument("--overwrite", action="store_true")
+    validation_collect.add_argument("--json", action="store_true")
+    validation_collect.set_defaults(func=cmd_validation_collect)
+
+    validation_report = validation_sub.add_parser(
+        "report", help="Aggregate measured results and evaluate the release gate."
+    )
+    validation_report.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_report.add_argument("--json", action="store_true")
+    validation_report.set_defaults(func=cmd_validation_report)
+
+    validation_bundle = validation_sub.add_parser(
+        "bundle", help="Export inputs, results, evidence, summary, and gate as ZIP."
+    )
+    validation_bundle.add_argument("--out", required=True)
+    validation_bundle.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_bundle.add_argument("--json", action="store_true")
+    validation_bundle.set_defaults(func=cmd_validation_bundle)
 
     oss_pilot = sub.add_parser(
         "oss-pilot",

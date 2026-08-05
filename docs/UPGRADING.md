@@ -42,15 +42,20 @@ Install an exact earlier version with the same tool manager, then check config a
 compatibility before starting a run:
 
 ```bash
-uv tool install --force claim-plane==0.36.7
+uv tool install --force claim-plane==0.36.9
 # or
-pipx install --force claim-plane==0.36.7
+pipx install --force claim-plane==0.36.9
 
 claim-plane config status
 claim-plane doctor
 ```
 
 A newer unknown config protocol is never downgraded automatically.
+
+Comparative validation state is stored outside the enrolled repository by default at
+`/private/tmp/claim-plane-single-agent-validation`. Package rollback does not rewrite or
+remove that evidence. Use a separate `--root` when comparing results from different Claim
+Plane versions.
 
 ## Remove project enrollment
 

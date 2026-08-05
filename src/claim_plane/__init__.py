@@ -13,6 +13,18 @@ from claim_plane.controlled_run import (
     run_controlled_task,
     run_interactive_codex,
 )
+from claim_plane.determinism import (
+    ACCEPTANCE_SNAPSHOT_PROTOCOL,
+    ADAPTER_SNAPSHOT_PROTOCOL,
+    CANDIDATE_IDENTITY_PROTOCOL,
+    DETERMINISM_RECORD_PROTOCOL,
+    LIFECYCLE_SNAPSHOT_PROTOCOL,
+    POLICY_SNAPSHOT_PROTOCOL,
+    VERDICT_PROTOCOL,
+    build_determinism_record,
+    canonical_repository_path,
+    verify_determinism_record,
+)
 from claim_plane.evidence import (
     EVIDENCE_REPLAY_PROTOCOL,
     EVIDENCE_REPORT_PROTOCOL,
@@ -49,6 +61,29 @@ from claim_plane.dogfood import (
     load_dogfood_results,
     load_dogfood_summary,
     load_golden_suite,
+)
+from claim_plane.validation import (
+    VALIDATION_ARMS,
+    VALIDATION_BUNDLE_PROTOCOL,
+    VALIDATION_DEFAULT_ROOT,
+    VALIDATION_GATE_PROTOCOL,
+    VALIDATION_PROFILES,
+    VALIDATION_SELECTION_PROTOCOL,
+    VALIDATION_STATE_PROTOCOL,
+    ValidationError,
+    ValidationProfile,
+    build_validation_bundle,
+    build_validation_report,
+    collect_validation_execution,
+    discover_validation_catalog,
+    evaluate_validation_release_gate,
+    initialize_validation,
+    load_validation_state,
+    next_validation_execution,
+    prepare_validation_execution,
+    run_validation_execution,
+    select_validation_tasks,
+    validation_status,
 )
 from claim_plane.oss_pilot import (
     OSS_PILOT_ARMS,
@@ -280,9 +315,30 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.36.8"
+__version__ = "0.37.0"
 
 __all__ = [
+    "VALIDATION_ARMS",
+    "VALIDATION_BUNDLE_PROTOCOL",
+    "VALIDATION_DEFAULT_ROOT",
+    "VALIDATION_GATE_PROTOCOL",
+    "VALIDATION_PROFILES",
+    "VALIDATION_SELECTION_PROTOCOL",
+    "VALIDATION_STATE_PROTOCOL",
+    "ValidationError",
+    "ValidationProfile",
+    "build_validation_bundle",
+    "build_validation_report",
+    "collect_validation_execution",
+    "discover_validation_catalog",
+    "evaluate_validation_release_gate",
+    "initialize_validation",
+    "load_validation_state",
+    "next_validation_execution",
+    "prepare_validation_execution",
+    "run_validation_execution",
+    "select_validation_tasks",
+    "validation_status",
     "DOGFOOD_ARMS",
     "DOGFOOD_GATE_PROTOCOL",
     "DOGFOOD_PLAN_PROTOCOL",
@@ -540,5 +596,15 @@ __all__ = [
     "prepare_oss_pilot_workspace",
     "run_oss_pilot",
     "run_oss_pilot_acceptance",
+    "ACCEPTANCE_SNAPSHOT_PROTOCOL",
+    "ADAPTER_SNAPSHOT_PROTOCOL",
+    "CANDIDATE_IDENTITY_PROTOCOL",
+    "DETERMINISM_RECORD_PROTOCOL",
+    "LIFECYCLE_SNAPSHOT_PROTOCOL",
+    "POLICY_SNAPSHOT_PROTOCOL",
+    "VERDICT_PROTOCOL",
+    "build_determinism_record",
+    "canonical_repository_path",
+    "verify_determinism_record",
     "__version__",
 ]

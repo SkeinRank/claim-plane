@@ -231,6 +231,9 @@
           }
         }
       }
+    },
+    "determinism": {
+      "$ref": "single-agent-determinism.schema.json"
     }
   },
   "$defs": {

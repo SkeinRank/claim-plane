@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/single-agent-determinism.schema.json",
+  "title": "Claim Plane single-agent deterministic verdict binding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "candidate",
+    "snapshots",
+    "input_digest",
+    "completeness",
+    "verdict",
+    "digest"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.single-agent-determinism.v1"},
+    "candidate": {
+      "type": "object",
+      "required": ["protocol", "task_sha256", "base_commit", "base_tree", "start_state_digest", "result_state_digest", "change_digest", "changed_paths", "digest"],
+      "properties": {
+        "protocol": {"const": "claim-plane.candidate-identity.v1"},
+        "task_sha256": {"$ref": "#/$defs/sha256"},
+        "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+        "base_tree": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+        "start_state_digest": {"$ref": "#/$defs/sha256"},
+        "result_state_digest": {"$ref": "#/$defs/sha256"},
+        "change_digest": {"$ref": "#/$defs/sha256"},
+        "changed_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "digest": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "snapshots": {
+      "type": "object",
+      "required": ["policy", "adapter", "acceptance", "lifecycle"],
+      "properties": {
+        "policy": {"type": "object"},
+        "adapter": {"type": "object"},
+        "acceptance": {"type": "object"},
+        "lifecycle": {"type": "object"}
+      }
+    },
+    "input_digest": {"$ref": "#/$defs/sha256"},
+    "completeness": {
+      "type": "object",
+      "required": ["complete", "findings"],
+      "properties": {
+        "complete": {"type": "boolean"},
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "message": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["protocol", "outcome", "reason_code", "candidate_digest", "input_digest", "complete", "finding_codes", "digest"],
+      "properties": {
+        "protocol": {"const": "claim-plane.deterministic-verdict.v1"},
+        "outcome": {"enum": ["VERIFIED", "REJECTED", "REVIEW_REQUIRED", "CANCELLED", "TIMED_OUT", "FAILED"]},
+        "reason_code": {"type": "string", "minLength": 1},
+        "candidate_digest": {"$ref": "#/$defs/sha256"},
+        "input_digest": {"$ref": "#/$defs/sha256"},
+        "complete": {"type": "boolean"},
+        "finding_codes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "digest": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "digest": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

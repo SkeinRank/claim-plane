@@ -19,6 +19,7 @@ from claim_plane.controlled_run import (
     ControlledRunError,
     load_controlled_run,
 )
+from claim_plane.determinism import verify_determinism_record
 from claim_plane.oss_pilot import (
     _candidate_identity,
     _current_candidate_verdict,
@@ -322,6 +323,20 @@ def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
                     ),
                 }
             )
+    determinism_verification = verify_determinism_record(run)
+    if determinism_verification.get("available") and not determinism_verification.get(
+        "valid"
+    ):
+        findings.extend(
+            {
+                "code": str(item.get("code") or "determinism_invalid"),
+                "message": str(
+                    item.get("message") or "deterministic evidence mismatch"
+                ),
+            }
+            for item in determinism_verification.get("findings") or ()
+            if isinstance(item, Mapping)
+        )
     completion_value = run.get("completion")
     completion: Mapping[str, Any] = (
         completion_value if isinstance(completion_value, Mapping) else {}
@@ -402,6 +417,10 @@ def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
         "scope": dict(run.get("scope") or {}),
         "acceptance": dict(acceptance),
         "verification": dict(run.get("completion") or {}),
+        "determinism": {
+            "record": dict(run.get("determinism") or {}),
+            "verification": determinism_verification,
+        },
         "reverification": reverification,
         "current_candidate_verdict": current_candidate_verdict,
         "decisions": _decision_summary(events),
@@ -509,6 +528,19 @@ def build_evidence_replay(root: str | Path, selector: str = "latest") -> dict[st
     reverification, current_candidate_verdict = _matching_oss_reverification(
         resolved_root, run
     )
+    determinism_verification = verify_determinism_record(run)
+    determinism_record = run.get("determinism")
+    stored_lifecycle_digest = None
+    if isinstance(determinism_record, Mapping):
+        snapshots = determinism_record.get("snapshots")
+        if isinstance(snapshots, Mapping):
+            lifecycle_snapshot = snapshots.get("lifecycle")
+            if isinstance(lifecycle_snapshot, Mapping):
+                stored_lifecycle_digest = lifecycle_snapshot.get("head_digest")
+    replay_equivalent = bool(
+        determinism_verification.get("valid")
+        and stored_lifecycle_digest == report.head_digest
+    )
     unsigned = {
         "protocol": EVIDENCE_REPLAY_PROTOCOL,
         "run_id": run.get("run_id"),
@@ -520,6 +552,23 @@ def build_evidence_replay(root: str | Path, selector: str = "latest") -> dict[st
         "entries": [item.to_dict() for item in entries],
         "reverification": reverification,
         "current_candidate_verdict": current_candidate_verdict,
+        "determinism": {
+            "available": bool(determinism_verification.get("available")),
+            "valid": bool(determinism_verification.get("valid")),
+            "decision_digest": (
+                (determinism_record.get("verdict") or {}).get("digest")
+                if isinstance(determinism_record, Mapping)
+                and isinstance(determinism_record.get("verdict"), Mapping)
+                else None
+            ),
+            "input_digest": (
+                determinism_record.get("input_digest")
+                if isinstance(determinism_record, Mapping)
+                else None
+            ),
+            "replay_equivalent": replay_equivalent,
+            "findings": list(determinism_verification.get("findings") or ()),
+        },
     }
     return {**unsigned, "replay_digest": _sha256(unsigned)}
 
@@ -553,5 +602,10 @@ def render_evidence_replay(payload: Mapping[str, Any]) -> tuple[str, ...]:
         if reverification.get("log_dir"):
             lines.append(f"  logs {reverification.get('log_dir')}")
         lines.append(f"Current candidate: {payload.get('current_candidate_verdict')}")
+    determinism = payload.get("determinism")
+    if isinstance(determinism, Mapping) and determinism.get("available"):
+        state = "EQUIVALENT" if determinism.get("replay_equivalent") else "MISMATCH"
+        lines.append(f"Deterministic replay: {state}")
+        lines.append(f"Decision digest: {determinism.get('decision_digest')}")
     lines.append(f"Replay digest: {payload.get('replay_digest')}")
     return tuple(lines)
