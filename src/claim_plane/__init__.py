@@ -50,6 +50,20 @@ from claim_plane.dogfood import (
     load_dogfood_summary,
     load_golden_suite,
 )
+from claim_plane.oss_pilot import (
+    OSS_PILOT_ARMS,
+    OSS_PILOT_SELECTION_PROTOCOL,
+    OSS_PILOT_SOURCE_REVISION,
+    OSS_PILOT_WORKSPACE_PROTOCOL,
+    FROZEN_OSS_PILOT_TASKS,
+    OssPilotError,
+    OssPilotTask,
+    oss_pilot_selection,
+    oss_pilot_status,
+    prepare_oss_pilot_workspace,
+    run_oss_pilot,
+    run_oss_pilot_acceptance,
+)
 from claim_plane.core import (
     AcceptanceResult,
     AccessMode,
@@ -266,7 +280,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.36.5"
+__version__ = "0.36.6"
 
 __all__ = [
     "DOGFOOD_ARMS",
@@ -514,5 +528,17 @@ __all__ = [
     "init_project",
     "load_project_config",
     "reset_project",
+    "FROZEN_OSS_PILOT_TASKS",
+    "OSS_PILOT_ARMS",
+    "OSS_PILOT_SELECTION_PROTOCOL",
+    "OSS_PILOT_SOURCE_REVISION",
+    "OSS_PILOT_WORKSPACE_PROTOCOL",
+    "OssPilotError",
+    "OssPilotTask",
+    "oss_pilot_selection",
+    "oss_pilot_status",
+    "prepare_oss_pilot_workspace",
+    "run_oss_pilot",
+    "run_oss_pilot_acceptance",
     "__version__",
 ]

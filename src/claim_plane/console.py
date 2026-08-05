@@ -417,8 +417,30 @@ class ConsoleRenderer:
                     dedupe_key="verification:authority:cancelled",
                 )
         else:
+            classification = str(acceptance_map.get("classification") or "")
+            log_dir = str(acceptance_map.get("log_dir") or "")
+            if acceptance_passed:
+                acceptance_label = "Acceptance passed"
+            elif classification == "TEST_FAILED":
+                acceptance_label = "Acceptance tests failed"
+            elif classification == "DEPENDENCY_INSTALL_FAILED":
+                acceptance_label = "Acceptance environment failed"
+            elif classification == "TIMEOUT":
+                acceptance_label = "Acceptance timed out"
+            elif classification in {
+                "OFFICIAL_TEST_CONFLICT",
+                "WORKSPACE_SAFETY_FAILED",
+                "EVALUATOR_ERROR",
+            }:
+                acceptance_label = "Acceptance evaluator error"
+            else:
+                acceptance_label = "Acceptance not verified"
+            if not acceptance_passed and classification:
+                acceptance_detail += f" · {classification}"
+            if not acceptance_passed and log_dir:
+                acceptance_detail += f" · logs {log_dir}"
             self.step(
-                "Acceptance passed" if acceptance_passed else "Acceptance not verified",
+                acceptance_label,
                 detail=acceptance_detail,
                 state="passed" if acceptance_passed else "failed",
                 dedupe_key="verification:acceptance",

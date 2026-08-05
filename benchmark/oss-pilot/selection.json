@@ -1,0 +1,48 @@
+{
+  "arms": [
+    "guarded",
+    "observe",
+    "bare"
+  ],
+  "digest": "d43e352797d32b88aa7d152831d06a3c490e49facd0df630783f266f0c69c7be",
+  "protocol": "claim-plane.oss-pilot-selection.v1",
+  "source": {
+    "revision": "d46d9e73fa64159e0428b480f293623de90be1ad",
+    "url": "https://github.com/cooperbench/CooperBench.git"
+  },
+  "tasks": [
+    {
+      "cooperbench_task": 1621,
+      "feature": 1,
+      "initial_scope": [
+        "src/jinja2/loaders.py"
+      ],
+      "repository_family": "pallets_jinja_task",
+      "source_ref": "dataset/pallets_jinja_task/task1621/feature1",
+      "task_class": "local_change",
+      "task_id": "jinja-loader-local"
+    },
+    {
+      "cooperbench_task": 2800,
+      "feature": 1,
+      "initial_scope": [
+        "src/click/shell_completion.py"
+      ],
+      "repository_family": "pallets_click_task",
+      "source_ref": "dataset/pallets_click_task/task2800/feature1",
+      "task_class": "required_supporting_change",
+      "task_id": "click-completion-amendment"
+    },
+    {
+      "cooperbench_task": 43,
+      "feature": 5,
+      "initial_scope": [
+        "dirty_equals/_other.py"
+      ],
+      "repository_family": "samuelcolvin_dirty_equals_task",
+      "source_ref": "dataset/samuelcolvin_dirty_equals_task/task43/feature5",
+      "task_class": "scope_pressure",
+      "task_id": "dirty-equals-scope-pressure"
+    }
+  ]
+}

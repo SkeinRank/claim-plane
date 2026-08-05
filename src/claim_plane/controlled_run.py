@@ -736,6 +736,26 @@ def _change_summary(
     }
 
 
+_OSS_PILOT_ACCEPTANCE_RESULT_MARKER = "CLAIM_PLANE_OSS_ACCEPTANCE_RESULT="
+
+
+def _oss_pilot_acceptance_metadata(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    for stream_field in ("stdout_tail", "stderr_tail"):
+        text = result.get(stream_field)
+        if not isinstance(text, str):
+            continue
+        for line in reversed(text.splitlines()):
+            if not line.startswith(_OSS_PILOT_ACCEPTANCE_RESULT_MARKER):
+                continue
+            try:
+                payload = json.loads(line[len(_OSS_PILOT_ACCEPTANCE_RESULT_MARKER) :])
+            except json.JSONDecodeError:
+                return None
+            if isinstance(payload, dict):
+                return payload
+    return None
+
+
 def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, Any]:
     config = load_project_config(root)
     acceptance = config.get("acceptance")
@@ -743,11 +763,38 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
     safe_commands = [
         str(item) for item in commands or () if isinstance(item, str) and item.strip()
     ]
+    result_items: list[dict[str, Any]] = []
+    classification = "PASS" if completion.get("acceptance_passed") else "COMMAND_FAILED"
+    log_dir: str | None = None
+    for raw in completion.get("acceptance_results") or ():
+        if not isinstance(raw, Mapping):
+            continue
+        metadata = _oss_pilot_acceptance_metadata(raw)
+        item = {
+            "command": str(raw.get("command") or ""),
+            "returncode": int(raw.get("returncode") or 0),
+            "passed": bool(raw.get("passed")),
+            "duration_ms": int(raw.get("duration_ms") or 0),
+            "stdout_tail": str(raw.get("stdout_tail") or ""),
+            "stderr_tail": str(raw.get("stderr_tail") or ""),
+        }
+        if metadata is not None:
+            item["classification"] = str(metadata.get("classification") or "")
+            item["detail"] = str(metadata.get("detail") or "")
+            item["log_dir"] = str(metadata.get("log_dir") or "")
+            if not item["passed"]:
+                classification = item["classification"] or classification
+            if item["log_dir"]:
+                log_dir = item["log_dir"]
+        result_items.append(item)
     return {
         "protocol": "claim-plane.acceptance-summary.v1",
         "commands": safe_commands,
         "command_count": len(safe_commands),
         "passed": bool(completion.get("acceptance_passed")),
+        "classification": classification,
+        "log_dir": log_dir,
+        "results": result_items,
         "duration_ms": int(completion.get("acceptance_duration_ms") or 0),
         "errors": int(completion.get("errors") or 0),
         "warnings": int(completion.get("warnings") or 0),

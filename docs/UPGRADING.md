@@ -42,9 +42,9 @@ Install an exact earlier version with the same tool manager, then check config a
 compatibility before starting a run:
 
 ```bash
-uv tool install --force claim-plane==0.36.5
+uv tool install --force claim-plane==0.36.6
 # or
-pipx install --force claim-plane==0.36.5
+pipx install --force claim-plane==0.36.6
 
 claim-plane config status
 claim-plane doctor

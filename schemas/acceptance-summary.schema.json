@@ -41,6 +41,61 @@
     "duration_ms": {
       "type": "integer",
       "minimum": 0
+    },
+    "classification": {
+      "type": "string",
+      "minLength": 1
+    },
+    "log_dir": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command",
+          "returncode",
+          "passed",
+          "duration_ms",
+          "stdout_tail",
+          "stderr_tail"
+        ],
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "returncode": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stdout_tail": {
+            "type": "string"
+          },
+          "stderr_tail": {
+            "type": "string"
+          },
+          "classification": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "log_dir": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

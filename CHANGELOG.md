@@ -8,6 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.36.6] — 2026-08-05
+
+### Added
+
+- Add a frozen three-task single-agent OSS pilot covering Jinja, Click, and dirty-equals at one exact CooperBench source revision.
+- Add `claim-plane oss-pilot list`, `prepare`, `run`, `verify`, and `status` for reproducible Guarded, Observe, and Bare workspaces.
+- Bind every prepared workspace to the exact repository base commit, source task, prompt digest, initial authority, arm, and acceptance command.
+- Run task-local CooperBench acceptance in an isolated temporary Git worktree so evaluator cleanup cannot modify the agent workspace.
+- Add `benchmark/oss-pilot/selection.json`, operating guidance, and `scripts/check-oss-pilot.sh`.
+
+### Fixed
+
+- Keep interactive Codex project-root typing consistent across enrollment and hook dispatch so the complete mypy gate remains clean.
+- Create frozen OSS evaluator repositories beneath the required `agent_workspace` boundary so task-local safety checks run in the intended isolated layout.
+- Combine official task tests with candidate changes through a base-aware three-way merge, including the case where Codex already added the same regression coverage.
+- Distinguish test failures, dependency setup failures, evaluator conflicts, workspace failures, and timeouts while preserving full acceptance logs beside the pilot evidence.
+
 ## [0.36.5] — 2026-08-05
 
 ### Added

@@ -298,6 +298,8 @@ def verify_completion(
             "returncode": result.returncode,
             "passed": result.passed,
             "duration_ms": result.duration_ms,
+            "stdout_tail": result.stdout_tail,
+            "stderr_tail": result.stderr_tail,
             "sandbox_backend": result.sandbox_backend,
             "sandbox_enforced": result.sandbox_enforced,
         }

@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.36.5.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.36.6.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -59,6 +59,26 @@ claim-plane swarm recovery-status <session-id>
 claim-plane swarm recover <session-id>
 claim-plane swarm replace-codex <session-id> --work-id <work-id> --run-id <run-id>
 ```
+
+## Frozen OSS pilot
+
+Version `0.36.6` includes a three-task real-repository pilot for the interactive
+Codex workflow. It prepares exact Jinja, Click, and dirty-equals repository states
+from a frozen CooperBench revision, runs each arm in an independent directory, and
+executes authoritative acceptance in an isolated temporary worktree. The evaluator
+uses the task-required `agent_workspace` layout, combines official tests with the
+candidate tree through a base-aware merge, and records classified failures with full
+logs under `.claim-plane/oss-pilot/acceptance/`.
+
+```bash
+claim-plane oss-pilot list
+claim-plane oss-pilot prepare jinja-loader-local --arm guarded
+claim-plane oss-pilot run jinja-loader-local --arm guarded --model gpt-5.6-luna
+claim-plane oss-pilot status jinja-loader-local --arm guarded
+```
+
+See [`benchmark/oss-pilot/README.md`](benchmark/oss-pilot/README.md) for all three
+tasks, frozen inputs, and the comparative-arm layout.
 
 ## Research paper
 

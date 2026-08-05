@@ -53,6 +53,16 @@ from claim_plane.dogfood import (
     load_dogfood_summary,
     load_golden_suite,
 )
+from claim_plane.oss_pilot import (
+    OSS_PILOT_ARMS,
+    OSS_PILOT_DEFAULT_ROOT,
+    oss_pilot_selection,
+    oss_pilot_status,
+    prepare_oss_pilot_workspace,
+    run_oss_pilot,
+    run_oss_pilot_acceptance,
+    oss_pilot_workspace_path,
+)
 from claim_plane.policy import POLICY_NAMES, EffectivePolicy, resolve_policy
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
@@ -858,10 +868,29 @@ def _print_evidence_report(payload: Mapping[str, Any]) -> None:
         )
         print(f"  Amendment {index}: {decision} {resources or 'no resources'}")
     acceptance = payload.get("acceptance") or {}
+    acceptance_status = "PASS" if acceptance.get("passed") else "NOT VERIFIED"
+    classification = str(acceptance.get("classification") or "")
+    if classification and not acceptance.get("passed"):
+        acceptance_status = classification
     print(
-        f"Acceptance: {'PASS' if acceptance.get('passed') else 'NOT VERIFIED'} "
+        f"Acceptance: {acceptance_status} "
         f"({acceptance.get('command_count', 0)} configured commands)"
     )
+    if acceptance.get("log_dir"):
+        print(f"  Logs: {acceptance.get('log_dir')}")
+    for item in acceptance.get("results") or ():
+        if not isinstance(item, Mapping) or item.get("passed"):
+            continue
+        detail = str(item.get("detail") or "")
+        if detail:
+            print(f"  {detail}")
+        stdout_tail = str(item.get("stdout_tail") or "").strip()
+        stderr_tail = str(item.get("stderr_tail") or "").strip()
+        tail = stderr_tail or stdout_tail
+        if tail:
+            final_line = tail.splitlines()[-1]
+            shown = final_line if len(final_line) <= 100 else final_line[:97] + "..."
+            print(f"  Last output: {shown}")
     execution = payload.get("execution") or {}
     print(
         f"Execution: {execution.get('duration_seconds')}s · "
@@ -898,6 +927,100 @@ def cmd_replay(args: argparse.Namespace) -> int:
     else:
         for line in render_evidence_replay(payload):
             print(line)
+    return 0
+
+
+def _print_oss_pilot_selection(payload: Mapping[str, Any]) -> None:
+    print("Claim Plane OSS pilot — frozen selection")
+    print(f"Source revision: {payload['source']['revision']}")
+    print(f"Selection digest: {payload['digest']}")
+    for task in payload.get("tasks") or ():
+        scope = ", ".join(task.get("initial_scope") or ())
+        print(f"  {task['task_id']} · {task['task_class']} · scope {scope}")
+
+
+def cmd_oss_pilot_list(args: argparse.Namespace) -> int:
+    payload = oss_pilot_selection()
+    if args.json:
+        _write_json(payload)
+    else:
+        _print_oss_pilot_selection(payload)
+    return 0
+
+
+def cmd_oss_pilot_prepare(args: argparse.Namespace) -> int:
+    payload = prepare_oss_pilot_workspace(
+        args.task,
+        arm=args.arm,
+        workspace_root=args.workspace_root,
+        cooperbench=args.cooperbench,
+        force=args.force,
+        allow_source_drift=args.allow_source_drift,
+    )
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Prepared OSS pilot workspace: {payload['workspace']}")
+        print(f"Task: {payload['task']['task_id']} · arm {payload['arm']}")
+        print(f"Base: {payload['repository']['base_commit']}")
+        print(f"Initial scope: {', '.join(payload['initial_scope'])}")
+        print("Run with:")
+        print(
+            "  claim-plane oss-pilot run "
+            f"{payload['task']['task_id']} --arm {payload['arm']}"
+        )
+    return 0
+
+
+def cmd_oss_pilot_run(args: argparse.Namespace) -> int:
+    payload = run_oss_pilot(
+        args.task,
+        arm=args.arm,
+        workspace_root=args.workspace_root,
+        model=args.model,
+        session_timeout=args.timeout,
+        acceptance_timeout=args.acceptance_timeout,
+        dry_run=args.dry_run,
+    )
+    if args.json or args.dry_run:
+        _write_json(payload)
+    if args.dry_run:
+        return 0
+    return int(payload.get("returncode", 1))
+
+
+def cmd_oss_pilot_verify(args: argparse.Namespace) -> int:
+    workspace = oss_pilot_workspace_path(args.task, args.arm, args.workspace_root)
+    return run_oss_pilot_acceptance(workspace, timeout=args.timeout)
+
+
+def cmd_oss_pilot_status(args: argparse.Namespace) -> int:
+    payload = oss_pilot_status(
+        args.task, arm=args.arm, workspace_root=args.workspace_root
+    )
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Claim Plane OSS pilot — {payload['task_id']} · {payload['arm']}")
+        print(f"Workspace: {payload['workspace']}")
+        print(f"Base: {payload['base_commit']}")
+        print(f"Changed entries: {len(payload['changed'])}")
+        for item in payload["changed"]:
+            print(f"  {item}")
+        latest = payload.get("latest_run")
+        if latest:
+            print(f"Latest run: {latest.get('run_id')} · {latest.get('outcome')}")
+        else:
+            print("Latest run: none")
+        latest_acceptance = payload.get("latest_acceptance")
+        if isinstance(latest_acceptance, Mapping):
+            print(
+                "Latest acceptance: "
+                f"{latest_acceptance.get('classification')} · "
+                f"{latest_acceptance.get('detail')}"
+            )
+            if latest_acceptance.get("log_dir"):
+                print(f"Acceptance logs: {latest_acceptance.get('log_dir')}")
     return 0
 
 
@@ -2717,6 +2840,69 @@ def build_parser() -> argparse.ArgumentParser:
     policy_classify.add_argument("--policy", choices=POLICY_NAMES)
     policy_classify.add_argument("--json", action="store_true")
     policy_classify.set_defaults(func=cmd_policy_classify)
+
+    oss_pilot = sub.add_parser(
+        "oss-pilot",
+        help="Prepare and run the frozen three-task single-agent OSS pilot.",
+    )
+    oss_pilot_sub = oss_pilot.add_subparsers(dest="oss_pilot_command", required=True)
+
+    oss_pilot_list = oss_pilot_sub.add_parser(
+        "list", help="Show the frozen source revision, tasks, and initial scopes."
+    )
+    oss_pilot_list.add_argument("--json", action="store_true")
+    oss_pilot_list.set_defaults(func=cmd_oss_pilot_list)
+
+    oss_pilot_prepare = oss_pilot_sub.add_parser(
+        "prepare", help="Create one exact repository workspace for a pilot arm."
+    )
+    oss_pilot_prepare.add_argument("task")
+    oss_pilot_prepare.add_argument("--arm", choices=OSS_PILOT_ARMS, default="guarded")
+    oss_pilot_prepare.add_argument(
+        "--workspace-root", default=str(OSS_PILOT_DEFAULT_ROOT)
+    )
+    oss_pilot_prepare.add_argument("--cooperbench", default=None)
+    oss_pilot_prepare.add_argument("--force", action="store_true")
+    oss_pilot_prepare.add_argument("--allow-source-drift", action="store_true")
+    oss_pilot_prepare.add_argument("--json", action="store_true")
+    oss_pilot_prepare.set_defaults(func=cmd_oss_pilot_prepare)
+
+    oss_pilot_run = oss_pilot_sub.add_parser(
+        "run", help="Open Codex for one prepared pilot workspace."
+    )
+    oss_pilot_run.add_argument("task")
+    oss_pilot_run.add_argument("--arm", choices=OSS_PILOT_ARMS, default="guarded")
+    oss_pilot_run.add_argument("--workspace-root", default=str(OSS_PILOT_DEFAULT_ROOT))
+    oss_pilot_run.add_argument("--model", default="gpt-5.6-luna")
+    oss_pilot_run.add_argument("--timeout", type=float, default=None)
+    oss_pilot_run.add_argument("--acceptance-timeout", type=float, default=1200.0)
+    oss_pilot_run.add_argument("--dry-run", action="store_true")
+    oss_pilot_run.add_argument("--json", action="store_true")
+    oss_pilot_run.set_defaults(func=cmd_oss_pilot_run)
+
+    oss_pilot_verify = oss_pilot_sub.add_parser(
+        "verify", help="Run the frozen task acceptance in an isolated temporary tree."
+    )
+    oss_pilot_verify.add_argument("task")
+    oss_pilot_verify.add_argument("--arm", choices=OSS_PILOT_ARMS, default="guarded")
+    oss_pilot_verify.add_argument(
+        "--workspace-root", default=str(OSS_PILOT_DEFAULT_ROOT)
+    )
+    oss_pilot_verify.add_argument("--timeout", type=float, default=1200.0)
+    oss_pilot_verify.set_defaults(func=cmd_oss_pilot_verify)
+
+    oss_pilot_status_parser = oss_pilot_sub.add_parser(
+        "status", help="Show changed files and the latest sealed run."
+    )
+    oss_pilot_status_parser.add_argument("task")
+    oss_pilot_status_parser.add_argument(
+        "--arm", choices=OSS_PILOT_ARMS, default="guarded"
+    )
+    oss_pilot_status_parser.add_argument(
+        "--workspace-root", default=str(OSS_PILOT_DEFAULT_ROOT)
+    )
+    oss_pilot_status_parser.add_argument("--json", action="store_true")
+    oss_pilot_status_parser.set_defaults(func=cmd_oss_pilot_status)
 
     dogfood = sub.add_parser(
         "dogfood",
