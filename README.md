@@ -9,18 +9,109 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 [![PyPI](https://img.shields.io/pypi/v/claim-plane?label=pypi)](https://pypi.org/project/claim-plane/)
 [![Python](https://img.shields.io/pypi/pyversions/claim-plane?label=python)](https://pypi.org/project/claim-plane/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-4c1)](LICENSE)
-[![Status](https://img.shields.io/badge/status-technical%20preview-orange)](#start-here)
+[![Status](https://img.shields.io/badge/status-technical%20preview-orange)](#quick-start)
 
 **Let agents code. Make every change provable.**
 
 </div>
 
 > **Technical Preview — 0.37.9.** APIs, evidence formats, and deployment contracts may change before 1.0.
-> Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
-Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
+## Quick start
 
-Claim Plane coordinates those changes before and during implementation:
+**Already use Codex? Run the same conversational TUI through Claim Plane.**
+
+Claim Plane does not replace Codex. It controls authority around the session:
+Codex explores and implements normally, while Claim Plane admits the task scope,
+requires explicit amendments for necessary scope growth, verifies the final Git diff,
+runs the configured acceptance checks after Codex exits, and seals the evidence.
+
+### 1. Install the CLI
+
+```bash
+uv tool install claim-plane
+# or: pipx install claim-plane
+```
+
+Claim Plane uses the Codex CLI already installed and authenticated on your machine.
+
+### 2. Enroll a repository once
+
+Run these commands from a Git feature branch:
+
+```bash
+cd my-project
+git switch -c agent/my-task
+
+claim-plane init
+claim-plane connect codex
+claim-plane doctor
+```
+
+`doctor` reports the actual adapter, sandbox, policy, and enforcement boundary before
+an agent starts changing files.
+
+### 3. Work in Codex as usual
+
+```bash
+claim-plane codex --policy guarded
+```
+
+Then describe the task inside the normal Codex session:
+
+```text
+Fix timeout handling and update the appropriate regression tests.
+```
+
+That is the default daily workflow. On later sessions in the same enrolled repository,
+`claim-plane codex --policy guarded` is normally the only command you need.
+
+### What happens around the session
+
+```text
+You work with the normal Codex TUI
+              ↓
+Codex proposes a task-bound ChangeIntent before mutation
+              ↓
+Claim Plane admits the initial authority
+              ↓
+Necessary scope growth uses a recorded amendment instead of silent expansion
+              ↓
+Codex exits; Claim Plane verifies the real Git diff and runs acceptance
+              ↓
+DELIVERY VERIFIED, REJECTED, REVIEW REQUIRED, or another explicit outcome
+              ↓
+Durable report and replay evidence under .claim-plane/runs/
+```
+
+For normal use, omit `--scope` and let the task establish the initial authority.
+Supply an explicit starting boundary when reproducibility or review requires it:
+
+```bash
+claim-plane codex \
+  --scope src/connectors/github.py \
+  --policy guarded
+```
+
+A genuinely required additional file can pass through the brokered amendment path.
+Add `--lock-scope` only when every expansion must be forbidden.
+
+Read the [five-minute walkthrough](docs/QUICKSTART.md), the explicit
+[guarantees and trust boundaries](docs/GUARANTEES.md), and the
+[troubleshooting guide](docs/TROUBLESHOOTING.md).
+
+## Why Claim Plane exists
+
+A Git worktree isolates a process, but it does not prove that an agent stayed within
+the task, that every scope expansion was justified, or that a successful agent exit
+matches the final repository state. Claim Plane separates probabilistic planning from
+deterministic authority and verification.
+
+It does not replace Git, an IDE, a planner, or a coding agent. Codex remains the
+interactive coding experience; Claim Plane is the control and evidence layer around it.
+
+<details>
+<summary><strong>Architecture and multi-agent flow</strong></summary>
 
 ```text
 Task
@@ -40,9 +131,7 @@ Integration Verifier checks real Git hunks, contracts, policies, and acceptance
 Clean integration or targeted repair
 ```
 
-Claim Plane does not replace Git, an IDE, a planner, or a coding agent. It is a model-agnostic integration layer that can sit between a planner and Cursor, Codex, Claude Code, Copilot, OpenHands, or internal agents.
-
-Swarm planning can now be materialized into Claim Plane-owned isolated worktrees:
+Swarm planning can be materialized into Claim Plane-owned isolated worktrees:
 
 ```bash
 claim-plane swarm plan <session-id>
@@ -60,9 +149,11 @@ claim-plane swarm recover <session-id>
 claim-plane swarm replace-codex <session-id> --work-id <work-id> --run-id <run-id>
 ```
 
+</details>
+
 ## Deterministic single-agent evidence
 
-Version `0.37.0` retains deterministic single-agent candidate and verdict binding.
+The current technical preview retains deterministic single-agent candidate and verdict binding.
 Every new controlled run seals the task, base and result repository states, change
 summary, effective policy, adapter contract, acceptance definition, and lifecycle head
 into one reproducible decision digest. Evidence reports recompute that binding and
@@ -70,7 +161,7 @@ replay verifies equivalence without rerunning the provider.
 
 ## Frozen OSS pilot
 
-Version `0.37.0` includes a three-task real-repository pilot for the interactive
+The repository includes a three-task real-repository pilot for the interactive
 Codex workflow. It prepares exact Jinja, Click, and dirty-equals repository states
 from a frozen CooperBench revision, runs each arm in an independent directory, and
 executes authoritative acceptance in an isolated temporary worktree. The evaluator
@@ -222,32 +313,30 @@ Maxim Nikolaev · Software Engineering (`cs.SE`) · 2026
 
 Repository-level software citation metadata is available in [`CITATION.cff`](CITATION.cff), and the paper-specific BibTeX entry is available in [`papers/claim-plane-2026/citation.bib`](papers/claim-plane-2026/citation.bib).
 
-## Start here
+## More ways to run
 
-Install the isolated CLI, enroll a feature branch, and run one bounded Codex task:
+Open the same interactive TUI with the first task already submitted:
 
 ```bash
-uv tool install claim-plane
-# or: pipx install claim-plane
-
-cd my-project
-git switch -c agent/audit-pagination
-claim-plane init
-claim-plane connect codex
-claim-plane doctor
-claim-plane codex --policy guarded
-# or run one bounded unattended task:
-claim-plane run "Add pagination to the audit API and extend its tests" --policy guarded
-claim-plane report latest
+claim-plane codex "Fix timeout handling and update its regression test" \
+  --policy guarded
 ```
 
-The five-minute walkthrough is in [`docs/QUICKSTART.md`](docs/QUICKSTART.md). Before using
-the preview on important repositories, read the explicit
-[guarantees and trust boundaries](docs/GUARANTEES.md),
-[troubleshooting guide](docs/TROUBLESHOOTING.md), and
-[upgrade/uninstall behavior](docs/UPGRADING.md).
+Run a bounded unattended task instead of an interactive session:
 
-Inspect the installed product contract and packaged schemas with:
+```bash
+claim-plane run "Add pagination to the audit API and extend its tests" \
+  --policy guarded
+```
+
+Inspect the latest durable evidence without reopening Codex:
+
+```bash
+claim-plane report latest
+claim-plane replay latest
+```
+
+Inspect the installed product contract and packaged schemas:
 
 ```bash
 claim-plane preview
@@ -255,7 +344,11 @@ claim-plane exit-codes
 claim-plane schemas list
 ```
 
-## Current capabilities
+See [upgrade and uninstall behavior](docs/UPGRADING.md) before changing an existing
+installation.
+
+<details>
+<summary><strong>Current capabilities</strong></summary>
 
 - atomic claim and intent admission through SQLite transactions;
 - leases, heartbeats, completion, release, and append-only audit events;
@@ -321,18 +414,22 @@ The base package has no runtime dependencies. Agent Lexicon remains an optional 
 
 The brokered boundary is Linux-first. On macOS, the broker and verification pipeline work normally, while non-bypassable repository isolation should run in a Linux VM/container with Bubblewrap.
 
-## Install
+</details>
 
-Install the CLI as an isolated tool with `uv`:
+## Installation details
+
+The quick-start installation is:
 
 ```bash
 uv tool install claim-plane
-
-# Optional semantic identity and evidence signing
-uv tool install "claim-plane[semantic,signing]"
+# or: pipx install claim-plane
 ```
 
-`pipx install claim-plane` is also supported when `pipx` is the preferred tool manager.
+Optional semantic identity and evidence signing extras:
+
+```bash
+uv tool install "claim-plane[semantic,signing]"
+```
 
 Verify the installation and public CLI contract:
 
