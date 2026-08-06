@@ -8,6 +8,25 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.1] — 2026-08-05
+
+### Added
+
+- Show the current comparative matrix cell, runtime phase, elapsed time, evaluator output, and silence heartbeats during long validation operations.
+- Add `claim-plane validation resume` to continue official acceptance for a preserved candidate without rerunning Codex.
+- Persist execution metadata before the agent starts and before acceptance begins so interrupted cells remain visible and recoverable.
+- Detect candidates created by the earlier validation runner and expose them as `LEGACY_CANDIDATE` with an explicit recovery command.
+- Add profile-aware acceptance limits: five minutes for preview and twenty minutes for release, with an operator override.
+- Add bounded evaluator cleanup and durable `INTERRUPTED` acceptance evidence instead of losing a cell on Ctrl-C.
+- Keep timeouts and evaluator-environment failures resumable instead of recording them as completed task failures.
+- Add reusable runtime progress primitives and `scripts/check-validation-runtime-ux.sh` for future long-running benchmark and precomputation workflows.
+
+### Fixed
+
+- Prevent a completed Codex candidate from disappearing from matrix progress when official acceptance is interrupted.
+- Prevent silent dependency installation and test execution from appearing hung while output is captured.
+- Prevent cleanup of large temporary environments from blocking the terminal indefinitely after interruption.
+
 ## [0.37.0] — 2026-08-05
 
 ### Added

@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from claim_plane.connectors import build_adapter_registry, connect_codex
 from claim_plane.project import (
@@ -30,6 +30,7 @@ from claim_plane.project import (
     load_project_config,
     set_adapter_enabled,
 )
+from claim_plane.runtime_progress import bounded_rmtree, run_streaming_process
 from claim_plane.test_feedback import managed_test_artifact
 
 OSS_PILOT_SELECTION_PROTOCOL = "claim-plane.oss-pilot-selection.v1"
@@ -49,6 +50,7 @@ OSS_PILOT_ACCEPTANCE_EXIT_CODES = {
     "WORKSPACE_SAFETY_FAILED": 73,
     "EVALUATOR_ERROR": 74,
     "TIMEOUT": 124,
+    "INTERRUPTED": 130,
 }
 
 
@@ -696,6 +698,7 @@ def _finish_oss_pilot_acceptance(
     stdout: str = "",
     stderr: str = "",
     detail: str = "",
+    emit_logs: bool = True,
 ) -> int:
     manifest = load_oss_pilot_manifest(root)
     candidate = _candidate_identity(root, manifest)
@@ -727,9 +730,9 @@ def _finish_oss_pilot_acceptance(
         json.dumps(result, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    if stdout:
+    if emit_logs and stdout:
         print(stdout, end="" if stdout.endswith("\n") else "\n")
-    if stderr:
+    if emit_logs and stderr:
         print(stderr, end="" if stderr.endswith("\n") else "\n", file=sys.stderr)
     print(OSS_PILOT_ACCEPTANCE_RESULT_MARKER + _canonical_json(result))
     return OSS_PILOT_ACCEPTANCE_EXIT_CODES[classification]
@@ -881,6 +884,10 @@ def run_oss_pilot_acceptance(
     workspace: str | Path,
     *,
     timeout: float = OSS_PILOT_ACCEPTANCE_TIMEOUT,
+    progress: Callable[[str], None] | None = None,
+    stream_output: bool = False,
+    heartbeat_seconds: float = 15.0,
+    cleanup_timeout: float = 15.0,
 ) -> int:
     root = Path(workspace).expanduser().resolve()
     manifest = load_oss_pilot_manifest(root)
@@ -917,12 +924,16 @@ def run_oss_pilot_acceptance(
     official_tree.parent.mkdir(parents=True, exist_ok=True)
     preparation_stdout: list[str] = []
     preparation_stderr: list[str] = []
+    if progress is not None:
+        progress("Preparing isolated evaluator workspace")
     try:
         _run(("git", "worktree", "add", "--detach", str(tree), "HEAD"), cwd=root)
         _run(
             ("git", "worktree", "add", "--detach", str(official_tree), "HEAD"),
             cwd=root,
         )
+        if progress is not None:
+            progress("Merging official task tests")
         official_result = _apply_git_patch(official_tree, tests_patch)
         preparation_stdout.append(official_result.stdout)
         preparation_stderr.append(official_result.stderr)
@@ -991,37 +1002,92 @@ def run_oss_pilot_acceptance(
         _runner_input_patch(runner_patch)
         env = os.environ.copy()
         env.pop("UV_SYSTEM_PYTHON", None)
-        try:
-            completed = subprocess.run(
-                (
-                    "bash",
-                    str(runner.resolve()),
-                    str(tree.resolve()),
-                    str(runner_patch.resolve()),
-                ),
+        evaluator_command = (
+            "bash",
+            str(runner.resolve()),
+            str(tree.resolve()),
+            str(runner_patch.resolve()),
+        )
+        if progress is not None:
+            progress(f"Running official evaluator · timeout {int(timeout)}s")
+        if stream_output:
+            streamed = run_streaming_process(
+                evaluator_command,
                 cwd=tree,
-                text=True,
-                capture_output=True,
-                timeout=timeout,
-                check=False,
                 env=env,
+                timeout=timeout,
+                heartbeat_seconds=heartbeat_seconds,
+                on_output=lambda name, line: print(
+                    line,
+                    end="",
+                    file=sys.stderr if name == "stderr" else sys.stdout,
+                    flush=True,
+                ),
+                on_heartbeat=(
+                    None
+                    if progress is None
+                    else lambda elapsed: progress(
+                        f"Official evaluator still running · {int(elapsed)}s elapsed"
+                    )
+                ),
             )
-        except subprocess.TimeoutExpired as exc:
-            stdout = _timeout_output(exc.stdout)
-            stderr = _timeout_output(exc.stderr)
-            stderr += f"\nTimed out after {timeout}s\n"
-            return _finish_oss_pilot_acceptance(
-                root,
-                classification="TIMEOUT",
-                returncode=OSS_PILOT_ACCEPTANCE_EXIT_CODES["TIMEOUT"],
-                stdout="".join(preparation_stdout) + stdout,
-                stderr="".join(preparation_stderr) + stderr,
-                detail=f"official evaluator timed out after {timeout}s",
-            )
+            completed_returncode = streamed.returncode
+            completed_stdout = streamed.stdout
+            completed_stderr = streamed.stderr
+            if streamed.interrupted:
+                return _finish_oss_pilot_acceptance(
+                    root,
+                    classification="INTERRUPTED",
+                    returncode=OSS_PILOT_ACCEPTANCE_EXIT_CODES["INTERRUPTED"],
+                    stdout="".join(preparation_stdout) + completed_stdout,
+                    stderr="".join(preparation_stderr) + completed_stderr,
+                    detail="official evaluator interrupted by the operator",
+                    emit_logs=False,
+                )
+            if streamed.timed_out:
+                return _finish_oss_pilot_acceptance(
+                    root,
+                    classification="TIMEOUT",
+                    returncode=OSS_PILOT_ACCEPTANCE_EXIT_CODES["TIMEOUT"],
+                    stdout="".join(preparation_stdout) + completed_stdout,
+                    stderr=(
+                        "".join(preparation_stderr)
+                        + completed_stderr
+                        + f"\nTimed out after {timeout}s\n"
+                    ),
+                    detail=f"official evaluator timed out after {timeout}s",
+                    emit_logs=False,
+                )
+        else:
+            try:
+                completed = subprocess.run(
+                    evaluator_command,
+                    cwd=tree,
+                    text=True,
+                    capture_output=True,
+                    timeout=timeout,
+                    check=False,
+                    env=env,
+                )
+            except subprocess.TimeoutExpired as exc:
+                stdout = _timeout_output(exc.stdout)
+                stderr = _timeout_output(exc.stderr)
+                stderr += f"\nTimed out after {timeout}s\n"
+                return _finish_oss_pilot_acceptance(
+                    root,
+                    classification="TIMEOUT",
+                    returncode=OSS_PILOT_ACCEPTANCE_EXIT_CODES["TIMEOUT"],
+                    stdout="".join(preparation_stdout) + stdout,
+                    stderr="".join(preparation_stderr) + stderr,
+                    detail=f"official evaluator timed out after {timeout}s",
+                )
+            completed_returncode = completed.returncode
+            completed_stdout = completed.stdout
+            completed_stderr = completed.stderr
 
-        stdout = "".join(preparation_stdout) + completed.stdout
-        stderr = "".join(preparation_stderr) + completed.stderr
-        if completed.returncode == 0:
+        stdout = "".join(preparation_stdout) + completed_stdout
+        stderr = "".join(preparation_stderr) + completed_stderr
+        if completed_returncode == 0:
             return _finish_oss_pilot_acceptance(
                 root,
                 classification="PASS",
@@ -1029,21 +1095,31 @@ def run_oss_pilot_acceptance(
                 stdout=stdout,
                 stderr=stderr,
                 detail="official OSS task tests passed",
+                emit_logs=not stream_output,
             )
         classification, detail = _classify_runner_failure(stdout, stderr)
         return _finish_oss_pilot_acceptance(
             root,
             classification=classification,
-            returncode=completed.returncode,
+            returncode=completed_returncode,
             stdout=stdout,
             stderr=stderr,
             detail=detail,
+            emit_logs=not stream_output,
         )
     finally:
-        _run(("git", "worktree", "remove", "--force", str(tree)), cwd=root, check=False)
-        _run(
-            ("git", "worktree", "remove", "--force", str(official_tree)),
-            cwd=root,
-            check=False,
-        )
-        shutil.rmtree(temp_parent, ignore_errors=True)
+        if progress is not None:
+            progress("Cleaning evaluator workspace")
+        for worktree in (tree, official_tree):
+            try:
+                _run(
+                    ("git", "worktree", "remove", "--force", str(worktree)),
+                    cwd=root,
+                    timeout=cleanup_timeout,
+                    check=False,
+                )
+            except (OssPilotError, subprocess.TimeoutExpired, KeyboardInterrupt):
+                pass
+        removed = bounded_rmtree(temp_parent, timeout=cleanup_timeout)
+        if not removed and progress is not None:
+            progress(f"Cleanup continuing asynchronously: {temp_parent}")

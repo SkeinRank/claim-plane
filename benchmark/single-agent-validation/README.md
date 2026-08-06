@@ -1,6 +1,6 @@
 # Comparative single-agent validation
 
-Claim Plane `0.37.0` provides one reproducible workflow for comparing the same
+Claim Plane `0.37.1` provides one reproducible workflow for comparing the same
 coding task under three execution arms:
 
 ```text
@@ -32,6 +32,23 @@ Run one missing cell at a time:
 ```bash
 claim-plane validation run --next
 ```
+
+The runner prints the current cell, each phase, live evaluator output, and a heartbeat
+when a dependency installation or test process is silent. Preview acceptance is bounded
+to five minutes by default. Release validation keeps a twenty-minute default and both
+profiles accept `--acceptance-timeout` overrides.
+
+If acceptance is interrupted, the candidate remains in place and the cell is marked
+resumable:
+
+```bash
+claim-plane validation status
+claim-plane validation resume <execution-id>
+```
+
+`validation run --next` automatically resumes new interrupted acceptance states. A
+candidate produced by the older runner is reported as `LEGACY_CANDIDATE`; restore its
+known agent duration with `--agent-seconds` when preserving timing accuracy.
 
 That command performs the complete cell lifecycle:
 

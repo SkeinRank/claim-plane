@@ -63,6 +63,7 @@ from claim_plane.dogfood import (
     load_golden_suite,
 )
 from claim_plane.validation import (
+    VALIDATION_ACCEPTANCE_TIMEOUTS,
     VALIDATION_ARMS,
     VALIDATION_BUNDLE_PROTOCOL,
     VALIDATION_DEFAULT_ROOT,
@@ -81,6 +82,7 @@ from claim_plane.validation import (
     load_validation_state,
     next_validation_execution,
     prepare_validation_execution,
+    resume_validation_execution,
     run_validation_execution,
     select_validation_tasks,
     validation_status,
@@ -315,9 +317,10 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.0"
+__version__ = "0.37.1"
 
 __all__ = [
+    "VALIDATION_ACCEPTANCE_TIMEOUTS",
     "VALIDATION_ARMS",
     "VALIDATION_BUNDLE_PROTOCOL",
     "VALIDATION_DEFAULT_ROOT",
@@ -336,6 +339,7 @@ __all__ = [
     "load_validation_state",
     "next_validation_execution",
     "prepare_validation_execution",
+    "resume_validation_execution",
     "run_validation_execution",
     "select_validation_tasks",
     "validation_status",

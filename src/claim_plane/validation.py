@@ -21,7 +21,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from claim_plane.dogfood import (
     DogfoodArm,
@@ -41,7 +41,6 @@ from claim_plane.dogfood import (
 )
 from claim_plane.evidence import EvidenceError, build_evidence_report
 from claim_plane.oss_pilot import (
-    OSS_PILOT_ACCEPTANCE_TIMEOUT,
     OSS_PILOT_SOURCE_URL,
     OSS_PILOT_WORKSPACE_PROTOCOL,
     OssPilotError,
@@ -59,12 +58,21 @@ from claim_plane.oss_pilot import (
 )
 from claim_plane.connectors import build_adapter_registry, connect_codex
 from claim_plane.project import init_project, set_adapter_enabled
+from claim_plane.runtime_progress import ProgressReporter, periodic_heartbeat
 
 VALIDATION_STATE_PROTOCOL = "claim-plane.single-agent-validation.v1"
 VALIDATION_SELECTION_PROTOCOL = "claim-plane.single-agent-validation-selection.v1"
 VALIDATION_BUNDLE_PROTOCOL = "claim-plane.single-agent-validation-bundle.v1"
 VALIDATION_GATE_PROTOCOL = "claim-plane.single-agent-validation-gate.v1"
 VALIDATION_DEFAULT_ROOT = Path("/private/tmp/claim-plane-single-agent-validation")
+VALIDATION_ACCEPTANCE_TIMEOUTS = {"preview": 300.0, "release": 1200.0}
+VALIDATION_HEARTBEAT_SECONDS = 15.0
+VALIDATION_RESUMABLE_PHASES = {
+    "ACCEPTANCE_PENDING",
+    "ACCEPTANCE_RUNNING",
+    "INTERRUPTED",
+    "RETRYABLE_ERROR",
+}
 VALIDATION_ARMS = (
     DogfoodArm.BARE_CODEX,
     DogfoodArm.OBSERVE,
@@ -445,6 +453,7 @@ def initialize_validation(
     minimum_repositories: int | None = None,
     force: bool = False,
     allow_source_drift: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Freeze the task selection and complete comparative execution matrix."""
 
@@ -458,17 +467,24 @@ def initialize_validation(
         shutil.rmtree(resolved)
     resolved.mkdir(parents=True, exist_ok=True)
     selected_profile = _profile(profile)
-    source = _source_checkout(
-        resolved,
-        cooperbench=cooperbench,
-        allow_source_drift=allow_source_drift,
-    )
+    if progress is not None:
+        progress("Resolving frozen CooperBench source")
+    with periodic_heartbeat(progress, "Frozen source resolution"):
+        source = _source_checkout(
+            resolved,
+            cooperbench=cooperbench,
+            allow_source_drift=allow_source_drift,
+        )
     source_revision = _git(source, "rev-parse", "HEAD")
+    if progress is not None:
+        progress("Discovering feature-level validation tasks")
     catalog = tuple(
         item
         for item in discover_validation_catalog(source)
         if str(item.get("language")) in selected_profile.languages
     )
+    if progress is not None:
+        progress("Selecting a deterministic repository-diverse matrix")
     selected = select_validation_tasks(
         catalog,
         task_count=task_count or selected_profile.task_count,
@@ -562,6 +578,8 @@ def initialize_validation(
         },
     }
     state = {**state_unsigned, "digest": _digest(state_unsigned)}
+    if progress is not None:
+        progress("Writing immutable validation inputs")
     _write_json(resolved / "selection.json", selection)
     _write_json(resolved / "suite.json", suite.to_dict())
     _write_json(resolved / "plan.json", plan.to_dict())
@@ -605,6 +623,60 @@ def _results(root: Path) -> tuple[DogfoodResult, ...]:
     return load_dogfood_results(paths)
 
 
+def _execution_metadata_path(workspace: Path) -> Path:
+    return workspace / ".claim-plane" / "validation-execution.json"
+
+
+def _execution_metadata(workspace: Path) -> dict[str, Any] | None:
+    path = _execution_metadata_path(workspace)
+    if not path.exists():
+        return None
+    return _read_json(path)
+
+
+def _store_execution_metadata(workspace: Path, payload: Mapping[str, Any]) -> None:
+    path = _execution_metadata_path(workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(path, dict(payload))
+
+
+def _workspace_has_candidate(workspace: Path) -> bool:
+    if not (workspace / ".claim-plane" / "oss-pilot.json").exists():
+        return False
+    try:
+        return bool(_git(workspace, "status", "--porcelain"))
+    except (OssPilotError, OSError, ValueError):
+        return False
+
+
+def _resumable_entry(root: Path, plan: DogfoodPlan) -> DogfoodPlanEntry | None:
+    observed = {item.execution_id for item in _results(root)}
+    for entry in plan.entries:
+        if entry.execution_id in observed:
+            continue
+        workspace = validation_workspace(root, entry.execution_id)
+        metadata = _execution_metadata(workspace) if workspace.exists() else None
+        if (
+            isinstance(metadata, Mapping)
+            and str(metadata.get("phase") or "") in VALIDATION_RESUMABLE_PHASES
+        ):
+            return entry
+        if (
+            metadata is None
+            and workspace.exists()
+            and _workspace_has_candidate(workspace)
+        ):
+            return entry
+    return None
+
+
+def _acceptance_timeout(state: Mapping[str, Any], requested: float | None) -> float:
+    if requested is not None:
+        return max(1.0, float(requested))
+    profile = str(state.get("profile") or "preview")
+    return VALIDATION_ACCEPTANCE_TIMEOUTS.get(profile, 300.0)
+
+
 def validation_status(root: str | Path = VALIDATION_DEFAULT_ROOT) -> dict[str, Any]:
     resolved = validation_root(root)
     state, suite, plan = _load_assets(resolved)
@@ -622,6 +694,19 @@ def validation_status(root: str | Path = VALIDATION_DEFAULT_ROOT) -> dict[str, A
             "completed": completed,
             "passed": passed,
         }
+    resumable = _resumable_entry(resolved, plan)
+    active: dict[str, Any] | None = None
+    if resumable is not None:
+        workspace = validation_workspace(resolved, resumable.execution_id)
+        metadata = _execution_metadata(workspace) or {}
+        active = {
+            "execution_id": resumable.execution_id,
+            "task_id": resumable.task_id,
+            "arm": resumable.arm.value,
+            "phase": metadata.get("phase") or "LEGACY_CANDIDATE",
+            "updated_at": metadata.get("updated_at"),
+            "resume_command": f"claim-plane validation resume {resumable.execution_id}",
+        }
     next_entry = pending[0].to_dict() if pending else None
     return {
         "protocol": VALIDATION_STATE_PROTOCOL,
@@ -637,6 +722,7 @@ def validation_status(root: str | Path = VALIDATION_DEFAULT_ROOT) -> dict[str, A
         "complete": not pending,
         "arms": by_arm,
         "next_execution": next_entry,
+        "active_execution": active,
     }
 
 
@@ -972,15 +1058,156 @@ def collect_validation_execution(
     return result
 
 
+def _run_acceptance_for_execution(
+    selected: DogfoodPlanEntry,
+    *,
+    resolved: Path,
+    state: Mapping[str, Any],
+    acceptance_timeout: float | None,
+    progress_enabled: bool,
+    started_at: str,
+    agent_wall_time_seconds: float,
+    runtime_returncode: int,
+) -> dict[str, Any]:
+    workspace = validation_workspace(resolved, selected.execution_id)
+    timeout = _acceptance_timeout(state, acceptance_timeout)
+    reporter = ProgressReporter(
+        enabled=progress_enabled, stream=sys.stderr, prefix="Validation"
+    )
+    metadata = {
+        "protocol": "claim-plane.single-agent-validation-execution.v2",
+        "execution_id": selected.execution_id,
+        "phase": "ACCEPTANCE_RUNNING",
+        "started_at": started_at,
+        "updated_at": _utc_now(),
+        "runtime_returncode": runtime_returncode,
+        "agent_wall_time_seconds": agent_wall_time_seconds,
+        "acceptance_timeout_seconds": timeout,
+    }
+    _store_execution_metadata(workspace, metadata)
+    acceptance_started = time.monotonic()
+    acceptance_returncode = run_oss_pilot_acceptance(
+        workspace,
+        timeout=timeout,
+        progress=reporter.emit if progress_enabled else None,
+        stream_output=progress_enabled,
+        heartbeat_seconds=VALIDATION_HEARTBEAT_SECONDS,
+    )
+    acceptance_elapsed = time.monotonic() - acceptance_started
+    acceptance = latest_oss_pilot_reverification(workspace) or {}
+    classification = str(acceptance.get("classification") or "EVALUATOR_ERROR")
+    total_elapsed = agent_wall_time_seconds + acceptance_elapsed
+    if classification == "INTERRUPTED":
+        phase = "INTERRUPTED"
+    elif classification in {"PASS", "TEST_FAILED"}:
+        phase = "COMPLETED"
+    else:
+        phase = "RETRYABLE_ERROR"
+    metadata.update(
+        {
+            "phase": phase,
+            "updated_at": _utc_now(),
+            "finished_at": _utc_now() if phase == "COMPLETED" else None,
+            "acceptance_returncode": acceptance_returncode,
+            "acceptance_classification": classification,
+            "acceptance_wall_time_seconds": acceptance_elapsed,
+            "wall_time_seconds": total_elapsed,
+        }
+    )
+    _store_execution_metadata(workspace, metadata)
+    payload: dict[str, Any] = {
+        "execution_id": selected.execution_id,
+        "acceptance_returncode": acceptance_returncode,
+        "acceptance_classification": classification,
+        "wall_time_seconds": total_elapsed,
+        "interrupted": phase == "INTERRUPTED",
+        "retryable": phase == "RETRYABLE_ERROR",
+    }
+    if phase != "COMPLETED":
+        reporter.emit(
+            f"Acceptance {classification}; candidate preserved. Resume with "
+            f"`claim-plane validation resume {selected.execution_id}`"
+        )
+        return payload
+    result = collect_validation_execution(
+        selected.execution_id,
+        root=resolved,
+        wall_time_seconds=total_elapsed,
+        runtime_returncode=runtime_returncode,
+        overwrite=True,
+    )
+    payload["result"] = result.to_dict()
+    reporter.emit(f"Recorded {selected.execution_id} · acceptance {classification}")
+    return payload
+
+
+def resume_validation_execution(
+    execution_id: str | None = None,
+    *,
+    root: str | Path = VALIDATION_DEFAULT_ROOT,
+    acceptance_timeout: float | None = None,
+    agent_wall_time_seconds: float | None = None,
+    progress: bool = True,
+) -> dict[str, Any]:
+    """Resume official acceptance for a preserved candidate without rerunning Codex."""
+
+    resolved = validation_root(root)
+    state, _, plan = _load_assets(resolved)
+    selected = (
+        _entry(plan, execution_id) if execution_id else _resumable_entry(resolved, plan)
+    )
+    if selected is None:
+        raise ValidationError(
+            "no interrupted or pending validation execution is resumable"
+        )
+    workspace = validation_workspace(resolved, selected.execution_id)
+    metadata = _execution_metadata(workspace)
+    if not isinstance(metadata, Mapping):
+        if not _workspace_has_candidate(workspace):
+            raise ValidationError(
+                "execution metadata and preserved candidate are missing: "
+                f"{selected.execution_id}"
+            )
+        metadata = {
+            "phase": "ACCEPTANCE_PENDING",
+            "started_at": _utc_now(),
+            "runtime_returncode": 0,
+            "agent_wall_time_seconds": float(agent_wall_time_seconds or 0.0),
+            "legacy_recovery": True,
+        }
+        _store_execution_metadata(workspace, metadata)
+    phase = str(metadata.get("phase") or "")
+    if phase not in VALIDATION_RESUMABLE_PHASES:
+        raise ValidationError(
+            f"execution {selected.execution_id} is not resumable from phase {phase!r}"
+        )
+    measured_agent_seconds = (
+        float(agent_wall_time_seconds)
+        if agent_wall_time_seconds is not None
+        else float(metadata.get("agent_wall_time_seconds") or 0.0)
+    )
+    return _run_acceptance_for_execution(
+        selected,
+        resolved=resolved,
+        state=state,
+        acceptance_timeout=acceptance_timeout,
+        progress_enabled=progress,
+        started_at=str(metadata.get("started_at") or _utc_now()),
+        agent_wall_time_seconds=measured_agent_seconds,
+        runtime_returncode=int(metadata.get("runtime_returncode") or 0),
+    )
+
+
 def run_validation_execution(
     execution_id: str | None = None,
     *,
     root: str | Path = VALIDATION_DEFAULT_ROOT,
     model: str | None = None,
     session_timeout: float | None = None,
-    acceptance_timeout: float = OSS_PILOT_ACCEPTANCE_TIMEOUT,
+    acceptance_timeout: float | None = None,
     force_prepare: bool = False,
     dry_run: bool = False,
+    progress: bool = True,
 ) -> dict[str, Any]:
     """Prepare, run, independently verify, and collect one plan cell."""
 
@@ -993,16 +1220,46 @@ def run_validation_execution(
     )
     if selected is None:
         raise ValidationError("the comparative validation matrix is complete")
+    workspace = validation_workspace(resolved, selected.execution_id)
+    existing = _execution_metadata(workspace) if workspace.exists() else None
+    if (
+        not force_prepare
+        and existing is None
+        and workspace.exists()
+        and _workspace_has_candidate(workspace)
+    ):
+        raise ValidationError(
+            "a preserved candidate from an earlier runner is present; resume it "
+            f"with `claim-plane validation resume {selected.execution_id}` "
+            "or pass --force-prepare to recreate the cell"
+        )
+    if (
+        not force_prepare
+        and isinstance(existing, Mapping)
+        and str(existing.get("phase") or "") in VALIDATION_RESUMABLE_PHASES
+    ):
+        return resume_validation_execution(
+            selected.execution_id,
+            root=resolved,
+            acceptance_timeout=acceptance_timeout,
+            progress=progress,
+        )
     manifest = prepare_validation_execution(
         selected.execution_id,
         root=resolved,
         force=force_prepare,
     )
+    timeout = _acceptance_timeout(state, acceptance_timeout)
     command = oss_pilot_command(
         manifest,
         model=model or str(state["model"]),
         session_timeout=session_timeout,
-        acceptance_timeout=acceptance_timeout,
+        acceptance_timeout=timeout,
+    )
+    position = next(
+        index
+        for index, entry in enumerate(plan.entries, start=1)
+        if entry.execution_id == selected.execution_id
     )
     payload: dict[str, Any] = {
         "execution_id": selected.execution_id,
@@ -1013,43 +1270,76 @@ def run_validation_execution(
         "command": list(command),
         "command_shell": shlex.join(command),
         "dry_run": dry_run,
+        "position": position,
+        "execution_count": len(plan.entries),
+        "acceptance_timeout_seconds": timeout,
     }
     if dry_run:
         return payload
+    reporter = ProgressReporter(
+        enabled=progress, stream=sys.stderr, prefix="Validation"
+    )
+    reporter.emit(
+        f"Current cell {position}/{len(plan.entries)} · "
+        f"{selected.task_id} · {selected.arm.value}"
+    )
+    started_iso = _utc_now()
     started = time.monotonic()
-    completed = subprocess.run(command, cwd=str(manifest["workspace"]), check=False)
-    runtime_returncode = completed.returncode
-    acceptance_returncode = run_oss_pilot_acceptance(
-        str(manifest["workspace"]), timeout=acceptance_timeout
-    )
-    elapsed = time.monotonic() - started
-    execution_metadata = {
-        "protocol": "claim-plane.single-agent-validation-execution.v1",
+    metadata = {
+        "protocol": "claim-plane.single-agent-validation-execution.v2",
         "execution_id": selected.execution_id,
-        "runtime_returncode": runtime_returncode,
-        "acceptance_returncode": acceptance_returncode,
-        "wall_time_seconds": elapsed,
-        "finished_at": _utc_now(),
+        "phase": "AGENT_RUNNING",
+        "started_at": started_iso,
+        "updated_at": started_iso,
+        "acceptance_timeout_seconds": timeout,
+        "position": position,
+        "execution_count": len(plan.entries),
     }
-    _write_json(
-        Path(str(manifest["workspace"])) / ".claim-plane" / "validation-execution.json",
-        execution_metadata,
-    )
-    result = collect_validation_execution(
-        selected.execution_id,
-        root=resolved,
-        wall_time_seconds=elapsed,
-        runtime_returncode=runtime_returncode,
-        overwrite=True,
-    )
-    payload.update(
+    _store_execution_metadata(workspace, metadata)
+    try:
+        completed = subprocess.run(command, cwd=str(workspace), check=False)
+        runtime_returncode = completed.returncode
+    except KeyboardInterrupt:
+        elapsed = time.monotonic() - started
+        metadata.update(
+            {
+                "phase": "AGENT_INTERRUPTED",
+                "updated_at": _utc_now(),
+                "runtime_returncode": 130,
+                "agent_wall_time_seconds": elapsed,
+                "wall_time_seconds": elapsed,
+            }
+        )
+        _store_execution_metadata(workspace, metadata)
+        payload.update({"runtime_returncode": 130, "interrupted": True})
+        reporter.emit("Codex interrupted; workspace preserved")
+        return payload
+    agent_elapsed = time.monotonic() - started
+    metadata.update(
         {
+            "phase": "ACCEPTANCE_PENDING",
+            "updated_at": _utc_now(),
             "runtime_returncode": runtime_returncode,
-            "acceptance_returncode": acceptance_returncode,
-            "wall_time_seconds": elapsed,
-            "result": result.to_dict(),
+            "agent_wall_time_seconds": agent_elapsed,
         }
     )
+    _store_execution_metadata(workspace, metadata)
+    reporter.emit(
+        f"Codex completed in {ProgressReporter.duration(agent_elapsed)}; "
+        f"starting official acceptance (timeout {int(timeout)}s)"
+    )
+    acceptance_payload = _run_acceptance_for_execution(
+        selected,
+        resolved=resolved,
+        state=state,
+        acceptance_timeout=timeout,
+        progress_enabled=progress,
+        started_at=started_iso,
+        agent_wall_time_seconds=agent_elapsed,
+        runtime_returncode=runtime_returncode,
+    )
+    payload.update(acceptance_payload)
+    payload["runtime_returncode"] = runtime_returncode
     return payload
 
 

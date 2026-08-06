@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.1.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -118,7 +118,7 @@ candidate verdict, including `VERIFIED_AFTER_RECHECK`.
 
 ## Comparative single-agent validation
 
-Version `0.37.0` turns the frozen OSS pilot and dogfood contracts into one
+Version `0.37.1` turns the frozen OSS pilot and dogfood contracts into one
 operator workflow for identical Bare Codex, Claim Plane Observe, and Claim Plane
 Guarded executions. The preview profile freezes 12 feature-level tasks across at
 least six repository families and expands them into a 36-cell matrix. The release
@@ -130,6 +130,26 @@ claim-plane validation status
 claim-plane validation run --next
 claim-plane validation report
 claim-plane validation bundle --out claim-plane-validation.zip
+```
+
+Preview acceptance defaults to five minutes and streams evaluator output. Long silent
+phases emit elapsed-time heartbeats. Claim Plane stores the cell phase before Codex and
+before acceptance, so one interruption preserves the candidate and prints a resumable
+command:
+
+```bash
+claim-plane validation status
+claim-plane validation resume <execution-id>
+```
+
+Timeouts and evaluator-environment failures keep the same candidate resumable and do
+not fill the comparative matrix with a false task verdict.
+
+Candidates created by `0.37.0` are detected as `LEGACY_CANDIDATE`. Their measured agent
+time can be restored during the one-time recovery:
+
+```bash
+claim-plane validation resume <execution-id> --agent-seconds 178
 ```
 
 `validation run --next` prepares the exact repository state, opens the selected

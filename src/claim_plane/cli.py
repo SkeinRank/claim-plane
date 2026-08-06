@@ -34,6 +34,7 @@ from claim_plane.controlled_run import (
 from claim_plane.exit_codes import ExitCode, exit_code_manifest
 from claim_plane.preview import technical_preview_manifest
 from claim_plane.resources import export_schemas, list_schemas
+from claim_plane.runtime_progress import ProgressReporter
 from claim_plane.evidence import (
     EvidenceError,
     build_evidence_replay,
@@ -74,6 +75,7 @@ from claim_plane.validation import (
     initialize_validation,
     next_validation_execution,
     prepare_validation_execution,
+    resume_validation_execution,
     run_validation_execution,
     validation_status,
 )
@@ -1036,7 +1038,15 @@ def cmd_oss_pilot_run(args: argparse.Namespace) -> int:
 
 def cmd_oss_pilot_verify(args: argparse.Namespace) -> int:
     workspace = oss_pilot_workspace_path(args.task, args.arm, args.workspace_root)
-    return run_oss_pilot_acceptance(workspace, timeout=args.timeout)
+    reporter = ProgressReporter(
+        enabled=True, stream=sys.stderr, prefix="OSS acceptance"
+    )
+    return run_oss_pilot_acceptance(
+        workspace,
+        timeout=args.timeout,
+        progress=reporter.emit,
+        stream_output=True,
+    )
 
 
 def cmd_oss_pilot_status(args: argparse.Namespace) -> int:
@@ -1085,6 +1095,14 @@ def _print_validation_status(payload: Mapping[str, Any]) -> None:
             f"{metrics.get('expected', 0)} · "
             f"{metrics.get('passed', 0)} passed"
         )
+    active_execution = payload.get("active_execution")
+    if isinstance(active_execution, Mapping):
+        print(
+            "Resumable: "
+            f"{active_execution.get('execution_id')} · "
+            f"{active_execution.get('phase')}"
+        )
+        print(f"  {active_execution.get('resume_command')}")
     next_execution = payload.get("next_execution")
     if isinstance(next_execution, Mapping):
         print(
@@ -1098,6 +1116,9 @@ def _print_validation_status(payload: Mapping[str, Any]) -> None:
 
 
 def cmd_validation_init(args: argparse.Namespace) -> int:
+    reporter = ProgressReporter(
+        enabled=not args.json, stream=sys.stderr, prefix="Validation"
+    )
     try:
         payload = initialize_validation(
             root=args.root,
@@ -1109,6 +1130,7 @@ def cmd_validation_init(args: argparse.Namespace) -> int:
             minimum_repositories=args.repositories,
             force=args.force,
             allow_source_drift=args.allow_source_drift,
+            progress=reporter.emit if not args.json else None,
         )
     except (ValidationError, OssPilotError, OSError, ValueError) as exc:
         print(f"Validation initialization failed: {exc}", file=sys.stderr)
@@ -1182,12 +1204,21 @@ def cmd_validation_run(args: argparse.Namespace) -> int:
             acceptance_timeout=args.acceptance_timeout,
             force_prepare=args.force_prepare,
             dry_run=args.dry_run,
+            progress=not args.json,
         )
     except (ValidationError, OssPilotError, OSError, ValueError) as exc:
         print(f"Validation execution failed: {exc}", file=sys.stderr)
         return 2
     if args.json or args.dry_run:
         _write_json(payload)
+    elif payload.get("interrupted") or payload.get("retryable"):
+        classification = payload.get("acceptance_classification") or "INTERRUPTED"
+        print(
+            f"Validation acceptance {classification}; candidate preserved for "
+            f"{payload['execution_id']}."
+        )
+        print(f"Resume: claim-plane validation resume {payload['execution_id']}")
+        _print_validation_status(validation_status(args.root))
     else:
         result = payload.get("result") or {}
         print(
@@ -1198,6 +1229,47 @@ def cmd_validation_run(args: argparse.Namespace) -> int:
         _print_validation_status(validation_status(args.root))
     if args.dry_run:
         return 0
+    if payload.get("interrupted"):
+        return 130
+    if payload.get("retryable"):
+        return 3
+    result = payload.get("result") or {}
+    return 0 if result.get("evaluation_complete") else 3
+
+
+def cmd_validation_resume(args: argparse.Namespace) -> int:
+    try:
+        payload = resume_validation_execution(
+            args.execution_id,
+            root=args.root,
+            acceptance_timeout=args.acceptance_timeout,
+            agent_wall_time_seconds=args.agent_seconds,
+            progress=not args.json,
+        )
+    except (ValidationError, OssPilotError, OSError, ValueError) as exc:
+        print(f"Validation resume failed: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(payload)
+    elif payload.get("interrupted") or payload.get("retryable"):
+        classification = payload.get("acceptance_classification") or "INTERRUPTED"
+        print(
+            f"Acceptance {classification}; candidate remains resumable for "
+            f"{payload['execution_id']}."
+        )
+        print(f"Resume: claim-plane validation resume {payload['execution_id']}")
+    else:
+        result = payload.get("result") or {}
+        print(
+            f"Recorded {payload['execution_id']} · "
+            f"task_success={result.get('task_success')} · "
+            f"accepted_delivery={result.get('accepted_delivery')}"
+        )
+        _print_validation_status(validation_status(args.root))
+    if payload.get("interrupted"):
+        return 130
+    if payload.get("retryable"):
+        return 3
     result = payload.get("result") or {}
     return 0 if result.get("evaluation_complete") else 3
 
@@ -3153,11 +3225,46 @@ def build_parser() -> argparse.ArgumentParser:
     validation_run.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
     validation_run.add_argument("--model", default=None)
     validation_run.add_argument("--timeout", type=float, default=None)
-    validation_run.add_argument("--acceptance-timeout", type=float, default=1200.0)
+    validation_run.add_argument(
+        "--acceptance-timeout",
+        type=float,
+        default=None,
+        help=(
+            "Official acceptance timeout; defaults to 300s for preview and "
+            "1200s for release."
+        ),
+    )
     validation_run.add_argument("--force-prepare", action="store_true")
     validation_run.add_argument("--dry-run", action="store_true")
     validation_run.add_argument("--json", action="store_true")
     validation_run.set_defaults(func=cmd_validation_run)
+
+    validation_resume = validation_sub.add_parser(
+        "resume",
+        help=(
+            "Resume official acceptance for a preserved candidate without "
+            "rerunning Codex."
+        ),
+    )
+    validation_resume.add_argument("execution_id", nargs="?")
+    validation_resume.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_resume.add_argument(
+        "--acceptance-timeout",
+        type=float,
+        default=None,
+        help="Override the profile acceptance timeout.",
+    )
+    validation_resume.add_argument(
+        "--agent-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Restore agent wall time for a candidate created before resumable "
+            "metadata existed."
+        ),
+    )
+    validation_resume.add_argument("--json", action="store_true")
+    validation_resume.set_defaults(func=cmd_validation_resume)
 
     validation_collect = validation_sub.add_parser(
         "collect", help="Collect a measured result from one prepared workspace."
