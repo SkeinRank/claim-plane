@@ -75,10 +75,14 @@ from claim_plane.validation import (
     initialize_validation,
     next_validation_execution,
     prepare_validation_execution,
+    prefetch_all_validation_environments,
+    prefetch_validation_environments,
+    reset_validation_task,
     resume_validation_execution,
     run_validation_execution,
     validation_status,
 )
+from claim_plane.validation_environment import ValidationEnvironmentError
 from claim_plane.policy import POLICY_NAMES, EffectivePolicy, resolve_policy
 from claim_plane.protocol import (
     AdapterCapabilityManifest,
@@ -821,6 +825,12 @@ def cmd_codex(args: argparse.Namespace) -> int:
             model=args.model,
             initial_scope=tuple(args.scope or ()),
             lock_scope=args.lock_scope,
+            codex_args=tuple(
+                item
+                for override in (getattr(args, "codex_config", None) or ())
+                for item in ("-c", str(override))
+            ),
+            defer_acceptance=getattr(args, "defer_acceptance", False),
             stdout=sys.stdout,
             stderr=sys.stderr,
         )
@@ -1087,6 +1097,11 @@ def _print_validation_status(payload: Mapping[str, Any]) -> None:
         f"Progress: {payload.get('completed_count', 0)}/"
         f"{payload.get('execution_count', 0)} executions"
     )
+    print(
+        "Development environments: "
+        f"{payload.get('prepared_environment_count', 0)} prepared · "
+        f"cache {payload.get('environment_cache')}"
+    )
     for arm, metrics in (payload.get("arms") or {}).items():
         if not isinstance(metrics, Mapping):
             continue
@@ -1206,7 +1221,13 @@ def cmd_validation_run(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             progress=not args.json,
         )
-    except (ValidationError, OssPilotError, OSError, ValueError) as exc:
+    except (
+        ValidationError,
+        ValidationEnvironmentError,
+        OssPilotError,
+        OSError,
+        ValueError,
+    ) as exc:
         print(f"Validation execution failed: {exc}", file=sys.stderr)
         return 2
     if args.json or args.dry_run:
@@ -1295,6 +1316,80 @@ def cmd_validation_collect(args: argparse.Namespace) -> int:
             f"files={payload['files_changed']} · "
             f"undeclared={payload['undeclared_mutations']}"
         )
+    return 0
+
+
+def cmd_validation_prefetch(args: argparse.Namespace) -> int:
+    reporter = ProgressReporter(
+        enabled=not args.json, stream=sys.stderr, prefix="Validation environment"
+    )
+    try:
+        if args.all and (args.execution_id is not None or args.next):
+            raise ValidationError(
+                "--all cannot be combined with an execution_id or --next"
+            )
+        if args.all:
+            payloads = prefetch_all_validation_environments(
+                root=args.root,
+                force=args.force,
+                progress=reporter.emit if not args.json else None,
+                stream_output=not args.json,
+            )
+        else:
+            execution_id = _resolve_validation_execution(args)
+            if execution_id is None:
+                raise ValidationError(
+                    "provide an execution_id, pass --next, or pass --all"
+                )
+            payloads = prefetch_validation_environments(
+                [execution_id],
+                root=args.root,
+                force=args.force,
+                progress=reporter.emit if not args.json else None,
+                stream_output=not args.json,
+            )
+    except (
+        ValidationError,
+        ValidationEnvironmentError,
+        OssPilotError,
+        OSError,
+        ValueError,
+    ) as exc:
+        print(f"Validation environment preparation failed: {exc}", file=sys.stderr)
+        return 2
+    payload = {
+        "prepared": len(payloads),
+        "cache_hits": sum(bool(item.get("cache_hit")) for item in payloads),
+        "environments": list(payloads),
+    }
+    if args.json:
+        _write_json(payload)
+    else:
+        print(
+            f"Prepared {payload['prepared']} validation environment(s) · "
+            f"{payload['cache_hits']} cache hit(s)"
+        )
+        for item in payloads:
+            state = "cache hit" if item.get("cache_hit") else "prepared"
+            print(f"  {item['task_id']} · {state} · {item['venv']}")
+    return 0
+
+
+def cmd_validation_reset_task(args: argparse.Namespace) -> int:
+    try:
+        payload = reset_validation_task(args.task_id, root=args.root)
+    except (ValidationError, OSError, ValueError) as exc:
+        print(f"Validation task reset failed: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        _write_json(payload)
+    else:
+        print(f"Reset validation task: {payload['task_id']}")
+        print(
+            f"Removed {payload['removed_results']} result(s) and "
+            f"{payload['removed_workspaces']} workspace(s)."
+        )
+        print("Dependency environment preserved for the repeat run.")
     return 0
 
 
@@ -3276,6 +3371,32 @@ def build_parser() -> argparse.ArgumentParser:
     validation_collect.add_argument("--json", action="store_true")
     validation_collect.set_defaults(func=cmd_validation_collect)
 
+    validation_prefetch = validation_sub.add_parser(
+        "prefetch",
+        help=(
+            "Prepare reusable task dependencies so every arm can run targeted tests."
+        ),
+    )
+    validation_prefetch.add_argument("execution_id", nargs="?")
+    validation_prefetch.add_argument("--next", action="store_true")
+    validation_prefetch.add_argument("--all", action="store_true")
+    validation_prefetch.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_prefetch.add_argument("--force", action="store_true")
+    validation_prefetch.add_argument("--json", action="store_true")
+    validation_prefetch.set_defaults(func=cmd_validation_prefetch)
+
+    validation_reset_task = validation_sub.add_parser(
+        "reset-task",
+        help=(
+            "Remove diagnostic results and workspaces for one frozen task across "
+            "Bare, Observe, and Guarded while preserving its dependency cache."
+        ),
+    )
+    validation_reset_task.add_argument("task_id")
+    validation_reset_task.add_argument("--root", default=str(VALIDATION_DEFAULT_ROOT))
+    validation_reset_task.add_argument("--json", action="store_true")
+    validation_reset_task.set_defaults(func=cmd_validation_reset_task)
+
     validation_report = validation_sub.add_parser(
         "report", help="Aggregate measured results and evaluate the release gate."
     )
@@ -3467,6 +3588,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--lock-scope",
         action="store_true",
         help="Deny every mutation outside explicit --scope paths; no amendments.",
+    )
+    interactive_codex.add_argument(
+        "--defer-acceptance",
+        action="store_true",
+        help=(
+            "Verify authority and scope now, but delegate the single authoritative "
+            "acceptance run to an enclosing validation workflow."
+        ),
+    )
+    interactive_codex.add_argument(
+        "--codex-config",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help=(
+            "Forward one temporary Codex -c configuration override; repeat for "
+            "multiple values. Comparative validation uses this to pin its "
+            "development environment without changing user config.toml."
+        ),
     )
     interactive_codex.add_argument(
         "--out",

@@ -1220,8 +1220,11 @@ def test_controlled_run_explicit_scope_records_real_brokered_amendment(
     assert "Scope amendment admitted" in output.getvalue()
 
 
+@pytest.mark.parametrize("defer_acceptance", (False, True))
 def test_interactive_codex_launcher_preserves_tui_and_seals_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    defer_acceptance: bool,
 ) -> None:
     repo = _repo(tmp_path)
     adapter, handshake = _prepare(repo, monkeypatch)
@@ -1355,15 +1358,29 @@ def test_interactive_codex_launcher_preserves_tui_and_seals_evidence(
         stderr=io.StringIO(),
         require_tty=False,
         process_factory=factory,
+        defer_acceptance=defer_acceptance,
     )
 
-    assert result.outcome is ControlledRunOutcome.VERIFIED
+    expected_outcome = (
+        ControlledRunOutcome.REVIEW_REQUIRED
+        if defer_acceptance
+        else ControlledRunOutcome.VERIFIED
+    )
+    assert result.outcome is expected_outcome
+    assert result.exit_code == 0
     assert result.runtime["interactive"] is True
     assert result.runtime["launcher"] == "codex_tui"
     assert result.task_sha256 == hashlib.sha256(task.encode("utf-8")).hexdigest()
     assert "Claim Plane · Interactive Codex" in output.getvalue()
-    assert "DELIVERY VERIFIED" in output.getvalue()
-    assert load_controlled_run(repo, result.run_id)["verified"] is True
+    stored = load_controlled_run(repo, result.run_id)
+    if defer_acceptance:
+        assert "DELIVERY AWAITING EXTERNAL ACCEPTANCE" in output.getvalue()
+        assert result.completion["authority_verified"] is True
+        assert result.completion["acceptance_deferred"] is True
+        assert stored["verified"] is False
+    else:
+        assert "DELIVERY VERIFIED" in output.getvalue()
+        assert stored["verified"] is True
 
 
 def test_interactive_codex_rejects_passthrough_authority_flags(

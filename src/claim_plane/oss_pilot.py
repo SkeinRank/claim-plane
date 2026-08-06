@@ -441,12 +441,18 @@ def oss_pilot_command(
     model: str,
     session_timeout: float | None = None,
     acceptance_timeout: float = OSS_PILOT_ACCEPTANCE_TIMEOUT,
+    defer_acceptance: bool = False,
+    codex_config: Sequence[str] = (),
 ) -> tuple[str, ...]:
     workspace = str(manifest["workspace"])
     prompt = str(manifest["prompt"])
     arm = str(manifest["arm"])
     if arm == "bare":
-        return ("codex", "--model", model, prompt)
+        command = ["codex", "--model", model]
+        for override in codex_config:
+            command.extend(("-c", str(override)))
+        command.append(prompt)
+        return tuple(command)
     command = [
         sys.executable,
         "-m",
@@ -462,8 +468,12 @@ def oss_pilot_command(
         "--acceptance-timeout",
         str(acceptance_timeout),
     ]
+    for override in codex_config:
+        command.extend(("--codex-config", str(override)))
     if session_timeout is not None:
         command.extend(("--timeout", str(session_timeout)))
+    if defer_acceptance:
+        command.append("--defer-acceptance")
     for scope in manifest.get("initial_scope") or ():
         command.extend(("--scope", str(scope)))
     return tuple(command)
@@ -888,6 +898,7 @@ def run_oss_pilot_acceptance(
     stream_output: bool = False,
     heartbeat_seconds: float = 15.0,
     cleanup_timeout: float = 15.0,
+    cache_dir: str | Path | None = None,
 ) -> int:
     root = Path(workspace).expanduser().resolve()
     manifest = load_oss_pilot_manifest(root)
@@ -1002,6 +1013,10 @@ def run_oss_pilot_acceptance(
         _runner_input_patch(runner_patch)
         env = os.environ.copy()
         env.pop("UV_SYSTEM_PYTHON", None)
+        if cache_dir is not None:
+            resolved_cache = Path(cache_dir).expanduser().resolve()
+            resolved_cache.mkdir(parents=True, exist_ok=True)
+            env["UV_CACHE_DIR"] = str(resolved_cache)
         evaluator_command = (
             "bash",
             str(runner.resolve()),

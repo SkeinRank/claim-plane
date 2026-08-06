@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.1.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.5.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -118,19 +118,37 @@ candidate verdict, including `VERIFIED_AFTER_RECHECK`.
 
 ## Comparative single-agent validation
 
-Version `0.37.1` turns the frozen OSS pilot and dogfood contracts into one
-operator workflow for identical Bare Codex, Claim Plane Observe, and Claim Plane
-Guarded executions. The preview profile freezes 12 feature-level tasks across at
+Version `0.37.5` turns the frozen OSS pilot and dogfood contracts into one
+operator workflow for fidelity-matched Bare Codex, Claim Plane Observe, and Claim
+Plane Guarded executions. The preview profile freezes 12 feature-level tasks across at
 least six repository families and expands them into a 36-cell matrix. The release
 profile freezes 20 tasks and two independent execution replicates.
 
 ```bash
 claim-plane validation init --profile preview --model gpt-5.6-luna
+claim-plane validation prefetch --next
 claim-plane validation status
 claim-plane validation run --next
 claim-plane validation report
 claim-plane validation bundle --out claim-plane-validation.zip
 ```
+
+`validation prefetch` executes only the dependency-setup prefix of the frozen task
+evaluator, stops before official tests, and stores one task-level virtual environment.
+The same environment and download cache are activated for Bare, Observe, and Guarded,
+so Codex can run targeted tests against the project dependencies in every arm. Candidate
+source is rebound with an editable no-dependency install before each execution.
+Claim Plane also injects that environment into Codex shell tools with one-run
+`shell_environment_policy` overrides and disables login-shell profile rewriting for the
+validation session. Before opening Codex, it removes parent Python launcher redirects, verifies the exact
+virtual-environment prefix, imports pytest and top-level test dependencies, and checks
+the editable candidate import. Prepared site-packages are pinned into the one-run Codex
+`PYTHONPATH`, which keeps macOS framework and pyenv launchers from selecting the parent
+interpreter's package set.
+
+Observe and Guarded defer their internal acceptance to the comparative runner. The
+external frozen evaluator therefore runs exactly once per cell, after the agent exits,
+and remains the sole authoritative task verdict.
 
 Preview acceptance defaults to five minutes and streams evaluator output. Long silent
 phases emit elapsed-time heartbeats. Claim Plane stores the cell phase before Codex and
@@ -150,6 +168,13 @@ time can be restored during the one-time recovery:
 
 ```bash
 claim-plane validation resume <execution-id> --agent-seconds 178
+```
+
+Diagnostic cells produced before runtime-fidelity matching can be removed across all
+three arms while preserving the prepared dependency cache:
+
+```bash
+claim-plane validation reset-task <task-id>
 ```
 
 `validation run --next` prepares the exact repository state, opens the selected

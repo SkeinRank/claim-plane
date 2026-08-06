@@ -325,7 +325,20 @@ def verify_completion(
             tuple(manifest.changed_files), task_obligations
         )
         findings.extend(task_findings)
-        completion_clean = report_obj.clean and task_obligation_summary["all_satisfied"]
+        authority_clean = report_obj.clean and task_obligation_summary["all_satisfied"]
+        acceptance_deferred = not run_acceptance
+        if acceptance_deferred:
+            findings.append(
+                {
+                    "code": "acceptance_deferred",
+                    "severity": "warning",
+                    "message": (
+                        "authoritative acceptance is delegated to the outer "
+                        "validation runner"
+                    ),
+                }
+            )
+        completion_clean = authority_clean and not acceptance_deferred
         if completion_clean:
             states = {
                 str(item.get("intent_id")): str(item.get("state"))
@@ -361,6 +374,8 @@ def verify_completion(
     return {
         "protocol": CODEX_COMPLETION_PROTOCOL,
         "verified": completion_clean,
+        "authority_verified": authority_clean,
+        "acceptance_deferred": acceptance_deferred,
         "scope_verified": not bool(error_codes & _SCOPE_CODES),
         "contracts_verified": not bool(error_codes & _CONTRACT_CODES),
         "preserves_verified": not bool(error_codes & _PRESERVE_CODES),
@@ -370,14 +385,15 @@ def verify_completion(
         "changed_paths": list(manifest.changed_files),
         "changed_regions": int(metrics.get("changed_regions") or 0),
         "acceptance_commands": int(metrics.get("acceptance_commands") or 0),
-        "acceptance_passed": not acceptance_failures,
+        "acceptance_executed": run_acceptance,
+        "acceptance_passed": run_acceptance and not acceptance_failures,
         "acceptance_duration_ms": sum(
             int(item["duration_ms"]) for item in acceptance_results
         ),
         "acceptance_results": acceptance_results,
         "executed_violations": len(executed_violations),
         "errors": int(metrics.get("errors") or len(error_findings)),
-        "warnings": int(metrics.get("warnings") or 0),
+        "warnings": int(metrics.get("warnings") or 0) + int(acceptance_deferred),
         "findings": findings,
         "task_obligations": task_obligation_summary,
         "managed_test_artifacts": list(

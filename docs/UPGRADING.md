@@ -36,6 +36,76 @@ claim-plane adapters pin codex --clear
 claim-plane adapters pin codex
 ```
 
+
+## macOS prepared-Python isolation from 0.37.5
+
+Version `0.37.5` fixes a macOS/pyenv edge case where a task environment contained
+pytest and project dependencies, but an inherited Python launcher redirected the
+preflight process to the parent interpreter's package paths. The environment manifest
+protocol is refreshed once; packages are rebuilt from the preserved UV download cache.
+
+Reset only the affected task result and rerun it:
+
+```bash
+claim-plane validation reset-task <task-id>
+claim-plane validation status
+claim-plane validation run --next
+```
+
+The run must print the prepared Python path and targeted-test imports before opening
+Codex. A separate `validation prefetch` is not required.
+
+## Comparative development environments from 0.37.3
+
+Version `0.37.4` fixes a comparative-runtime mismatch where dependency prefetch
+completed successfully but Codex shell tools still resolved `python` from the user's
+login profile. Results collected before this fix did not give the agent the intended
+targeted-test environment and should remain diagnostic only.
+
+Keep the prepared dependency environment, reset only the affected task, and repeat its
+three arms:
+
+```bash
+claim-plane validation reset-task <task-id>
+claim-plane validation status
+claim-plane validation run --next
+```
+
+The next run performs a fail-fast environment preflight and prints the exact Python
+executable plus available test imports before opening Codex. No second prefetch is
+needed when the task environment is already prepared.
+
+## Comparative prefetch from 0.37.2
+
+Version `0.37.3` fixes dependency prefetch for frozen evaluators that reject an empty
+feature-patch argument. No validation state reset is required. Remove the incomplete
+environment automatically by rerunning the same command; Claim Plane rebuilds it from
+the preserved UV cache:
+
+```bash
+claim-plane validation prefetch --next
+```
+
+## Comparative validation from 0.37.1
+
+Version `0.37.2` changes the comparative execution contract: all three arms receive the
+same task-level development environment, and Observe/Guarded delegate acceptance to the
+single external evaluator. Results already collected with `0.37.1` remain readable but
+should not be mixed with new fidelity-matched cells in a public comparison.
+
+Preserve the diagnostic bundle, reset the affected task across all arms, and prefetch its
+dependencies before repeating it:
+
+```bash
+claim-plane validation bundle --out claim-plane-0.37.1-diagnostic.zip
+claim-plane validation reset-task <task-id>
+claim-plane validation prefetch --next
+claim-plane validation run --next
+```
+
+`reset-task` removes only that task's result records and workspaces. The shared download
+cache and any prepared task environment remain available.
+
 ## Roll back the package
 
 Install an exact earlier version with the same tool manager, then check config and adapter

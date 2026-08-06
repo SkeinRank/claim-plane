@@ -40,6 +40,9 @@ _READ_ONLY_TOOLS = frozenset(
         "websearch",
         "web_fetch",
         "web_search",
+        "webrun",
+        "web_run",
+        "web.run",
         "askuserquestion",
         "ask_user",
         "todowrite",
@@ -324,8 +327,64 @@ def _git_subcommand(argv: Sequence[str]) -> str | None:
     return None
 
 
+def _git_subcommand_index(argv: Sequence[str]) -> int | None:
+    if len(argv) < 2:
+        return None
+    index = 1
+    value_options = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+    flag_options = {
+        "--no-pager",
+        "--paginate",
+        "--no-replace-objects",
+        "--literal-pathspecs",
+        "--no-literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+    }
+    while index < len(argv):
+        item = argv[index]
+        if item in {"--version", "--help"}:
+            return index
+        if item in value_options:
+            index += 2
+            continue
+        if any(
+            item.startswith(f"{option}=")
+            for option in value_options
+            if option.startswith("--")
+        ):
+            index += 1
+            continue
+        if item in flag_options:
+            index += 1
+            continue
+        if item.startswith("-"):
+            return None
+        return index
+    return None
+
+
+def _git_remote_read_only(argv: Sequence[str], index: int) -> bool:
+    arguments = list(argv[index + 1 :])
+    if arguments in ([], ["-v"], ["--verbose"]):
+        return True
+    if not arguments or arguments[0] != "get-url":
+        return False
+    remainder = arguments[1:]
+    flags = {"--all", "--push"}
+    names = [item for item in remainder if item not in flags]
+    return len(names) == 1 and all(
+        item in flags or re.fullmatch(r"[A-Za-z0-9_.-]+", item) is not None
+        for item in remainder
+    )
+
+
 def _git_read_only(argv: Sequence[str]) -> bool:
-    subcommand = _git_subcommand(argv)
+    index = _git_subcommand_index(argv)
+    if index is None:
+        return False
+    subcommand = argv[index]
     safe = {
         "--help",
         "--version",
@@ -343,7 +402,11 @@ def _git_read_only(argv: Sequence[str]) -> bool:
         "shortlog",
         "blame",
     }
-    return subcommand in safe
+    if subcommand in safe:
+        return True
+    if subcommand == "remote":
+        return _git_remote_read_only(argv, index)
+    return False
 
 
 def _rg_read_only(argv: Sequence[str]) -> bool:
@@ -355,7 +418,10 @@ _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 
 
 def _shell_argv(command: str) -> list[str] | None:
-    if _has_shell_metacharacters(command):
+    pipelines, failure = _split_read_only_shell(command)
+    if failure is not None or pipelines is None:
+        return None
+    if len(pipelines) != 1 or len(pipelines[0]) != 1:
         return None
     try:
         argv = shlex.split(command, posix=True)
@@ -478,12 +544,62 @@ def _configured_test_feedback_prefixes(root: Path) -> tuple[tuple[str, ...], ...
     return tuple(result)
 
 
+def _compile_feedback_shell(root: Path, command: str) -> bool:
+    pipelines, failure = _split_read_only_shell(command)
+    if failure is not None or pipelines is None:
+        return False
+    if len(pipelines) != 1 or len(pipelines[0]) != 1:
+        return False
+    try:
+        raw = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    assignments: dict[str, str] = {}
+    while raw and _ENV_ASSIGNMENT.match(raw[0]):
+        key, value = raw.pop(0).split("=", 1)
+        assignments[key] = value
+    if assignments != {"PYTHONDONTWRITEBYTECODE": "1"}:
+        return False
+    if len(raw) < 4:
+        return False
+    executable = posixpath.basename(raw[0]).casefold()
+    if executable not in {
+        "python",
+        "python3",
+        "python3.10",
+        "python3.11",
+        "python3.12",
+        "python3.13",
+    }:
+        return False
+    if raw[1:3] != ["-m", "py_compile"]:
+        return False
+    paths = raw[3:]
+    if not paths or any(item.startswith("-") for item in paths):
+        return False
+    for item in paths:
+        candidate = (
+            (root / item).resolve()
+            if not Path(item).is_absolute()
+            else Path(item).resolve()
+        )
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return False
+        if not candidate.is_file() or candidate.suffix not in {".py", ".pyi"}:
+            return False
+    return True
+
+
 def _test_feedback_shell(root: Path, command: str) -> bool:
     argv = _shell_argv(command)
     if argv is None or not argv:
         return False
     if _authoritative_acceptance_shell(root, command):
         return False
+    if _compile_feedback_shell(root, command):
+        return True
     pytest_args = _pytest_arguments(argv)
     if pytest_args is not None:
         return _targeted_pytest(argv)

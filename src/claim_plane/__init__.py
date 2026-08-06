@@ -317,7 +317,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.1"
+__version__ = "0.37.5"
 
 __all__ = [
     "VALIDATION_ACCEPTANCE_TIMEOUTS",

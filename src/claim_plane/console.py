@@ -382,6 +382,7 @@ class ConsoleRenderer:
                 )
             )
 
+        acceptance_deferred = bool(completion_map.get("acceptance_deferred"))
         acceptance_passed = bool(acceptance_map.get("passed"))
         commands = acceptance_map.get("commands")
         command_list = [str(item) for item in commands or () if isinstance(item, str)]
@@ -416,6 +417,13 @@ class ConsoleRenderer:
                     state="passed",
                     dedupe_key="verification:authority:cancelled",
                 )
+        elif acceptance_deferred:
+            self.step(
+                "Acceptance delegated",
+                detail="outer validation runner will execute the single authoritative check",
+                state="active",
+                dedupe_key="verification:acceptance",
+            )
         else:
             classification = str(acceptance_map.get("classification") or "")
             log_dir = str(acceptance_map.get("log_dir") or "")
@@ -542,10 +550,12 @@ class ConsoleRenderer:
         }.get(outcome, "1")
         self._write()
         self._write("─" * self.width)
-        delivery = self._paint(
-            f"DELIVERY {outcome.replace('_', ' ')}",
-            outcome_colour,
+        delivery_label = (
+            "DELIVERY AWAITING EXTERNAL ACCEPTANCE"
+            if acceptance_deferred
+            else f"DELIVERY {outcome.replace('_', ' ')}"
         )
+        delivery = self._paint(delivery_label, outcome_colour)
         self._write(delivery)
         summary_parts = [
             f"{changed_files} file{'s' if changed_files != 1 else ''} changed",
@@ -554,8 +564,13 @@ class ConsoleRenderer:
         deletions = int(changes_map.get("total_deletions") or 0)
         if additions or deletions:
             summary_parts.append(f"+{additions} -{deletions}")
-        acceptance_suffix = "s" if len(command_list) != 1 else ""
-        summary_parts.append(f"{len(command_list)} acceptance check{acceptance_suffix}")
+        if acceptance_deferred:
+            summary_parts.append("acceptance delegated")
+        else:
+            acceptance_suffix = "s" if len(command_list) != 1 else ""
+            summary_parts.append(
+                f"{len(command_list)} acceptance check{acceptance_suffix}"
+            )
         if duration:
             summary_parts.append(duration)
         self._write(" · ".join(summary_parts))

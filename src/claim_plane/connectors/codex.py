@@ -1936,6 +1936,7 @@ def verify_codex_completion(
     *,
     session_id: str,
     acceptance_timeout: int = CODEX_COMPLETION_ACCEPTANCE_TIMEOUT,
+    run_acceptance: bool = True,
 ) -> dict[str, Any]:
     """Verify one active Codex task and complete its intent only on clean evidence."""
 
@@ -1953,7 +1954,7 @@ def verify_codex_completion(
     result = verify_completion(
         root,
         intent_id=intent_id,
-        run_acceptance=True,
+        run_acceptance=run_acceptance,
         acceptance_timeout=acceptance_timeout,
         connector_control_baseline=(
             dict(session.get("connector_control_fingerprints") or {})
@@ -1994,9 +1995,12 @@ def verify_codex_completion(
     session["completion_attempts"] = int(session.get("completion_attempts") or 0) + 1
     session["completion"] = result
     session["last_completion_at"] = now
-    session["task_state"] = (
-        "verified" if result.get("verified") else "verification_failed"
-    )
+    if result.get("verified"):
+        session["task_state"] = "verified"
+    elif result.get("acceptance_deferred") and result.get("authority_verified"):
+        session["task_state"] = "acceptance_deferred"
+    else:
+        session["task_state"] = "verification_failed"
     if result.get("verified"):
         session.pop("pending_scope_amendment", None)
     _write_session(root, session)

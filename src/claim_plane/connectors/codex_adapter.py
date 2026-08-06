@@ -777,6 +777,7 @@ class CodexAdapter:
                 root,
                 session_id=session_id,
                 acceptance_timeout=timeout,
+                run_acceptance=bool(request.payload.get("run_acceptance", True)),
             )
 
         return self._perform(

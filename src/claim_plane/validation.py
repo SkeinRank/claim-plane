@@ -59,6 +59,13 @@ from claim_plane.oss_pilot import (
 from claim_plane.connectors import build_adapter_registry, connect_codex
 from claim_plane.project import init_project, set_adapter_enabled
 from claim_plane.runtime_progress import ProgressReporter, periodic_heartbeat
+from claim_plane.validation_environment import (
+    activate_task_environment,
+    codex_environment_config_overrides,
+    environment_marker_paths,
+    preflight_task_environment,
+    prepare_task_environment,
+)
 
 VALIDATION_STATE_PROTOCOL = "claim-plane.single-agent-validation.v1"
 VALIDATION_SELECTION_PROTOCOL = "claim-plane.single-agent-validation-selection.v1"
@@ -575,6 +582,8 @@ def initialize_validation(
             "plan": "plan.json",
             "results": "results",
             "workspaces": "workspaces",
+            "environments": "environments",
+            "cache": "cache",
         },
     }
     state = {**state_unsigned, "digest": _digest(state_unsigned)}
@@ -586,6 +595,8 @@ def initialize_validation(
     _write_json(_state_path(resolved), state)
     (resolved / "results").mkdir(exist_ok=True)
     (resolved / "workspaces").mkdir(exist_ok=True)
+    (resolved / "environments").mkdir(exist_ok=True)
+    (resolved / "cache" / "uv").mkdir(parents=True, exist_ok=True)
     return {
         **state,
         "task_count": len(selected),
@@ -723,6 +734,8 @@ def validation_status(root: str | Path = VALIDATION_DEFAULT_ROOT) -> dict[str, A
         "arms": by_arm,
         "next_execution": next_entry,
         "active_execution": active,
+        "prepared_environment_count": len(environment_marker_paths(resolved)),
+        "environment_cache": str(resolved / "cache" / "uv"),
     }
 
 
@@ -760,6 +773,129 @@ def _task_metadata(selection: Mapping[str, Any], task_id: str) -> dict[str, Any]
         if isinstance(item, Mapping) and item.get("task_id") == task_id:
             return dict(item)
     raise ValidationError(f"task metadata is missing: {task_id}")
+
+
+def _task_with_source_paths(
+    task: Mapping[str, Any], state: Mapping[str, Any]
+) -> dict[str, Any]:
+    source_root = Path(str(state["source_root"]))
+    source_ref = str(task["source_ref"])
+    feature_dir = source_root / source_ref
+    return {
+        **dict(task),
+        "task_dir": str(feature_dir.parent),
+        "feature_dir": str(feature_dir),
+    }
+
+
+def prepare_validation_environment(
+    execution_id: str,
+    *,
+    root: str | Path = VALIDATION_DEFAULT_ROOT,
+    force: bool = False,
+    progress: Callable[[str], None] | None = None,
+    stream_output: bool = True,
+) -> dict[str, Any]:
+    """Prepare or reuse the task-level development environment for one cell."""
+
+    resolved = validation_root(root)
+    state, _, plan = _load_assets(resolved)
+    entry = _entry(plan, execution_id)
+    task = _task_metadata(_selection(resolved, state), entry.task_id)
+    return prepare_task_environment(
+        validation_root=resolved,
+        task=_task_with_source_paths(task, state),
+        source_revision=str(state["source_revision"]),
+        force=force,
+        progress=progress,
+        stream_output=stream_output,
+    )
+
+
+def prefetch_validation_environments(
+    execution_ids: Sequence[str],
+    *,
+    root: str | Path = VALIDATION_DEFAULT_ROOT,
+    force: bool = False,
+    progress: Callable[[str], None] | None = None,
+    stream_output: bool = True,
+) -> tuple[dict[str, Any], ...]:
+    """Prepare unique task environments without opening Codex."""
+
+    resolved = validation_root(root)
+    _, _, plan = _load_assets(resolved)
+    selected = [_entry(plan, execution_id) for execution_id in execution_ids]
+    first_by_task: dict[str, DogfoodPlanEntry] = {}
+    for entry in selected:
+        first_by_task.setdefault(entry.task_id, entry)
+    prepared: list[dict[str, Any]] = []
+    for index, entry in enumerate(first_by_task.values(), start=1):
+        if progress is not None:
+            progress(f"Environment {index}/{len(first_by_task)} · {entry.task_id}")
+        prepared.append(
+            prepare_validation_environment(
+                entry.execution_id,
+                root=resolved,
+                force=force,
+                progress=progress,
+                stream_output=stream_output,
+            )
+        )
+    return tuple(prepared)
+
+
+def prefetch_all_validation_environments(
+    *,
+    root: str | Path = VALIDATION_DEFAULT_ROOT,
+    force: bool = False,
+    progress: Callable[[str], None] | None = None,
+    stream_output: bool = True,
+) -> tuple[dict[str, Any], ...]:
+    """Prepare one reusable environment for every unique frozen task."""
+
+    resolved = validation_root(root)
+    _, _, plan = _load_assets(resolved)
+    return prefetch_validation_environments(
+        [entry.execution_id for entry in plan.entries],
+        root=resolved,
+        force=force,
+        progress=progress,
+        stream_output=stream_output,
+    )
+
+
+def reset_validation_task(
+    task_id: str,
+    *,
+    root: str | Path = VALIDATION_DEFAULT_ROOT,
+) -> dict[str, Any]:
+    """Remove diagnostic results and workspaces for one task across all arms."""
+
+    resolved = validation_root(root)
+    _, _, plan = _load_assets(resolved)
+    entries = [entry for entry in plan.entries if entry.task_id == task_id]
+    if not entries:
+        raise ValidationError(f"validation task is not in the frozen plan: {task_id}")
+    removed_results = 0
+    removed_workspaces = 0
+    for entry in entries:
+        result_path = resolved / "results" / f"{entry.execution_id}.json"
+        if result_path.exists():
+            result_path.unlink()
+            removed_results += 1
+        workspace = validation_workspace(resolved, entry.execution_id)
+        if workspace.exists():
+            shutil.rmtree(workspace)
+            removed_workspaces += 1
+    for name in ("summary.json", "summary.md", "gate.json"):
+        (resolved / name).unlink(missing_ok=True)
+    return {
+        "task_id": task_id,
+        "execution_ids": [entry.execution_id for entry in entries],
+        "removed_results": removed_results,
+        "removed_workspaces": removed_workspaces,
+        "environment_preserved": True,
+    }
 
 
 def validation_workspace(root: Path, execution_id: str) -> Path:
@@ -1092,6 +1228,7 @@ def _run_acceptance_for_execution(
         progress=reporter.emit if progress_enabled else None,
         stream_output=progress_enabled,
         heartbeat_seconds=VALIDATION_HEARTBEAT_SECONDS,
+        cache_dir=resolved / "cache" / "uv",
     )
     acceptance_elapsed = time.monotonic() - acceptance_started
     acceptance = latest_oss_pilot_reverification(workspace) or {}
@@ -1255,6 +1392,7 @@ def run_validation_execution(
         model=model or str(state["model"]),
         session_timeout=session_timeout,
         acceptance_timeout=timeout,
+        defer_acceptance=selected.arm is not DogfoodArm.BARE_CODEX,
     )
     position = next(
         index
@@ -1273,6 +1411,9 @@ def run_validation_execution(
         "position": position,
         "execution_count": len(plan.entries),
         "acceptance_timeout_seconds": timeout,
+        "development_environment": "shared-per-task",
+        "authoritative_acceptance_runs": 1,
+        "internal_acceptance_deferred": (selected.arm is not DogfoodArm.BARE_CODEX),
     }
     if dry_run:
         return payload
@@ -1283,6 +1424,52 @@ def run_validation_execution(
         f"Current cell {position}/{len(plan.entries)} · "
         f"{selected.task_id} · {selected.arm.value}"
     )
+    reporter.emit("Preparing identical targeted-test environment")
+    environment = prepare_validation_environment(
+        selected.execution_id,
+        root=resolved,
+        progress=reporter.emit if progress else None,
+        stream_output=progress,
+    )
+    execution_env = activate_task_environment(
+        environment,
+        workspace=workspace,
+        progress=reporter.emit if progress else None,
+    )
+    preflight = preflight_task_environment(
+        environment,
+        workspace=workspace,
+        env=execution_env,
+    )
+    codex_config = codex_environment_config_overrides(execution_env)
+    command = oss_pilot_command(
+        manifest,
+        model=model or str(state["model"]),
+        session_timeout=session_timeout,
+        acceptance_timeout=timeout,
+        defer_acceptance=selected.arm is not DogfoodArm.BARE_CODEX,
+        codex_config=codex_config,
+    )
+    payload["command"] = list(command)
+    payload["command_shell"] = shlex.join(command)
+    cache_label = "hit" if environment.get("cache_hit") else "prepared"
+    reporter.emit(f"Development environment ready · {cache_label}")
+    reporter.emit(f"Python pinned for Codex · {preflight['python']}")
+    ready_modules = ["pytest"] if preflight.get("pytest_available") else []
+    ready_modules.extend(
+        str(item) for item in preflight.get("test_modules_available") or ()
+    )
+    if ready_modules:
+        reporter.emit("Targeted-test imports ready · " + ", ".join(ready_modules))
+    payload["environment"] = {
+        "identity_digest": environment["identity_digest"],
+        "cache_hit": bool(environment.get("cache_hit")),
+        "python": environment["python"],
+        "cache_dir": environment["cache_dir"],
+        "codex_shell_injected": True,
+        "codex_config_overrides": len(codex_config),
+        "preflight": preflight,
+    }
     started_iso = _utc_now()
     started = time.monotonic()
     metadata = {
@@ -1294,10 +1481,17 @@ def run_validation_execution(
         "acceptance_timeout_seconds": timeout,
         "position": position,
         "execution_count": len(plan.entries),
+        "environment_identity_digest": environment["identity_digest"],
+        "environment_cache_hit": bool(environment.get("cache_hit")),
+        "environment_python": str(preflight["python"]),
+        "codex_shell_environment_injected": True,
+        "internal_acceptance_deferred": (selected.arm is not DogfoodArm.BARE_CODEX),
     }
     _store_execution_metadata(workspace, metadata)
     try:
-        completed = subprocess.run(command, cwd=str(workspace), check=False)
+        completed = subprocess.run(
+            command, cwd=str(workspace), check=False, env=execution_env
+        )
         runtime_returncode = completed.returncode
     except KeyboardInterrupt:
         elapsed = time.monotonic() - started

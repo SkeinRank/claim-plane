@@ -767,7 +767,14 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
         str(item) for item in commands or () if isinstance(item, str) and item.strip()
     ]
     result_items: list[dict[str, Any]] = []
-    classification = "PASS" if completion.get("acceptance_passed") else "COMMAND_FAILED"
+    acceptance_deferred = bool(completion.get("acceptance_deferred"))
+    classification = (
+        "DEFERRED"
+        if acceptance_deferred
+        else "PASS"
+        if completion.get("acceptance_passed")
+        else "COMMAND_FAILED"
+    )
     log_dir: str | None = None
     for raw in completion.get("acceptance_results") or ():
         if not isinstance(raw, Mapping):
@@ -797,6 +804,8 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
         "protocol": "claim-plane.acceptance-summary.v1",
         "commands": safe_commands,
         "command_count": len(safe_commands),
+        "executed": bool(completion.get("acceptance_executed")),
+        "deferred": acceptance_deferred,
         "passed": bool(completion.get("acceptance_passed")),
         "classification": classification,
         "log_dir": log_dir,
@@ -1295,7 +1304,10 @@ def _completion_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "protocol": payload.get("protocol"),
         "verified": bool(payload.get("verified")),
+        "authority_verified": bool(payload.get("authority_verified")),
+        "acceptance_deferred": bool(payload.get("acceptance_deferred")),
         "changed_files": changed_files,
+        "acceptance_executed": bool(payload.get("acceptance_executed")),
         "acceptance_passed": bool(payload.get("acceptance_passed")),
         "acceptance_duration_ms": int(payload.get("acceptance_duration_ms") or 0),
         "errors": int(payload.get("errors") or 0),
@@ -1777,6 +1789,7 @@ def run_interactive_codex(
     initial_scope: tuple[str, ...] = (),
     lock_scope: bool = False,
     codex_args: tuple[str, ...] = (),
+    defer_acceptance: bool = False,
     stdout: TextIO,
     stderr: TextIO,
     require_tty: bool = True,
@@ -1941,7 +1954,10 @@ def run_interactive_codex(
                         intent_id=intent_id,
                         intent_version=intent_version,
                         timeout_seconds=acceptance_timeout,
-                        payload={"source": "interactive_codex_final_verifier"},
+                        payload={
+                            "source": "interactive_codex_final_verifier",
+                            "run_acceptance": not defer_acceptance,
+                        },
                     )
                 )
                 completion_payload = dict(response.payload)
@@ -2105,7 +2121,13 @@ def run_interactive_codex(
         started_at=started_at,
         finished_at=_utc_now(),
         outcome=outcome,
-        exit_code=_exit_code(outcome),
+        exit_code=(
+            int(ExitCode.OK)
+            if defer_acceptance
+            and completion.get("authority_verified") is True
+            and int(completion.get("errors") or 0) == 0
+            else _exit_code(outcome)
+        ),
         runtime_returncode=runtime_returncode,
         task_sha256=task_sha256,
         task_length=(
@@ -2132,6 +2154,7 @@ def run_interactive_codex(
             "model_override": model,
             "interactive": True,
             "launcher": "codex_tui",
+            "acceptance_deferred": defer_acceptance,
             "inspection": _inspection_summary(adapter_status),
         },
         completion=completion,

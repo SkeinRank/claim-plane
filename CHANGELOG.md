@@ -8,6 +8,62 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.5] — 2026-08-06
+
+### Fixed
+
+- remove inherited `__PYVENV_LAUNCHER__`, `PYTHONEXECUTABLE`, and `PYTHONHOME` from dependency bootstrap, editable binding, preflight, and Codex execution environments so macOS/pyenv parent launchers cannot redirect the prepared interpreter away from its task packages;
+- verify `sys.prefix` against the prepared virtual environment and import pytest during preflight instead of relying only on module discovery;
+- pin prepared site-packages into the one-run Codex `PYTHONPATH` while keeping the candidate workspace source first;
+- keep task-environment integrity stable when the frozen seed package is replaced by an editable arm workspace, preventing unnecessary environment rebuilds between Bare, Observe, and Guarded.
+
+### Added
+
+- record the prepared Python prefix, site-package roots, and pytest availability in the environment manifest;
+- add regression coverage for poisoned parent Python launcher variables and exact virtual-environment prefix verification.
+
+## [0.37.4] — 2026-08-06
+
+### Fixed
+
+- pin the prepared task virtual environment inside Codex shell tools with one-run `shell_environment_policy` overrides instead of relying only on the TUI parent process environment;
+- disable login-shell profile rewriting for comparative sessions so `python`, `pytest`, and project commands resolve through the task environment in Bare, Observe, and Guarded;
+- fail before opening Codex when the prepared Python, `VIRTUAL_ENV`, pytest, top-level test imports, or editable project import cannot be verified.
+
+### Added
+
+- report the exact Python executable and available targeted-test imports before every comparative Codex session;
+- add `claim-plane codex --codex-config` for bounded one-run Codex configuration forwarding without modifying user `config.toml`;
+- add focused regression coverage for shell-environment injection, command forwarding, and missing dependency detection.
+
+## [0.37.3] — 2026-08-06
+
+### Fixed
+
+- make comparative environment prefetch pass a valid non-empty feature patch to frozen evaluators, including tasks whose feature patch is intentionally absent during dependency bootstrap;
+- cover the exact `git apply` regression that previously failed with `No valid patches in input`.
+
+## [0.37.2] — 2026-08-06
+
+### Added
+
+- Add `claim-plane validation prefetch` to prepare one reusable task-level development environment from the dependency prefix of the frozen evaluator without executing official tests.
+- Share the same virtual environment and UV download cache across Bare Codex, Claim Plane Observe, and Claim Plane Guarded, while rebinding editable candidate source for each arm.
+- Add `claim-plane validation reset-task` to remove all diagnostic cells for one frozen task while preserving its dependency cache for a fidelity-matched repeat.
+- Report prepared environment count, cache location, cache hits, and current environment identity in comparative runtime metadata.
+- Add `scripts/check-comparative-runtime-fidelity.sh` and focused regression coverage for environment reuse, acceptance delegation, task reset, and real-world inspection commands.
+
+### Fixed
+
+- Defer internal final acceptance for Observe and Guarded validation cells so the frozen external evaluator is the single authoritative acceptance run for every arm.
+- Make project dependencies available during the Codex development loop so targeted tests can provide repair feedback before final acceptance.
+- Admit bounded quoted `rg` and `grep` patterns, `git remote -v`, `git remote get-url`, read-only Codex web tools, and bytecode-free `py_compile` feedback without broadening arbitrary shell authority.
+- Prevent dependency-prefetch boundary detection from confusing `uv pip install pytest` with actual test execution.
+
+### Changed
+
+- Mark comparative results created before the matched-environment contract as diagnostic evidence that should be reset and repeated before publication.
+
 ## [0.37.1] — 2026-08-05
 
 ### Added

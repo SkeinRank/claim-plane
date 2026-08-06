@@ -1,6 +1,6 @@
 # Comparative single-agent validation
 
-Claim Plane `0.37.1` provides one reproducible workflow for comparing the same
+Claim Plane `0.37.5` provides one reproducible workflow for comparing the same
 coding task under three execution arms:
 
 ```text
@@ -27,11 +27,32 @@ claim-plane validation init \
 claim-plane validation status
 ```
 
+Prepare the next task environment before opening Codex:
+
+```bash
+claim-plane validation prefetch --next
+```
+
+Prefetch executes the frozen evaluator only through dependency setup and stops before
+the official test phase. One task-level virtual environment and one shared download
+cache are then reused by Bare, Observe, and Guarded. Each arm receives an editable
+binding to its own candidate workspace, so targeted tests exercise the current source
+without reinstalling the full dependency graph.
+The runner pins `PATH`, `VIRTUAL_ENV`, `PYTHONPATH`, and the validation runtime
+markers through temporary Codex `shell_environment_policy` overrides. Login-shell
+profile loading is disabled for the session, preventing user shell initialization from
+replacing the prepared Python. A fail-fast preflight verifies pytest, direct imports
+from `tests/conftest.py`, and the editable project import before the TUI opens.
+
 Run one missing cell at a time:
 
 ```bash
 claim-plane validation run --next
 ```
+
+Observe and Guarded use deferred internal acceptance. The comparative runner invokes
+the isolated official evaluator exactly once after Codex exits and binds that result to
+the controlled-run evidence. Bare follows the same external acceptance path.
 
 The runner prints the current cell, each phase, live evaluator output, and a heartbeat
 when a dependency installation or test process is silent. Preview acceptance is bounded
@@ -64,12 +85,22 @@ bind measured result to immutable plan cell
 show the next missing execution
 ```
 
-The operator can prepare or collect a specific cell explicitly:
+The operator can prepare, prefetch, or collect a specific cell explicitly:
 
 ```bash
 claim-plane validation prepare <execution-id>
+claim-plane validation prefetch <execution-id>
 claim-plane validation collect <execution-id>
 ```
+
+When diagnostic executions were produced under an older runtime contract, remove all
+three arms for that task and repeat them under the matched environment:
+
+```bash
+claim-plane validation reset-task <task-id>
+```
+
+The dependency environment is intentionally preserved by `reset-task`.
 
 ## Reporting
 
