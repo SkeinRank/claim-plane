@@ -371,3 +371,85 @@ def test_acceptance_summary_surfaces_pilot_classification(tmp_path: Path) -> Non
     assert summary["classification"] == "TEST_FAILED"
     assert summary["log_dir"].endswith("attempt-1")
     assert summary["results"][0]["detail"] == "official tests failed"
+
+
+def _configure_pytest_witness_fixture(
+    source: Path, *, skipped: bool
+) -> tuple[Path, Path]:
+    task = source / "dataset" / "pallets_jinja_task" / "task1621"
+    feature = task / "feature1"
+    test_body = (
+        "import pytest\n\n"
+        "@pytest.mark.skip(reason='optional dependency missing')\n"
+        "def test_private_value():\n    assert False\n"
+        if skipped
+        else (
+            "from src.value import VALUE\n\n"
+            "def test_private_value():\n    assert VALUE == 2\n"
+        )
+    )
+    lines = test_body.splitlines()
+    patch = (
+        "diff --git a/tests/test_private_value.py b/tests/test_private_value.py\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/tests/test_private_value.py\n"
+        f"@@ -0,0 +1,{len(lines)} @@\n" + "".join(f"+{line}\n" for line in lines)
+    )
+    (feature / "tests.patch").write_text(patch, encoding="utf-8")
+    runner = task / "run_tests.sh"
+    runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        'REPO_PATH="$1"\n'
+        'TEST_PATCH="$2"\n'
+        'cd "$REPO_PATH"\n'
+        'git apply "$TEST_PATCH"\n'
+        'echo "RUNNING_TESTS..."\n'
+        "python -m pytest tests/test_private_value.py -q\n"
+        'echo "TEST_EXECUTION_COMPLETED"\n',
+        encoding="utf-8",
+    )
+    runner.chmod(0o755)
+    return runner, feature / "tests.patch"
+
+
+def test_acceptance_requires_hidden_pytest_witness(tmp_path: Path) -> None:
+    repo = tmp_path / "repo-witness-pass"
+    base = _init_repo(repo)
+    source = _cooperbench_fixture(tmp_path, repo, base)
+    runner, tests_patch = _configure_pytest_witness_fixture(source, skipped=False)
+    _write_manifest(repo, source, base)
+    (repo / "src" / "value.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    assert (
+        oss_pilot.run_oss_pilot_acceptance(
+            repo, runner_path=runner, tests_patch_path=tests_patch
+        )
+        == 0
+    )
+    latest = oss_pilot.latest_oss_pilot_reverification(repo)
+    assert latest is not None
+    assert latest["classification"] == "PASS"
+    assert latest["acceptance_witness"]["state"] == "VERIFIED"
+    assert latest["acceptance_witness"]["passed"] == 1
+
+
+def test_acceptance_rejects_skipped_hidden_pytest_test(tmp_path: Path) -> None:
+    repo = tmp_path / "repo-witness-skip"
+    base = _init_repo(repo)
+    source = _cooperbench_fixture(tmp_path, repo, base)
+    runner, tests_patch = _configure_pytest_witness_fixture(source, skipped=True)
+    _write_manifest(repo, source, base)
+
+    assert (
+        oss_pilot.run_oss_pilot_acceptance(
+            repo, runner_path=runner, tests_patch_path=tests_patch
+        )
+        == oss_pilot.OSS_PILOT_ACCEPTANCE_EXIT_CODES["EVALUATOR_INCOMPLETE"]
+    )
+    latest = oss_pilot.latest_oss_pilot_reverification(repo)
+    assert latest is not None
+    assert latest["classification"] == "EVALUATOR_INCOMPLETE"
+    assert latest["acceptance_witness"]["state"] == "INCOMPLETE"
+    assert latest["acceptance_witness"]["skipped"] == 1

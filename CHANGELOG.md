@@ -8,6 +8,27 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.9] — 2026-08-06
+
+### Fixed
+
+- install explicit optional acceptance dependencies from the external pytest plugin before repository `conftest.py` files are imported, so projects that cache dependency availability during test configuration observe the prepared runtime correctly;
+- verify the optional module with a real import after installation and retain fail-closed witness evidence when installation or import still fails;
+- identify automatic acceptance retries with an explicit preserved-candidate banner, including task, arm, and execution ID, before the evaluator starts.
+
+## [0.37.8] — 2026-08-06
+
+### Added
+
+- bind private Python acceptance tests to exact pytest node IDs and record collection, execution, pass, failure, and skip evidence in every OSS re-verification result;
+- install explicit task-relevant optional test dependencies, including Pillow for `require_pil`, into the shared development environment and the isolated evaluator runtime;
+- preserve fail-closed witness evidence in comparative validation bundles and resumable acceptance records.
+
+### Fixed
+
+- classify zero-exit evaluators with skipped, uncollected, unexecuted, or unwitnessed hidden tests as `EVALUATOR_INCOMPLETE` instead of `PASS`;
+- prevent incomplete evaluator runs from being counted as completed dogfood measurements.
+
 ## [0.37.7] — 2026-08-06
 
 ### Fixed

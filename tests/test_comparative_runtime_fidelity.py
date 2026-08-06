@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from claim_plane import validation
+from claim_plane import validation, validation_environment
 from claim_plane.connectors.codex_guard import classify_tool_call
 from claim_plane.dogfood import DogfoodArm, load_dogfood_plan
 from claim_plane.oss_pilot import oss_pilot_command
@@ -182,6 +182,76 @@ exit 91
     prepared_repo = Path(prepared["repository"])
     assert not (prepared_repo / ".claim-plane-feature-marker").exists()
     assert not (prepared_repo / ".claim-plane-evaluator-marker").exists()
+
+
+def test_task_environment_installs_private_optional_test_prerequisites(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo, base = _repo(tmp_path / "repo")
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    runner = task_dir / "run_tests.sh"
+    runner.write_text(
+        """#!/usr/bin/env bash
+set -e
+REPO_PATH="$1"
+cd "$REPO_PATH"
+python -m venv .venv
+echo RUNNING_TESTS...
+exit 91
+""",
+        encoding="utf-8",
+    )
+    runner.chmod(0o755)
+    feature_dir = task_dir / "feature1"
+    feature_dir.mkdir()
+    (feature_dir / "tests.patch").write_text(
+        """diff --git a/tests/test_image.py b/tests/test_image.py
+--- a/tests/test_image.py
++++ b/tests/test_image.py
+@@ -1,0 +2,2 @@
++@require_pil
++def test_image_crop_margin(): ...
+""",
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_install(python_path, dependencies, *, cache_dir=None):
+        captured["python"] = python_path
+        captured["dependencies"] = tuple(dependencies)
+        captured["cache_dir"] = cache_dir
+        return ({"package": "Pillow", "module": "PIL", "installed": True},)
+
+    monkeypatch.setattr(
+        validation_environment,
+        "install_optional_test_dependencies",
+        fake_install,
+    )
+    task = {
+        "task_id": "pillow-prerequisite",
+        "clone_url": f"file://{repo}",
+        "base_commit": base,
+        "task_dir": str(task_dir),
+        "feature_dir": str(feature_dir),
+    }
+
+    prepared = prepare_task_environment(
+        validation_root=tmp_path / "validation",
+        task=task,
+        source_revision="fixture-revision",
+        stream_output=False,
+    )
+
+    assert captured["dependencies"] == (
+        {"marker": "require_pil", "package": "Pillow", "module": "PIL"},
+    )
+    assert prepared["optional_test_dependencies"] == [
+        {"marker": "require_pil", "package": "Pillow", "module": "PIL"}
+    ]
+    assert prepared["optional_dependency_results"] == [
+        {"package": "Pillow", "module": "PIL", "installed": True}
+    ]
 
 
 def test_task_environment_is_reused_and_activated_for_each_arm(tmp_path: Path) -> None:

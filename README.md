@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.6.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.9.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -118,7 +118,7 @@ candidate verdict, including `VERIFIED_AFTER_RECHECK`.
 
 ## Comparative single-agent validation
 
-Version `0.37.6` turns the frozen OSS pilot and dogfood contracts into one
+Version `0.37.9` turns the frozen OSS pilot and dogfood contracts into one
 operator workflow for fidelity-matched Bare Codex, Claim Plane Observe, and Claim
 Plane Guarded executions. The preview profile freezes 12 feature-level tasks across at
 least six repository families and expands them into a 36-cell matrix. The release
@@ -146,6 +146,11 @@ the editable candidate import. Prepared site-packages are pinned into the one-ru
 `PYTHONPATH`, which keeps macOS framework and pyenv launchers from selecting the parent
 interpreter's package set.
 
+Private pytest acceptance installs explicit evaluator-only prerequisites before the
+repository's initial `conftest.py` imports, then witnesses exact hidden node execution.
+Skipped or stale dependency-gated tests remain `EVALUATOR_INCOMPLETE`; preserved
+candidates can be resumed without rerunning Codex.
+
 The comparative runner keeps frozen evaluator programs and hidden acceptance inputs in
 a private persistent vault outside the workspace tree. Agent-visible manifests contain
 only public task identity, while Codex web search and shell networking are disabled for
@@ -153,6 +158,13 @@ the cell. Newly written session and run records are audited after Codex exits; d
 reference-artifact access records the cell as `CONTAMINATED` and skips official
 acceptance. The agent-facing acceptance command resolves `python` from the prepared
 environment rather than embedding an absolute host interpreter.
+
+Official Python acceptance is also witness-bound. Claim Plane derives the private pytest
+node IDs added or modified by the frozen test input and requires every node to be
+collected, executed, and passed. A skipped test, an uncollected node, a missing pytest
+session, or an optional dependency that cannot be installed produces
+`EVALUATOR_INCOMPLETE`, never `PASS`. The compact witness summary is sealed into the
+re-verification evidence and exported with the validation bundle.
 Candidate workspaces and shared development environments are stored outside the matrix
 directory, so a session cannot discover previous-arm candidates by traversing its
 ordinary parent directories.

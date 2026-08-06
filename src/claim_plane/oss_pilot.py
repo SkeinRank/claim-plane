@@ -22,6 +22,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from claim_plane.acceptance_witness import (
+    assess_acceptance_witness,
+    build_acceptance_witness_spec,
+    prepare_pytest_witness_environment,
+)
 from claim_plane.connectors import build_adapter_registry, connect_codex
 from claim_plane.project import (
     PROJECT_CONFIG_PATH,
@@ -50,6 +55,7 @@ OSS_PILOT_ACCEPTANCE_EXIT_CODES = {
     "WORKSPACE_SAFETY_FAILED": 73,
     "EVALUATOR_ERROR": 74,
     "CONTAMINATED": 75,
+    "EVALUATOR_INCOMPLETE": 76,
     "TIMEOUT": 124,
     "INTERRUPTED": 130,
 }
@@ -710,6 +716,7 @@ def _finish_oss_pilot_acceptance(
     stderr: str = "",
     detail: str = "",
     emit_logs: bool = True,
+    acceptance_witness: Mapping[str, Any] | None = None,
 ) -> int:
     manifest = load_oss_pilot_manifest(root)
     candidate = _candidate_identity(root, manifest)
@@ -731,6 +738,9 @@ def _finish_oss_pilot_acceptance(
         "stderr_log": f"{relative_dir}/stderr.log",
         "stdout_sha256": hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
         "stderr_sha256": hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
+        "acceptance_witness": (
+            dict(acceptance_witness) if acceptance_witness is not None else None
+        ),
     }
     result = {**unsigned, "evidence_digest": _sha256(unsigned)}
     (artifact_dir / "result.json").write_text(
@@ -981,6 +991,12 @@ def run_oss_pilot_acceptance(
                 detail="the official tests patch does not apply to the frozen base",
             )
 
+        witness_spec = build_acceptance_witness_spec(
+            base_root=root,
+            official_tree=official_tree,
+            tests_patch=tests_patch,
+        )
+
         if patch:
             patch_path = temp_parent / "candidate.diff"
             patch_path.write_text(patch, encoding="utf-8")
@@ -1034,7 +1050,13 @@ def run_oss_pilot_acceptance(
 
         runner_patch = temp_parent / "runner-input.patch"
         _runner_input_patch(runner_patch)
-        env = os.environ.copy()
+        witness_path = temp_parent / "acceptance-witness.json"
+        env = prepare_pytest_witness_environment(
+            plugin_dir=temp_parent / "pytest-witness-plugin",
+            witness_path=witness_path,
+            spec=witness_spec,
+            source_env=os.environ,
+        )
         env.pop("UV_SYSTEM_PYTHON", None)
         if cache_dir is not None:
             resolved_cache = Path(cache_dir).expanduser().resolve()
@@ -1125,15 +1147,35 @@ def run_oss_pilot_acceptance(
 
         stdout = "".join(preparation_stdout) + completed_stdout
         stderr = "".join(preparation_stderr) + completed_stderr
-        if completed_returncode == 0:
+        witness = assess_acceptance_witness(witness_spec, witness_path)
+        witness_state = str(witness.get("state") or "INCOMPLETE")
+        if witness_state == "INCOMPLETE":
+            details = witness.get("details") or ()
+            detail = "private acceptance tests were not fully witnessed"
+            if details:
+                detail += ": " + json.dumps(details, ensure_ascii=False)[:1000]
+            return _finish_oss_pilot_acceptance(
+                root,
+                classification="EVALUATOR_INCOMPLETE",
+                returncode=OSS_PILOT_ACCEPTANCE_EXIT_CODES["EVALUATOR_INCOMPLETE"],
+                stdout=stdout,
+                stderr=stderr,
+                detail=detail,
+                emit_logs=not stream_output,
+                acceptance_witness=witness,
+            )
+        if completed_returncode == 0 and witness_state in {"VERIFIED", "NOT_REQUIRED"}:
             return _finish_oss_pilot_acceptance(
                 root,
                 classification="PASS",
                 returncode=0,
                 stdout=stdout,
                 stderr=stderr,
-                detail="official OSS task tests passed",
+                detail=(
+                    "official OSS task tests passed with complete acceptance witnesses"
+                ),
                 emit_logs=not stream_output,
+                acceptance_witness=witness,
             )
         classification, detail = _classify_runner_failure(stdout, stderr)
         return _finish_oss_pilot_acceptance(
@@ -1144,6 +1186,7 @@ def run_oss_pilot_acceptance(
             stderr=stderr,
             detail=detail,
             emit_logs=not stream_output,
+            acceptance_witness=witness,
         )
     finally:
         if progress is not None:

@@ -1,6 +1,6 @@
 # Comparative single-agent validation
 
-Claim Plane `0.37.6` provides one reproducible workflow for comparing the same
+Claim Plane `0.37.9` provides one reproducible workflow for comparing the same
 coding task under three execution arms:
 
 ```text
@@ -23,6 +23,17 @@ artifacts; official acceptance is skipped for that cell.
 Candidate workspaces and reusable development environments also live outside the
 matrix directory, preventing one arm from discovering prior candidates or immutable
 selection files through ordinary parent-directory inspection.
+
+Private Python acceptance is fail-closed. The evaluator records the exact hidden pytest
+node IDs collected and their setup/call/teardown outcomes. `PASS` requires every private
+node to execute and pass; skipped, missing, uncollected, or otherwise unwitnessed nodes
+produce `EVALUATOR_INCOMPLETE` and leave the candidate resumable. Explicit optional test
+markers such as `require_pil` are converted into identical runtime prerequisites for all
+three arms and for the isolated final evaluator.
+The external witness plugin installs those evaluator-only prerequisites during pytest's
+initial-conftest loading hook, before repository test configuration can cache dependency
+availability. Installation is followed by a real module import; a late, failed, or
+unimportable prerequisite remains fail-closed.
 
 ## Preview workflow
 

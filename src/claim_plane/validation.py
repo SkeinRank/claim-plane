@@ -1486,7 +1486,7 @@ def collect_validation_execution(
         if isinstance(acceptance, Mapping)
         else ""
     )
-    evaluation_complete = bool(classification)
+    evaluation_complete = classification in {"PASS", "TEST_FAILED", "CONTAMINATED"}
     task_success = classification == "PASS"
     base_commit = str(manifest["repository"]["base_commit"])
     changed = _changed_paths(workspace, base_commit)
@@ -1723,6 +1723,12 @@ def resume_validation_execution(
         if agent_wall_time_seconds is not None
         else float(metadata.get("agent_wall_time_seconds") or 0.0)
     )
+    if progress:
+        ProgressReporter(enabled=True, stream=sys.stderr, prefix="Validation").emit(
+            "Resuming preserved candidate · "
+            f"{selected.task_id} · {selected.arm.value} · "
+            f"{selected.execution_id}"
+        )
     return _run_acceptance_for_execution(
         selected,
         resolved=resolved,

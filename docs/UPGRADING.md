@@ -36,6 +36,46 @@ claim-plane adapters pin codex --clear
 claim-plane adapters pin codex
 ```
 
+## Pre-collection optional dependency bootstrap from 0.37.9
+
+Version `0.37.9` installs private-test optional dependencies before pytest imports the
+repository's initial `conftest.py` files. This matters for projects that cache values
+such as `PIL_AVAILABLE` during import: installing Pillow later in `pytest_configure`
+would leave those cached values stale and still skip the hidden test.
+
+Candidates preserved as `EVALUATOR_INCOMPLETE` by `0.37.8` do not need another Codex
+run. Upgrade Claim Plane and resume the existing execution:
+
+```bash
+claim-plane validation status
+claim-plane validation resume <execution-id>
+```
+
+The runner prints `Resuming preserved candidate` with the task, arm, and execution ID
+before starting external acceptance. A verified hidden test is then recorded with
+`executed: 1`, `passed: 1`, `skipped: 0`, and `state: VERIFIED`.
+
+## Fail-closed acceptance witnesses from 0.37.8
+
+Version `0.37.8` no longer accepts a zero evaluator exit code by itself. Private Python
+tests added by the frozen acceptance input must be collected, executed, and passed under
+the external pytest witness. Skipped or missing hidden tests are classified as
+`EVALUATOR_INCOMPLETE` and the candidate remains resumable.
+
+Results that reported `PASS` while task-specific tests were skipped are diagnostic only.
+Preserve the old bundle, reset that task across all three arms, and repeat it:
+
+```bash
+claim-plane validation bundle --out claim-plane-pre-witness-diagnostic.zip
+claim-plane validation reset-task <task-id>
+claim-plane validation prefetch --next
+claim-plane validation run --next
+```
+
+The environment identity now includes explicit optional test prerequisites. Affected
+environments rebuild once from the existing UV cache; unrelated validation evidence is
+left unchanged.
+
 ## Benchmark isolation from 0.37.6
 
 Version `0.37.6` moves frozen evaluator programs and hidden acceptance inputs out of

@@ -21,6 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from claim_plane.acceptance_witness import (
+    infer_optional_test_dependencies,
+    install_optional_test_dependencies,
+)
 from claim_plane.runtime_progress import run_streaming_process
 
 VALIDATION_ENVIRONMENT_PROTOCOL = "claim-plane.validation-environment.v2"
@@ -121,7 +125,11 @@ def _run_git(
 
 
 def _environment_identity(
-    *, task: Mapping[str, Any], runner: Path, source_revision: str
+    *,
+    task: Mapping[str, Any],
+    runner: Path,
+    source_revision: str,
+    optional_test_dependencies: tuple[dict[str, str], ...],
 ) -> dict[str, Any]:
     runner_bytes = runner.read_bytes()
     return {
@@ -129,6 +137,7 @@ def _environment_identity(
         "base_commit": str(task["base_commit"]),
         "runner_sha256": _sha256(runner_bytes),
         "source_revision": source_revision,
+        "optional_test_dependencies": list(optional_test_dependencies),
         "python_implementation": platform.python_implementation(),
         "python_version": platform.python_version(),
         "platform": platform.system().lower(),
@@ -344,8 +353,22 @@ def prepare_task_environment(
     runner = task_dir / "run_tests.sh"
     if not runner.is_file():
         raise ValidationEnvironmentError(f"frozen evaluator is missing: {runner}")
+    feature_dir_value = task.get("feature_dir")
+    tests_patch = (
+        Path(str(feature_dir_value)).expanduser().resolve() / "tests.patch"
+        if feature_dir_value is not None
+        else None
+    )
+    optional_test_dependencies = (
+        infer_optional_test_dependencies(tests_patch)
+        if tests_patch is not None and tests_patch.is_file()
+        else ()
+    )
     identity = _environment_identity(
-        task=task, runner=runner, source_revision=source_revision
+        task=task,
+        runner=runner,
+        source_revision=source_revision,
+        optional_test_dependencies=optional_test_dependencies,
     )
     identity_digest = _sha256(identity)
     environment_root = validation_root / "environments" / identity_digest[:24]
@@ -472,6 +495,9 @@ def prepare_task_environment(
     (repository / ".claim-plane-evaluator-marker").unlink(missing_ok=True)
     _run_git(repository, "reset", "--hard", base_commit)
     _run_git(repository, "clean", "-ffd", "-e", ".venv/")
+    optional_dependency_results = install_optional_test_dependencies(
+        python_path, optional_test_dependencies, cache_dir=cache_dir
+    )
     runtime = _python_runtime_snapshot(python_path)
     marker = {
         "protocol": VALIDATION_ENVIRONMENT_PROTOCOL,
@@ -487,6 +513,8 @@ def prepare_task_environment(
         "site_packages": list(runtime.get("site_packages") or ()),
         "pytest_available": bool(runtime.get("pytest_available")),
         "cache_dir": str(cache_dir),
+        "optional_test_dependencies": list(optional_test_dependencies),
+        "optional_dependency_results": list(optional_dependency_results),
         "dependency_digest": _dependency_digest(python_path, project_root=repository),
         "bootstrap_stdout_sha256": _sha256(bootstrap_stdout),
         "bootstrap_stderr_sha256": _sha256(bootstrap_stderr),

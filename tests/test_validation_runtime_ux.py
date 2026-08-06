@@ -147,6 +147,33 @@ def test_legacy_candidate_is_resumable_without_rerunning_codex(
     assert metadata["agent_wall_time_seconds"] == 178.0
 
 
+def test_resume_reports_preserved_candidate_before_acceptance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, bare = _initialized(tmp_path)
+    manifest = validation.prepare_validation_execution(bare.execution_id, root=root)
+    workspace = Path(manifest["workspace"])
+    (workspace / "src" / "value.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    monkeypatch.setattr(validation, "run_oss_pilot_acceptance", lambda *a, **k: 124)
+    monkeypatch.setattr(
+        validation,
+        "latest_oss_pilot_reverification",
+        lambda workspace: {"classification": "TIMEOUT"},
+    )
+
+    payload = validation.resume_validation_execution(
+        bare.execution_id, root=root, agent_wall_time_seconds=20, progress=True
+    )
+
+    captured = capsys.readouterr()
+    assert payload["retryable"] is True
+    assert "Resuming preserved candidate" in captured.err
+    assert bare.task_id in captured.err
+    assert bare.arm.value in captured.err
+    assert bare.execution_id in captured.err
+
+
 def test_streaming_process_emits_live_output_and_heartbeat(tmp_path: Path) -> None:
     output: list[tuple[str, str]] = []
     heartbeats: list[float] = []
