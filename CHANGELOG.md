@@ -8,6 +8,29 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.7] — 2026-08-06
+
+### Fixed
+
+- make the editable candidate install command variadic for static typing so the uv and Python fallback forms can have different argument counts without failing the release quality gate.
+
+## [0.37.6] — 2026-08-06
+
+### Added
+
+- isolate frozen evaluator programs and hidden acceptance inputs in a private persistent vault outside the validation workspace tree;
+- disable Codex web search and shell network access for comparative cells so benchmark identities and reference material cannot be recovered through online lookup;
+- audit newly written Codex session and Claim Plane run records for hidden benchmark artifact access and record affected cells as `CONTAMINATED` without running official acceptance;
+- include contamination evidence in exported validation bundles;
+- show the selected matrix arm before repository preparation and stream bounded clone/fetch progress with a three-minute fetch limit.
+
+### Fixed
+
+- remove frozen source checkout paths, evaluator directories, and hidden input locations from agent-visible workspace manifests;
+- pass private evaluator assets directly from the outer validation runner instead of teaching the agent where those assets live;
+- replace host-specific absolute Python acceptance commands with `python` resolved from the prepared task environment;
+- automatically migrate existing validation roots into the private evaluator vault and remove managed in-tree CooperBench source checkouts before Codex opens.
+
 ## [0.37.5] — 2026-08-06
 
 ### Fixed

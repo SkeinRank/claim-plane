@@ -1232,6 +1232,12 @@ def cmd_validation_run(args: argparse.Namespace) -> int:
         return 2
     if args.json or args.dry_run:
         _write_json(payload)
+    elif payload.get("contaminated"):
+        print(
+            f"Recorded {payload['execution_id']} · CONTAMINATED · "
+            "hidden benchmark artifact access detected"
+        )
+        _print_validation_status(validation_status(args.root))
     elif payload.get("interrupted") or payload.get("retryable"):
         classification = payload.get("acceptance_classification") or "INTERRUPTED"
         print(
@@ -1252,6 +1258,8 @@ def cmd_validation_run(args: argparse.Namespace) -> int:
         return 0
     if payload.get("interrupted"):
         return 130
+    if payload.get("contaminated"):
+        return 4
     if payload.get("retryable"):
         return 3
     result = payload.get("result") or {}
@@ -1272,6 +1280,12 @@ def cmd_validation_resume(args: argparse.Namespace) -> int:
         return 2
     if args.json:
         _write_json(payload)
+    elif payload.get("contaminated"):
+        print(
+            f"Recorded {payload['execution_id']} · CONTAMINATED · "
+            "hidden benchmark artifact access detected"
+        )
+        _print_validation_status(validation_status(args.root))
     elif payload.get("interrupted") or payload.get("retryable"):
         classification = payload.get("acceptance_classification") or "INTERRUPTED"
         print(
@@ -1289,6 +1303,8 @@ def cmd_validation_resume(args: argparse.Namespace) -> int:
         _print_validation_status(validation_status(args.root))
     if payload.get("interrupted"):
         return 130
+    if payload.get("contaminated"):
+        return 4
     if payload.get("retryable"):
         return 3
     result = payload.get("result") or {}

@@ -1,6 +1,6 @@
 # Comparative single-agent validation
 
-Claim Plane `0.37.5` provides one reproducible workflow for comparing the same
+Claim Plane `0.37.6` provides one reproducible workflow for comparing the same
 coding task under three execution arms:
 
 ```text
@@ -13,6 +13,16 @@ The workflow freezes inputs before any provider call. Every plan cell binds the
 feature prompt, repository base, model, arm, seed label, acceptance contract,
 suite digest, and plan digest. Measured results are recorded only after the
 candidate is evaluated by the task-local official evaluator.
+
+Frozen evaluator programs and hidden acceptance inputs are stored in a private
+persistent vault outside the validation workspace tree. Agent-visible manifests do
+not contain source checkout paths or evaluator locations. Comparative Codex sessions
+also run with web search and shell networking disabled. A post-session audit marks a
+cell `CONTAMINATED` when newly written runtime records show access to hidden benchmark
+artifacts; official acceptance is skipped for that cell.
+Candidate workspaces and reusable development environments also live outside the
+matrix directory, preventing one arm from discovering prior candidates or immutable
+selection files through ordinary parent-directory inspection.
 
 ## Preview workflow
 
@@ -43,6 +53,8 @@ markers through temporary Codex `shell_environment_policy` overrides. Login-shel
 profile loading is disabled for the session, preventing user shell initialization from
 replacing the prepared Python. A fail-fast preflight verifies pytest, direct imports
 from `tests/conftest.py`, and the editable project import before the TUI opens.
+The agent-facing acceptance command uses `python` from that prepared `PATH`; it never
+embeds a host-specific interpreter path.
 
 Run one missing cell at a time:
 

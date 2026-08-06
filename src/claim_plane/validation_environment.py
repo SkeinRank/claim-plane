@@ -517,6 +517,7 @@ def activate_task_environment(
         if progress is not None:
             progress("Binding editable candidate source to shared dependencies")
         uv = shutil.which("uv")
+        command: tuple[str, ...]
         if uv is not None:
             command = (
                 uv,

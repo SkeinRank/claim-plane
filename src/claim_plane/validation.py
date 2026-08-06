@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from dataclasses import dataclass
@@ -46,6 +48,7 @@ from claim_plane.oss_pilot import (
     OssPilotError,
     _exclude_local_state,
     _feature_prompt,
+    _finish_oss_pilot_acceptance,
     _git,
     _parse_task_setup,
     _sha256,
@@ -74,6 +77,9 @@ VALIDATION_GATE_PROTOCOL = "claim-plane.single-agent-validation-gate.v1"
 VALIDATION_DEFAULT_ROOT = Path("/private/tmp/claim-plane-single-agent-validation")
 VALIDATION_ACCEPTANCE_TIMEOUTS = {"preview": 300.0, "release": 1200.0}
 VALIDATION_HEARTBEAT_SECONDS = 15.0
+VALIDATION_GIT_TIMEOUT_SECONDS = 180.0
+VALIDATION_VAULT_PROTOCOL = "claim-plane.validation-evaluator-vault.v1"
+VALIDATION_CONTAMINATION_PROTOCOL = "claim-plane.validation-contamination.v1"
 VALIDATION_RESUMABLE_PHASES = {
     "ACCEPTANCE_PENDING",
     "ACCEPTANCE_RUNNING",
@@ -148,6 +154,15 @@ _DEPENDENCY_PATHS = {
     "go.sum",
 }
 
+_CONTAMINATION_PATTERNS = (
+    re.compile(
+        r"(?i)\b(?:read|opened?|inspected?|found|cat|sed|grep|rg)\b"
+        r".{0,180}\b(?:feature\.patch|tests\.patch)\b"
+    ),
+    re.compile(r"(?i)\breference\s+patch\b"),
+    re.compile(r"(?i)\bgold(?:en)?\s+patch\b"),
+)
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -180,6 +195,315 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValidationError(f"expected a JSON object: {path}")
     return payload
+
+
+def _vault_root(root: Path, state: Mapping[str, Any]) -> Path:
+    identity = _digest(
+        {
+            "root": str(root.resolve()),
+            "source_revision": str(state.get("source_revision") or ""),
+        }
+    )[:24]
+    cache_base = Path(
+        os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    ).expanduser()
+    return cache_base.resolve() / "claim-plane" / "evaluator-vault" / identity
+
+
+def _validation_identity(root: Path) -> str:
+    return _digest(str(root.resolve()))[:24]
+
+
+def _runtime_root(root: Path) -> Path:
+    cache_base = Path(
+        os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    ).expanduser()
+    return (
+        cache_base.resolve()
+        / "claim-plane"
+        / "validation-runtime"
+        / _validation_identity(root)
+    )
+
+
+def _workspace_storage_root(root: Path) -> Path:
+    return (
+        Path(tempfile.gettempdir()).resolve()
+        / ".claim-plane-validation-workspaces"
+        / _validation_identity(root)
+    )
+
+
+def _ensure_runtime_layout(root: Path) -> Path:
+    runtime = _runtime_root(root)
+    runtime.mkdir(parents=True, exist_ok=True)
+    _chmod_private(runtime, directory=True)
+    legacy_cache = root / "cache"
+    runtime_cache = runtime / "cache"
+    if legacy_cache.exists() and not runtime_cache.exists():
+        shutil.move(str(legacy_cache), str(runtime_cache))
+    (runtime_cache / "uv").mkdir(parents=True, exist_ok=True)
+    legacy_environments = root / "environments"
+    if legacy_environments.exists():
+        shutil.rmtree(legacy_environments)
+    (runtime / "environments").mkdir(parents=True, exist_ok=True)
+    workspace_root = _workspace_storage_root(root)
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    _chmod_private(workspace_root, directory=True)
+    return runtime
+
+
+def _vault_manifest_path(vault: Path) -> Path:
+    return vault / "vault.json"
+
+
+def _vault_task_dir(vault: Path, task_id: str) -> Path:
+    return vault / "tasks" / task_id
+
+
+def _chmod_private(path: Path, *, directory: bool = False) -> None:
+    try:
+        path.chmod(0o700 if directory else 0o600)
+    except OSError:
+        pass
+
+
+def _vault_complete(
+    vault: Path,
+    *,
+    selection: Mapping[str, Any],
+    source_revision: str,
+) -> bool:
+    manifest_path = _vault_manifest_path(vault)
+    if not manifest_path.exists():
+        return False
+    try:
+        manifest = _read_json(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    if manifest.get("protocol") != VALIDATION_VAULT_PROTOCOL:
+        return False
+    if manifest.get("source_revision") != source_revision:
+        return False
+    tasks = manifest.get("tasks")
+    if not isinstance(tasks, Mapping):
+        return False
+    for task in selection.get("tasks") or ():
+        if not isinstance(task, Mapping):
+            return False
+        task_id = str(task.get("task_id") or "")
+        payload = tasks.get(task_id)
+        if not isinstance(payload, Mapping):
+            return False
+        task_dir = _vault_task_dir(vault, task_id)
+        runner = task_dir / "run_tests.sh"
+        tests_patch = task_dir / "tests.patch"
+        if not runner.is_file() or not tests_patch.is_file():
+            return False
+        if (
+            str(payload.get("runner_sha256") or "")
+            != hashlib.sha256(runner.read_bytes()).hexdigest()
+        ):
+            return False
+        if (
+            str(payload.get("tests_patch_sha256") or "")
+            != hashlib.sha256(tests_patch.read_bytes()).hexdigest()
+        ):
+            return False
+    return True
+
+
+def _ensure_benchmark_isolation(
+    root: Path,
+    *,
+    state: Mapping[str, Any] | None = None,
+    selection: Mapping[str, Any] | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    current_state = dict(state or load_validation_state(root))
+    current_selection = dict(selection or _selection(root, current_state))
+    vault = _vault_root(root, current_state)
+    source_revision = str(current_state.get("source_revision") or "")
+    if _vault_complete(
+        vault,
+        selection=current_selection,
+        source_revision=source_revision,
+    ):
+        return vault, current_state
+
+    source_value = current_state.get("source_root")
+    if source_value is None:
+        raise ValidationError(
+            "private evaluator vault is incomplete and the frozen source checkout "
+            "is no longer available; recreate validation with `validation init --force`"
+        )
+    source = Path(str(source_value)).expanduser().resolve()
+    if not source.is_dir():
+        raise ValidationError(
+            "private evaluator vault is incomplete and the frozen source checkout "
+            f"is missing: {source}"
+        )
+
+    if vault.exists():
+        shutil.rmtree(vault)
+    vault.mkdir(parents=True, exist_ok=True)
+    _chmod_private(vault, directory=True)
+    task_records: dict[str, Any] = {}
+    for raw_task in current_selection.get("tasks") or ():
+        if not isinstance(raw_task, Mapping):
+            continue
+        task_id = str(raw_task["task_id"])
+        source_ref = str(raw_task["source_ref"])
+        feature_dir = source / source_ref
+        runner_source = feature_dir.parent / "run_tests.sh"
+        tests_source = feature_dir / "tests.patch"
+        if not runner_source.is_file() or not tests_source.is_file():
+            raise ValidationError(f"frozen evaluator assets are missing for {task_id}")
+        task_dir = _vault_task_dir(vault, task_id)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        _chmod_private(task_dir, directory=True)
+        runner = task_dir / "run_tests.sh"
+        tests_patch = task_dir / "tests.patch"
+        shutil.copy2(runner_source, runner)
+        shutil.copy2(tests_source, tests_patch)
+        runner.chmod(0o700)
+        _chmod_private(tests_patch)
+        task_records[task_id] = {
+            "runner_sha256": hashlib.sha256(runner.read_bytes()).hexdigest(),
+            "tests_patch_sha256": hashlib.sha256(tests_patch.read_bytes()).hexdigest(),
+        }
+
+    vault_manifest = {
+        "protocol": VALIDATION_VAULT_PROTOCOL,
+        "source_revision": source_revision,
+        "created_at": _utc_now(),
+        "task_count": len(task_records),
+        "tasks": task_records,
+    }
+    _write_json(_vault_manifest_path(vault), vault_manifest)
+    _chmod_private(_vault_manifest_path(vault))
+
+    managed_source = False
+    try:
+        source.relative_to(root)
+        managed_source = True
+    except ValueError:
+        managed_source = False
+    if managed_source:
+        source_container = root / "_source"
+        if source_container.exists():
+            shutil.rmtree(source_container)
+
+    if "source_root" in current_state:
+        unsigned = {
+            key: value
+            for key, value in current_state.items()
+            if key not in {"digest", "source_root"}
+        }
+        unsigned["benchmark_isolation"] = "private-evaluator-vault"
+        unsigned["evaluator_vault_id"] = vault.name
+        current_state = {**unsigned, "digest": _digest(unsigned)}
+        _write_json(_state_path(root), current_state)
+    return vault, current_state
+
+
+def _private_evaluator_assets(
+    root: Path,
+    *,
+    state: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    task_id: str,
+) -> tuple[Path, Path]:
+    vault, _ = _ensure_benchmark_isolation(
+        root,
+        state=state,
+        selection=selection,
+    )
+    task_dir = _vault_task_dir(vault, task_id)
+    runner = task_dir / "run_tests.sh"
+    tests_patch = task_dir / "tests.patch"
+    if not runner.is_file() or not tests_patch.is_file():
+        raise ValidationError(f"private evaluator assets are missing for {task_id}")
+    return runner, tests_patch
+
+
+def _audit_snapshot(paths: Sequence[Path]) -> dict[str, tuple[int, int]]:
+    snapshot: dict[str, tuple[int, int]] = {}
+    for root in paths:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            snapshot[str(path)] = (stat.st_mtime_ns, stat.st_size)
+    return snapshot
+
+
+def _audit_roots(workspace: Path) -> tuple[Path, ...]:
+    return (
+        workspace / ".claim-plane" / "runs",
+        Path.home() / ".codex" / "sessions",
+    )
+
+
+def _scan_contamination(
+    workspace: Path,
+    *,
+    before: Mapping[str, tuple[int, int]],
+    forbidden_paths: Sequence[Path],
+) -> dict[str, Any]:
+    matches: list[dict[str, str]] = []
+    exact_tokens = tuple(str(path.resolve()) for path in forbidden_paths)
+    for root in _audit_roots(workspace):
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            previous = before.get(str(path))
+            if previous == (stat.st_mtime_ns, stat.st_size):
+                continue
+            if stat.st_size > 20 * 1024 * 1024:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                exact = any(token and token in stripped for token in exact_tokens)
+                patterned = any(
+                    pattern.search(stripped) for pattern in _CONTAMINATION_PATTERNS
+                )
+                if exact or patterned:
+                    matches.append(
+                        {
+                            "artifact": str(path),
+                            "line": str(line_number),
+                            "evidence": stripped[:500],
+                        }
+                    )
+                    if len(matches) >= 20:
+                        break
+            if len(matches) >= 20:
+                break
+        if len(matches) >= 20:
+            break
+    return {
+        "protocol": VALIDATION_CONTAMINATION_PROTOCOL,
+        "contaminated": bool(matches),
+        "checked_at": _utc_now(),
+        "matches": matches,
+    }
 
 
 def _patch_paths(path: Path) -> tuple[str, ...]:
@@ -329,7 +653,8 @@ def discover_validation_catalog(source: str | Path) -> tuple[dict[str, Any], ...
                 "Use the smallest task-relevant change. You may run targeted tests "
                 "needed to develop and repair the solution. Do not run the configured "
                 "full acceptance command; Claim Plane will perform independent final "
-                "verification."
+                "verification. Use `python` from the prepared PATH for targeted Python "
+                "checks; do not invoke an absolute host interpreter."
             ),
         )
         task_number = int(task_match.group(1))
@@ -530,10 +855,7 @@ def initialize_validation(
                 "source_ref": task["source_ref"],
                 "task_class": task["task_class"],
                 "risk_class": task["risk_class"],
-                "acceptance": [
-                    f"{shlex.quote(sys.executable)} -m "
-                    "claim_plane.oss_pilot_acceptance --repo ."
-                ],
+                "acceptance": ["python -m claim_plane.oss_pilot_acceptance --repo ."],
                 "split": "single-agent-validation",
             }
             for task in selected
@@ -581,9 +903,9 @@ def initialize_validation(
             "suite": "suite.json",
             "plan": "plan.json",
             "results": "results",
-            "workspaces": "workspaces",
-            "environments": "environments",
-            "cache": "cache",
+            "workspaces": "external-isolated",
+            "environments": "external-isolated",
+            "cache": "external-isolated",
         },
     }
     state = {**state_unsigned, "digest": _digest(state_unsigned)}
@@ -594,9 +916,12 @@ def initialize_validation(
     _write_json(resolved / "plan.json", plan.to_dict())
     _write_json(_state_path(resolved), state)
     (resolved / "results").mkdir(exist_ok=True)
-    (resolved / "workspaces").mkdir(exist_ok=True)
-    (resolved / "environments").mkdir(exist_ok=True)
-    (resolved / "cache" / "uv").mkdir(parents=True, exist_ok=True)
+    _ensure_runtime_layout(resolved)
+    _, state = _ensure_benchmark_isolation(
+        resolved,
+        state=state,
+        selection=selection,
+    )
     return {
         **state,
         "task_count": len(selected),
@@ -691,6 +1016,7 @@ def _acceptance_timeout(state: Mapping[str, Any], requested: float | None) -> fl
 def validation_status(root: str | Path = VALIDATION_DEFAULT_ROOT) -> dict[str, Any]:
     resolved = validation_root(root)
     state, suite, plan = _load_assets(resolved)
+    runtime = _ensure_runtime_layout(resolved)
     observed = {item.execution_id: item for item in _results(resolved)}
     pending = [entry for entry in plan.entries if entry.execution_id not in observed]
     by_arm: dict[str, dict[str, int]] = {}
@@ -734,8 +1060,8 @@ def validation_status(root: str | Path = VALIDATION_DEFAULT_ROOT) -> dict[str, A
         "arms": by_arm,
         "next_execution": next_entry,
         "active_execution": active,
-        "prepared_environment_count": len(environment_marker_paths(resolved)),
-        "environment_cache": str(resolved / "cache" / "uv"),
+        "prepared_environment_count": len(environment_marker_paths(runtime)),
+        "environment_cache": str(runtime / "cache" / "uv"),
     }
 
 
@@ -776,15 +1102,22 @@ def _task_metadata(selection: Mapping[str, Any], task_id: str) -> dict[str, Any]
 
 
 def _task_with_source_paths(
-    task: Mapping[str, Any], state: Mapping[str, Any]
+    task: Mapping[str, Any],
+    *,
+    root: Path,
+    state: Mapping[str, Any],
+    selection: Mapping[str, Any],
 ) -> dict[str, Any]:
-    source_root = Path(str(state["source_root"]))
-    source_ref = str(task["source_ref"])
-    feature_dir = source_root / source_ref
+    runner, tests_patch = _private_evaluator_assets(
+        root,
+        state=state,
+        selection=selection,
+        task_id=str(task["task_id"]),
+    )
     return {
         **dict(task),
-        "task_dir": str(feature_dir.parent),
-        "feature_dir": str(feature_dir),
+        "task_dir": str(runner.parent),
+        "feature_dir": str(tests_patch.parent),
     }
 
 
@@ -801,10 +1134,17 @@ def prepare_validation_environment(
     resolved = validation_root(root)
     state, _, plan = _load_assets(resolved)
     entry = _entry(plan, execution_id)
-    task = _task_metadata(_selection(resolved, state), entry.task_id)
+    selection = _selection(resolved, state)
+    task = _task_metadata(selection, entry.task_id)
+    runtime = _ensure_runtime_layout(resolved)
     return prepare_task_environment(
-        validation_root=resolved,
-        task=_task_with_source_paths(task, state),
+        validation_root=runtime,
+        task=_task_with_source_paths(
+            task,
+            root=resolved,
+            state=state,
+            selection=selection,
+        ),
         source_revision=str(state["source_revision"]),
         force=force,
         progress=progress,
@@ -887,6 +1227,10 @@ def reset_validation_task(
         if workspace.exists():
             shutil.rmtree(workspace)
             removed_workspaces += 1
+        legacy_workspace = _legacy_validation_workspace(resolved, entry.execution_id)
+        if legacy_workspace.exists():
+            shutil.rmtree(legacy_workspace)
+            removed_workspaces += 1
     for name in ("summary.json", "summary.md", "gate.json"):
         (resolved / name).unlink(missing_ok=True)
     return {
@@ -899,7 +1243,38 @@ def reset_validation_task(
 
 
 def validation_workspace(root: Path, execution_id: str) -> Path:
+    return _workspace_storage_root(root) / execution_id
+
+
+def _legacy_validation_workspace(root: Path, execution_id: str) -> Path:
     return root / "workspaces" / execution_id
+
+
+def _run_repository_command(
+    command: Sequence[str],
+    *,
+    cwd: Path | None = None,
+    timeout: float = VALIDATION_GIT_TIMEOUT_SECONDS,
+    progress: Callable[[str], None] | None = None,
+    label: str,
+) -> None:
+    if progress is not None:
+        progress(label)
+    completed = subprocess.run(
+        list(command),
+        cwd=None if cwd is None else str(cwd),
+        text=True,
+        capture_output=progress is None,
+        check=False,
+        timeout=timeout,
+    )
+    if completed.returncode != 0:
+        detail = (
+            completed.stderr
+            or completed.stdout
+            or f"{label} failed with exit code {completed.returncode}"
+        ).strip()
+        raise ValidationError(detail)
 
 
 def prepare_validation_execution(
@@ -907,6 +1282,7 @@ def prepare_validation_execution(
     *,
     root: str | Path = VALIDATION_DEFAULT_ROOT,
     force: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     resolved = validation_root(root)
     state, _, plan = _load_assets(resolved)
@@ -916,21 +1292,34 @@ def prepare_validation_execution(
     workspace = validation_workspace(resolved, execution_id)
     if workspace.exists():
         if not force:
-            return load_oss_pilot_manifest(workspace)
+            existing_manifest = load_oss_pilot_manifest(workspace)
+            existing_source = existing_manifest.get("source")
+            if not (
+                isinstance(existing_source, Mapping)
+                and (
+                    "task_dir" in existing_source
+                    or "feature_dir" in existing_source
+                    or "root" in existing_source
+                )
+            ):
+                return existing_manifest
+            if progress is not None:
+                progress("Replacing legacy workspace with isolated benchmark metadata")
         shutil.rmtree(workspace)
     workspace.parent.mkdir(parents=True, exist_ok=True)
-    completed = subprocess.run(
+    _run_repository_command(
         ("git", "clone", str(task["clone_url"]), str(workspace)),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=900,
+        timeout=900.0,
+        progress=progress,
+        label="Cloning frozen task repository",
     )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "git clone failed").strip()
-        raise ValidationError(detail)
     base_commit = str(task["base_commit"])
-    _git(workspace, "fetch", "--force", "origin", base_commit)
+    _run_repository_command(
+        ("git", "fetch", "--force", "origin", base_commit),
+        cwd=workspace,
+        progress=progress,
+        label=f"Fetching frozen base {base_commit[:12]}",
+    )
     _git(workspace, "checkout", "--detach", base_commit)
     _git(workspace, "reset", "--hard", base_commit)
     _git(workspace, "clean", "-ffd")
@@ -946,7 +1335,7 @@ def prepare_validation_execution(
         )
     _exclude_local_state(workspace)
     arm = _arm_name(entry.arm)
-    acceptance_command = str(entry.acceptance[0])
+    acceptance_command = "python -m claim_plane.oss_pilot_acceptance --repo ."
     if arm != "bare":
         init_project(workspace)
         _write_acceptance_config(workspace, acceptance_command, arm)
@@ -980,15 +1369,10 @@ def prepare_validation_execution(
         "arm": arm,
         "workspace": str(workspace),
         "source": {
-            "root": state["source_root"],
+            "url": selection["source"]["url"],
             "revision": selection["source"]["revision"],
-            "task_dir": str(
-                Path(str(state["source_root"]))
-                / str(task["source_ref"]).rsplit("/", 1)[0]
-            ),
-            "feature_dir": str(
-                Path(str(state["source_root"])) / str(task["source_ref"])
-            ),
+            "source_ref": task["source_ref"],
+            "evaluator_assets": "private",
         },
         "repository": {
             "clone_url": task["clone_url"],
@@ -1162,11 +1546,18 @@ def collect_validation_execution(
                 metadata.get("runtime_returncode"), int
             ):
                 runtime_returncode = int(metadata["runtime_returncode"])
+    contaminated = classification == "CONTAMINATED"
     evaluation = {
-        "outcome": "COMPLETED" if (runtime_returncode or 0) == 0 else "FAILED",
+        "outcome": (
+            "CONTAMINATED"
+            if contaminated
+            else "COMPLETED"
+            if (runtime_returncode or 0) == 0
+            else "FAILED"
+        ),
         "evaluation_complete": evaluation_complete,
-        "task_success": task_success,
-        "accepted_delivery": accepted_delivery,
+        "task_success": task_success and not contaminated,
+        "accepted_delivery": accepted_delivery and not contaminated,
         "undeclared_mutations": undeclared,
         "scope_amendments": amendments,
         "false_blocks": false_blocks,
@@ -1206,6 +1597,13 @@ def _run_acceptance_for_execution(
     runtime_returncode: int,
 ) -> dict[str, Any]:
     workspace = validation_workspace(resolved, selected.execution_id)
+    selection = _selection(resolved, state)
+    runner, tests_patch = _private_evaluator_assets(
+        resolved,
+        state=state,
+        selection=selection,
+        task_id=selected.task_id,
+    )
     timeout = _acceptance_timeout(state, acceptance_timeout)
     reporter = ProgressReporter(
         enabled=progress_enabled, stream=sys.stderr, prefix="Validation"
@@ -1228,7 +1626,9 @@ def _run_acceptance_for_execution(
         progress=reporter.emit if progress_enabled else None,
         stream_output=progress_enabled,
         heartbeat_seconds=VALIDATION_HEARTBEAT_SECONDS,
-        cache_dir=resolved / "cache" / "uv",
+        cache_dir=_ensure_runtime_layout(resolved) / "cache" / "uv",
+        runner_path=runner,
+        tests_patch_path=tests_patch,
     )
     acceptance_elapsed = time.monotonic() - acceptance_started
     acceptance = latest_oss_pilot_reverification(workspace) or {}
@@ -1381,10 +1781,25 @@ def run_validation_execution(
             acceptance_timeout=acceptance_timeout,
             progress=progress,
         )
+    position = next(
+        index
+        for index, entry in enumerate(plan.entries, start=1)
+        if entry.execution_id == selected.execution_id
+    )
+    reporter = ProgressReporter(
+        enabled=progress and not dry_run,
+        stream=sys.stderr,
+        prefix="Validation",
+    )
+    reporter.emit(
+        f"Current cell {position}/{len(plan.entries)} · "
+        f"{selected.task_id} · {selected.arm.value}"
+    )
     manifest = prepare_validation_execution(
         selected.execution_id,
         root=resolved,
         force=force_prepare,
+        progress=reporter.emit if progress and not dry_run else None,
     )
     timeout = _acceptance_timeout(state, acceptance_timeout)
     command = oss_pilot_command(
@@ -1393,11 +1808,6 @@ def run_validation_execution(
         session_timeout=session_timeout,
         acceptance_timeout=timeout,
         defer_acceptance=selected.arm is not DogfoodArm.BARE_CODEX,
-    )
-    position = next(
-        index
-        for index, entry in enumerate(plan.entries, start=1)
-        if entry.execution_id == selected.execution_id
     )
     payload: dict[str, Any] = {
         "execution_id": selected.execution_id,
@@ -1417,13 +1827,6 @@ def run_validation_execution(
     }
     if dry_run:
         return payload
-    reporter = ProgressReporter(
-        enabled=progress, stream=sys.stderr, prefix="Validation"
-    )
-    reporter.emit(
-        f"Current cell {position}/{len(plan.entries)} · "
-        f"{selected.task_id} · {selected.arm.value}"
-    )
     reporter.emit("Preparing identical targeted-test environment")
     environment = prepare_validation_environment(
         selected.execution_id,
@@ -1441,7 +1844,11 @@ def run_validation_execution(
         workspace=workspace,
         env=execution_env,
     )
-    codex_config = codex_environment_config_overrides(execution_env)
+    codex_config = (
+        *codex_environment_config_overrides(execution_env),
+        'web_search="disabled"',
+        "sandbox_workspace_write.network_access=false",
+    )
     command = oss_pilot_command(
         manifest,
         model=model or str(state["model"]),
@@ -1468,6 +1875,8 @@ def run_validation_execution(
         "cache_dir": environment["cache_dir"],
         "codex_shell_injected": True,
         "codex_config_overrides": len(codex_config),
+        "benchmark_web_search": "disabled",
+        "benchmark_shell_network": "disabled",
         "preflight": preflight,
     }
     started_iso = _utc_now()
@@ -1485,9 +1894,12 @@ def run_validation_execution(
         "environment_cache_hit": bool(environment.get("cache_hit")),
         "environment_python": str(preflight["python"]),
         "codex_shell_environment_injected": True,
+        "benchmark_web_search_disabled": True,
+        "benchmark_shell_network_disabled": True,
         "internal_acceptance_deferred": (selected.arm is not DogfoodArm.BARE_CODEX),
     }
     _store_execution_metadata(workspace, metadata)
+    audit_before = _audit_snapshot(_audit_roots(workspace))
     try:
         completed = subprocess.run(
             command, cwd=str(workspace), check=False, env=execution_env
@@ -1509,6 +1921,80 @@ def run_validation_execution(
         reporter.emit("Codex interrupted; workspace preserved")
         return payload
     agent_elapsed = time.monotonic() - started
+    selection = _selection(resolved, state)
+    runner, tests_patch = _private_evaluator_assets(
+        resolved,
+        state=state,
+        selection=selection,
+        task_id=selected.task_id,
+    )
+    forbidden_paths = [runner, tests_patch, runner.parent, resolved]
+    forbidden_paths.extend(
+        validation_workspace(resolved, entry.execution_id)
+        for entry in plan.entries
+        if entry.execution_id != selected.execution_id
+        and validation_workspace(resolved, entry.execution_id).exists()
+    )
+    source_value = state.get("source_root")
+    if source_value is not None:
+        forbidden_paths.append(Path(str(source_value)))
+    contamination = _scan_contamination(
+        workspace,
+        before=audit_before,
+        forbidden_paths=forbidden_paths,
+    )
+    contamination_path = workspace / ".claim-plane" / "contamination.json"
+    _write_json(contamination_path, contamination)
+    if contamination["contaminated"]:
+        contamination_returncode = _finish_oss_pilot_acceptance(
+            workspace,
+            classification="CONTAMINATED",
+            returncode=75,
+            stderr=(
+                "benchmark reference or hidden evaluator artifacts were observed "
+                "during the agent session\n"
+            ),
+            detail="benchmark artifact access contaminated the validation cell",
+            emit_logs=False,
+        )
+        finished_at = _utc_now()
+        metadata.update(
+            {
+                "phase": "COMPLETED",
+                "updated_at": finished_at,
+                "finished_at": finished_at,
+                "runtime_returncode": runtime_returncode,
+                "agent_wall_time_seconds": agent_elapsed,
+                "acceptance_returncode": contamination_returncode,
+                "acceptance_classification": "CONTAMINATED",
+                "acceptance_wall_time_seconds": 0.0,
+                "wall_time_seconds": agent_elapsed,
+                "contaminated": True,
+                "contamination_evidence": str(contamination_path),
+            }
+        )
+        _store_execution_metadata(workspace, metadata)
+        result = collect_validation_execution(
+            selected.execution_id,
+            root=resolved,
+            wall_time_seconds=agent_elapsed,
+            runtime_returncode=runtime_returncode,
+            overwrite=True,
+        )
+        payload.update(
+            {
+                "runtime_returncode": runtime_returncode,
+                "acceptance_returncode": contamination_returncode,
+                "acceptance_classification": "CONTAMINATED",
+                "contaminated": True,
+                "result": result.to_dict(),
+            }
+        )
+        reporter.emit(
+            "Benchmark contamination detected; official acceptance skipped and "
+            "the cell recorded as CONTAMINATED"
+        )
+        return payload
     metadata.update(
         {
             "phase": "ACCEPTANCE_PENDING",
@@ -1736,15 +2222,27 @@ def build_validation_bundle(
             files.append((path, name))
     for path in sorted((resolved / "results").glob("*.json")):
         files.append((path, f"results/{path.name}"))
-    for workspace in sorted((resolved / "workspaces").glob("*")):
+    _, _, plan = _load_assets(resolved)
+    evidence_workspaces: list[Path] = []
+    for entry in plan.entries:
+        workspace = validation_workspace(resolved, entry.execution_id)
         if not workspace.is_dir():
-            continue
+            legacy = _legacy_validation_workspace(resolved, entry.execution_id)
+            workspace = legacy if legacy.is_dir() else workspace
+        if workspace.is_dir():
+            evidence_workspaces.append(workspace)
+    for workspace in evidence_workspaces:
         manifest = workspace / ".claim-plane" / "oss-pilot.json"
         if manifest.exists():
             files.append((manifest, f"evidence/{workspace.name}/oss-pilot.json"))
         execution = workspace / ".claim-plane" / "validation-execution.json"
         if execution.exists():
             files.append((execution, f"evidence/{workspace.name}/execution.json"))
+        contamination = workspace / ".claim-plane" / "contamination.json"
+        if contamination.exists():
+            files.append(
+                (contamination, f"evidence/{workspace.name}/contamination.json")
+            )
         latest = workspace / ".claim-plane" / "oss-pilot" / "acceptance" / "latest.json"
         if latest.exists():
             files.append((latest, f"evidence/{workspace.name}/acceptance.json"))

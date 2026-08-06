@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.5.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.6.** APIs, evidence formats, and deployment contracts may change before 1.0.
 > Long-running CooperBench runs expose checkpoint-aware live progress and ETA on stderr while keeping final CLI results machine-readable.
 
 Git worktrees isolate agent processes, but they do not prove that two agents are making compatible changes. Agents can still introduce different names for one concept, design incompatible contracts, expand outside their assigned surfaces, or discover a dependency conflict only after both branches have consumed tokens and time.
@@ -118,7 +118,7 @@ candidate verdict, including `VERIFIED_AFTER_RECHECK`.
 
 ## Comparative single-agent validation
 
-Version `0.37.5` turns the frozen OSS pilot and dogfood contracts into one
+Version `0.37.6` turns the frozen OSS pilot and dogfood contracts into one
 operator workflow for fidelity-matched Bare Codex, Claim Plane Observe, and Claim
 Plane Guarded executions. The preview profile freezes 12 feature-level tasks across at
 least six repository families and expands them into a 36-cell matrix. The release
@@ -145,6 +145,17 @@ virtual-environment prefix, imports pytest and top-level test dependencies, and 
 the editable candidate import. Prepared site-packages are pinned into the one-run Codex
 `PYTHONPATH`, which keeps macOS framework and pyenv launchers from selecting the parent
 interpreter's package set.
+
+The comparative runner keeps frozen evaluator programs and hidden acceptance inputs in
+a private persistent vault outside the workspace tree. Agent-visible manifests contain
+only public task identity, while Codex web search and shell networking are disabled for
+the cell. Newly written session and run records are audited after Codex exits; detected
+reference-artifact access records the cell as `CONTAMINATED` and skips official
+acceptance. The agent-facing acceptance command resolves `python` from the prepared
+environment rather than embedding an absolute host interpreter.
+Candidate workspaces and shared development environments are stored outside the matrix
+directory, so a session cannot discover previous-arm candidates by traversing its
+ordinary parent directories.
 
 Observe and Guarded defer their internal acceptance to the comparative runner. The
 external frozen evaluator therefore runs exactly once per cell, after the agent exits,

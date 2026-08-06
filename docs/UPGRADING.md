@@ -36,6 +36,25 @@ claim-plane adapters pin codex --clear
 claim-plane adapters pin codex
 ```
 
+## Benchmark isolation from 0.37.6
+
+Version `0.37.6` moves frozen evaluator programs and hidden acceptance inputs out of
+the validation workspace tree, removes legacy source paths from agent-visible
+manifests, disables Codex web search and shell networking for comparative cells, and
+uses the prepared `python` command instead of an absolute host interpreter.
+
+Results produced after an agent could inspect reference artifacts are diagnostic only.
+Reset the affected task and repeat all three arms:
+
+```bash
+claim-plane validation reset-task <task-id>
+claim-plane validation status
+claim-plane validation run --next
+```
+
+The first run migrates the existing validation root into the private evaluator vault.
+Prepared dependency environments and the UV download cache remain reusable.
+
 
 ## macOS prepared-Python isolation from 0.37.5
 

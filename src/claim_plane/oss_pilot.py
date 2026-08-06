@@ -49,6 +49,7 @@ OSS_PILOT_ACCEPTANCE_EXIT_CODES = {
     "OFFICIAL_TEST_CONFLICT": 72,
     "WORKSPACE_SAFETY_FAILED": 73,
     "EVALUATOR_ERROR": 74,
+    "CONTAMINATED": 75,
     "TIMEOUT": 124,
     "INTERRUPTED": 130,
 }
@@ -899,14 +900,36 @@ def run_oss_pilot_acceptance(
     heartbeat_seconds: float = 15.0,
     cleanup_timeout: float = 15.0,
     cache_dir: str | Path | None = None,
+    runner_path: str | Path | None = None,
+    tests_patch_path: str | Path | None = None,
 ) -> int:
     root = Path(workspace).expanduser().resolve()
     manifest = load_oss_pilot_manifest(root)
-    source = manifest["source"]
-    task_dir = Path(str(source["task_dir"]))
-    feature_dir = Path(str(source["feature_dir"]))
-    runner = task_dir / "run_tests.sh"
-    tests_patch = feature_dir / "tests.patch"
+    if runner_path is not None or tests_patch_path is not None:
+        if runner_path is None or tests_patch_path is None:
+            raise OssPilotError(
+                "runner_path and tests_patch_path must be provided together"
+            )
+        runner = Path(runner_path).expanduser().resolve()
+        tests_patch = Path(tests_patch_path).expanduser().resolve()
+    else:
+        source = manifest.get("source")
+        if not isinstance(source, Mapping):
+            source = {}
+        task_dir_value = source.get("task_dir")
+        feature_dir_value = source.get("feature_dir")
+        if task_dir_value is None or feature_dir_value is None:
+            return _finish_oss_pilot_acceptance(
+                root,
+                classification="EVALUATOR_ERROR",
+                returncode=OSS_PILOT_ACCEPTANCE_EXIT_CODES["EVALUATOR_ERROR"],
+                stderr="private evaluator assets were not supplied\n",
+                detail="private evaluator assets were not supplied",
+            )
+        task_dir = Path(str(task_dir_value))
+        feature_dir = Path(str(feature_dir_value))
+        runner = task_dir / "run_tests.sh"
+        tests_patch = feature_dir / "tests.patch"
     if not runner.exists() or not tests_patch.exists():
         return _finish_oss_pilot_acceptance(
             root,
