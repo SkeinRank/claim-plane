@@ -89,3 +89,31 @@ def test_opaque_shell_denial_names_the_exact_unsupported_pipeline_stage(
     assert evaluation.diagnostic_segment_index == 2
     assert "segment 2 `tee diff.txt`" in evaluation.reason
     assert "executable 'tee'" in evaluation.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "git diff --check; python -m pytest tests/test_loader.py",
+        "git status --short && /opt/pyenv/versions/3.10.14/bin/python -m pytest -q tests/test_other.py",
+        "git diff -- src/app.py; pytest -q tests/test_app.py",
+    ),
+)
+def test_bounded_inspection_chains_can_include_targeted_test_feedback(
+    tmp_path: Path, command: str
+) -> None:
+    assert _classify(tmp_path, command) == "test_feedback"
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "git diff --check; python -c 'open(\"out.txt\", \"w\").write(\"x\")'",
+        "pytest -q tests/test_app.py | tee pytest.log",
+        "git status --short && pytest",
+    ),
+)
+def test_test_feedback_chains_remain_fail_closed_for_unsafe_or_full_suite_segments(
+    tmp_path: Path, command: str
+) -> None:
+    assert _classify(tmp_path, command) == "opaque_shell"

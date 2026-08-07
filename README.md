@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.10.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.11.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -204,8 +204,10 @@ Untracked test caches and build outputs are treated as managed artifacts; tracke
 configuration, snapshots, and golden files remain subject to normal authority checks.
 
 OSS pilot re-verification is sealed to the current candidate digest. `oss-pilot status`,
-`report`, and `replay` distinguish the immutable original run outcome from the current
-candidate verdict, including `VERIFIED_AFTER_RECHECK`.
+`report`, and `replay` keep the immutable delivery outcome separate from the latest
+acceptance recheck. A rejected delivery remains rejected even when its unchanged
+candidate later passes the evaluator; the candidate is labeled
+`MATCHES_PASSING_ACCEPTANCE_RECHECK` rather than being promoted to verified delivery.
 
 ## Comparative single-agent validation
 

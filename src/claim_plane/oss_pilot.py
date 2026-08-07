@@ -572,32 +572,52 @@ def latest_oss_pilot_reverification(root: str | Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _candidate_matches_reverification(
+    current_candidate: Mapping[str, Any],
+    reverification: Mapping[str, Any] | None,
+) -> bool | None:
+    """Return whether the latest evaluator result belongs to the current candidate.
+
+    ``None`` means that no structured re-verification candidate is available.  The
+    distinction matters because acceptance can pass for a delivery that Claim Plane
+    still rejected for an independent obligation or authority failure.
+    """
+
+    if not isinstance(reverification, Mapping):
+        return None
+    candidate = reverification.get("candidate")
+    if not isinstance(candidate, Mapping):
+        return None
+    return bool(
+        candidate.get("digest") == current_candidate.get("digest")
+        and candidate.get("base_commit") == current_candidate.get("base_commit")
+    )
+
+
 def _current_candidate_verdict(
     *,
     current_candidate: Mapping[str, Any],
     latest_run: Mapping[str, Any] | None,
     reverification: Mapping[str, Any] | None,
 ) -> str:
-    if isinstance(reverification, Mapping):
-        candidate = reverification.get("candidate")
-        if (
-            isinstance(candidate, Mapping)
-            and candidate.get("digest") == current_candidate.get("digest")
-            and candidate.get("base_commit") == current_candidate.get("base_commit")
-        ):
-            classification = str(reverification.get("classification") or "")
-            if classification == "PASS":
-                return "VERIFIED_AFTER_RECHECK"
-            if classification == "TEST_FAILED":
-                return "REJECTED_AFTER_RECHECK"
-            return "UNVERIFIED_EVALUATOR_ERROR"
-        return "STALE_REVERIFICATION"
+    """Describe candidate evidence without conflating it with delivery outcome."""
+
+    matches = _candidate_matches_reverification(current_candidate, reverification)
+    if matches is True:
+        classification = str(reverification.get("classification") or "")
+        if classification == "PASS":
+            return "MATCHES_PASSING_ACCEPTANCE_RECHECK"
+        if classification == "TEST_FAILED":
+            return "MATCHES_FAILING_ACCEPTANCE_RECHECK"
+        return "MATCHES_EVALUATOR_ERROR_RECHECK"
+    if matches is False:
+        return "STALE_ACCEPTANCE_RECHECK"
     if isinstance(latest_run, Mapping):
         if latest_run.get("verified") is True:
-            return "VERIFIED"
+            return "MATCHES_VERIFIED_DELIVERY"
         if latest_run.get("outcome") == "REJECTED":
-            return "REJECTED"
-    return "UNVERIFIED"
+            return "DELIVERY_REJECTED_NOT_RECHECKED"
+    return "NOT_RECHECKED"
 
 
 def oss_pilot_status(
@@ -646,11 +666,17 @@ def oss_pilot_status(
                 "evidence_digest": payload.get("evidence_digest"),
             }
     current_candidate = _candidate_identity(workspace, manifest)
+    candidate_matches_recheck = _candidate_matches_reverification(
+        current_candidate, latest_acceptance
+    )
+    if latest_acceptance is not None:
+        latest_acceptance["candidate_matches_current"] = candidate_matches_recheck
     current_verdict = _current_candidate_verdict(
         current_candidate=current_candidate,
         latest_run=latest,
         reverification=latest_acceptance,
     )
+    delivery_outcome = str(latest.get("outcome") or "UNKNOWN") if latest else "NOT_RUN"
     return {
         "protocol": OSS_PILOT_STATUS_PROTOCOL,
         "task_id": task_id,
@@ -660,9 +686,12 @@ def oss_pilot_status(
         "head": _git(workspace, "rev-parse", "HEAD"),
         "changed": changed,
         "latest_run": latest,
+        "delivery_outcome": delivery_outcome,
+        "delivery_verified": bool(latest and latest.get("verified") is True),
         "latest_acceptance": latest_acceptance,
         "current_candidate": current_candidate,
         "current_verdict": current_verdict,
+        "candidate_matches_recheck": candidate_matches_recheck,
         "manifest_digest": manifest["digest"],
     }
 

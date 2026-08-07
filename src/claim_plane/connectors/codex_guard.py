@@ -631,6 +631,30 @@ def _test_feedback_shell(root: Path, command: str) -> bool:
     )
 
 
+def _compound_test_feedback_shell(root: Path, command: str) -> bool:
+    """Allow bounded inspection chains containing a targeted test command.
+
+    Every segment must independently be either read-only or accepted test feedback.
+    Pipelines are intentionally excluded because they can mask the test exit status or
+    introduce an output-writing stage.
+    """
+
+    pipelines, failure = _split_read_only_shell(command)
+    if failure is not None or pipelines is None or len(pipelines) < 2:
+        return False
+    saw_test_feedback = False
+    for pipeline in pipelines:
+        if len(pipeline) != 1:
+            return False
+        segment = pipeline[0]
+        if _test_feedback_shell(root, segment):
+            saw_test_feedback = True
+            continue
+        if not _simple_read_only_shell(segment):
+            return False
+    return saw_test_feedback
+
+
 def _shell_failure(
     reason_code: str,
     detail: str,
@@ -1254,7 +1278,9 @@ def classify_tool_call(
             return "control_plane", ()
         if _authoritative_acceptance_shell(root, command):
             return "acceptance_reserved", ()
-        if _test_feedback_shell(root, command):
+        if _test_feedback_shell(root, command) or _compound_test_feedback_shell(
+            root, command
+        ):
             return "test_feedback", ()
         if _simple_read_only_shell(command):
             return "read_only", ()

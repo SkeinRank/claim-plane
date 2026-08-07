@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.11] — 2026-08-07
+
+### Fixed
+
+- separate final delivery outcome from later OSS acceptance rechecks so a rejected delivery can never be presented as `VERIFIED_AFTER_RECHECK`;
+- report whether the current candidate matches the evaluator input and label passing, failing, stale, and evaluator-error rechecks without overwriting the original delivery decision;
+- allow bounded shell inspection chains to include a targeted test command when every segment is independently read-only or approved test feedback, while keeping pipelines, full acceptance commands, inline Python, and mutating segments fail-closed.
+
 ## [0.37.10] — 2026-08-06
 
 ### Fixed

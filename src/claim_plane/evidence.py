@@ -423,6 +423,19 @@ def _report_unsigned(root: Path, run: Mapping[str, Any]) -> dict[str, Any]:
         },
         "reverification": reverification,
         "current_candidate_verdict": current_candidate_verdict,
+        "candidate_recheck": {
+            "state": current_candidate_verdict,
+            "classification": (
+                reverification.get("classification")
+                if isinstance(reverification, Mapping)
+                else None
+            ),
+            "matches_current": isinstance(reverification, Mapping),
+        },
+        "delivery": {
+            "outcome": run.get("outcome"),
+            "verified": bool(run.get("verified")),
+        },
         "decisions": _decision_summary(events),
         "execution": execution,
         "lifecycle": lifecycle_payload,
@@ -552,6 +565,19 @@ def build_evidence_replay(root: str | Path, selector: str = "latest") -> dict[st
         "entries": [item.to_dict() for item in entries],
         "reverification": reverification,
         "current_candidate_verdict": current_candidate_verdict,
+        "candidate_recheck": {
+            "state": current_candidate_verdict,
+            "classification": (
+                reverification.get("classification")
+                if isinstance(reverification, Mapping)
+                else None
+            ),
+            "matches_current": isinstance(reverification, Mapping),
+        },
+        "delivery": {
+            "outcome": run.get("outcome"),
+            "verified": bool(run.get("verified")),
+        },
         "determinism": {
             "available": bool(determinism_verification.get("available")),
             "valid": bool(determinism_verification.get("valid")),
@@ -601,7 +627,8 @@ def render_evidence_replay(payload: Mapping[str, Any]) -> tuple[str, ...]:
         )
         if reverification.get("log_dir"):
             lines.append(f"  logs {reverification.get('log_dir')}")
-        lines.append(f"Current candidate: {payload.get('current_candidate_verdict')}")
+        lines.append(f"  candidate {payload.get('current_candidate_verdict')}")
+        lines.append(f"  delivery remains {payload.get('outcome')}")
     determinism = payload.get("determinism")
     if isinstance(determinism, Mapping) and determinism.get("available"):
         state = "EQUIVALENT" if determinism.get("replay_equivalent") else "MISMATCH"

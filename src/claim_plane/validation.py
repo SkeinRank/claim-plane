@@ -1464,6 +1464,31 @@ def _runtime_usage(
     )
 
 
+def _guarded_delivery_accepted(
+    report: Mapping[str, Any], *, task_success: bool
+) -> bool:
+    """Require both a verified delivery and passing acceptance evidence.
+
+    Older evidence values remain readable, but a later passing recheck never upgrades
+    an originally rejected delivery.
+    """
+
+    candidate_state = str(
+        report.get("current_candidate_verdict") or report.get("outcome") or ""
+    )
+    return bool(
+        task_success
+        and report.get("outcome") == "VERIFIED"
+        and candidate_state
+        in {
+            "MATCHES_VERIFIED_DELIVERY",
+            "MATCHES_PASSING_ACCEPTANCE_RECHECK",
+            "VERIFIED",
+            "VERIFIED_AFTER_RECHECK",
+        }
+    )
+
+
 def collect_validation_execution(
     execution_id: str,
     *,
@@ -1517,12 +1542,9 @@ def collect_validation_execution(
         false_blocks = int(inspection_map.get("recovered_after_denial") or 0)
         evidence_digest = str(report.get("evidence_digest") or "") or None
         if entry.arm is DogfoodArm.GUARDED:
-            accepted_delivery = task_success and str(
-                report.get("current_candidate_verdict") or report.get("outcome") or ""
-            ) in {
-                "VERIFIED",
-                "VERIFIED_AFTER_RECHECK",
-            }
+            accepted_delivery = _guarded_delivery_accepted(
+                report, task_success=task_success
+            )
             missed_mutations = sum(not _covered(path, final_scope) for path in changed)
     undeclared = sum(not _covered(path, initial_scope) for path in changed)
     input_tokens, output_tokens, cost_usd = _runtime_usage(report)

@@ -931,10 +931,11 @@ def _print_evidence_report(payload: Mapping[str, Any]) -> None:
     reverification = payload.get("reverification")
     if isinstance(reverification, Mapping):
         print(
-            "Reverification: "
+            "Acceptance recheck: "
             f"{reverification.get('classification')} · "
-            f"current={payload.get('current_candidate_verdict')}"
+            f"candidate={payload.get('current_candidate_verdict')}"
         )
+        print(f"  Delivery remains: {payload.get('outcome')}")
         if reverification.get("log_dir"):
             print(f"  Logs: {reverification.get('log_dir')}")
     determinism = payload.get("determinism") or {}
@@ -1074,15 +1075,24 @@ def cmd_oss_pilot_status(args: argparse.Namespace) -> int:
             print(f"  {item}")
         latest = payload.get("latest_run")
         if latest:
-            print(f"Latest run: {latest.get('run_id')} · {latest.get('outcome')}")
+            print(f"Latest run: {latest.get('run_id')}")
         else:
             print("Latest run: none")
-        print(f"Current candidate: {payload.get('current_verdict')}")
+        print(f"Delivery: {payload.get('delivery_outcome')}")
+        print(f"Candidate state: {payload.get('current_verdict')}")
         latest_acceptance = payload.get("latest_acceptance")
         if isinstance(latest_acceptance, Mapping):
+            match = latest_acceptance.get("candidate_matches_current")
+            match_text = (
+                "candidate matches current"
+                if match is True
+                else "candidate does not match current"
+                if match is False
+                else "candidate match unavailable"
+            )
             print(
-                "Latest acceptance: "
-                f"{latest_acceptance.get('classification')} · "
+                "Acceptance recheck: "
+                f"{latest_acceptance.get('classification')} · {match_text} · "
                 f"{latest_acceptance.get('detail')}"
             )
             if latest_acceptance.get("log_dir"):
