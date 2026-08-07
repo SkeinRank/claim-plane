@@ -603,7 +603,7 @@ def _current_candidate_verdict(
     """Describe candidate evidence without conflating it with delivery outcome."""
 
     matches = _candidate_matches_reverification(current_candidate, reverification)
-    if matches is True:
+    if matches is True and reverification is not None:
         classification = str(reverification.get("classification") or "")
         if classification == "PASS":
             return "MATCHES_PASSING_ACCEPTANCE_RECHECK"

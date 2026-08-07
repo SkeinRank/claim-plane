@@ -37,7 +37,8 @@ def _classify(root: Path, command: str) -> str:
     ),
 )
 def test_read_only_shell_chains_and_pipelines_are_classified_as_read_only(
-    tmp_path: Path, command: str
+    tmp_path: Path,
+    command: str,
 ) -> None:
     assert _classify(tmp_path, command) == "read_only"
 
@@ -63,7 +64,8 @@ def test_read_only_shell_chains_and_pipelines_are_classified_as_read_only(
     ),
 )
 def test_shell_compositions_fail_closed_when_any_stage_is_not_provably_read_only(
-    tmp_path: Path, command: str
+    tmp_path: Path,
+    command: str,
 ) -> None:
     assert _classify(tmp_path, command) == "opaque_shell"
 
@@ -97,10 +99,14 @@ def test_opaque_shell_denial_names_the_exact_unsupported_pipeline_stage(
         "git diff --check; python -m pytest tests/test_loader.py",
         "git status --short && /opt/pyenv/versions/3.10.14/bin/python -m pytest -q tests/test_other.py",
         "git diff -- src/app.py; pytest -q tests/test_app.py",
+        "ruff check src/claim_plane/cli.py tests/test_controlled_run.py",
+        "ruff format --check src/claim_plane/cli.py tests/test_controlled_run.py",
+        "git diff --check; ruff format --check tests/test_controlled_run.py",
     ),
 )
 def test_bounded_inspection_chains_can_include_targeted_test_feedback(
-    tmp_path: Path, command: str
+    tmp_path: Path,
+    command: str,
 ) -> None:
     assert _classify(tmp_path, command) == "test_feedback"
 
@@ -108,12 +114,20 @@ def test_bounded_inspection_chains_can_include_targeted_test_feedback(
 @pytest.mark.parametrize(
     "command",
     (
-        "git diff --check; python -c 'open(\"out.txt\", \"w\").write(\"x\")'",
+        'git diff --check; python -c \'open("out.txt", "w").write("x")\'',
         "pytest -q tests/test_app.py | tee pytest.log",
         "git status --short && pytest",
+        "ruff check --fix src/claim_plane/cli.py",
+        "ruff check --fix-only src/claim_plane/cli.py",
+        "ruff check --add-noqa src/claim_plane/cli.py",
+        "ruff check --output-file ruff.txt src/claim_plane/cli.py",
+        "ruff format src/claim_plane/cli.py",
+        "ruff clean",
+        "ruff format --check src/claim_plane/cli.py | tee ruff.log",
     ),
 )
 def test_test_feedback_chains_remain_fail_closed_for_unsafe_or_full_suite_segments(
-    tmp_path: Path, command: str
+    tmp_path: Path,
+    command: str,
 ) -> None:
     assert _classify(tmp_path, command) == "opaque_shell"

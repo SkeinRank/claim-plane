@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.12] — 2026-08-07
+
+### Fixed
+
+- preserve per-command acceptance results in durable controlled-run evidence so failed final verification keeps the command, return code, duration, and bounded stdout/stderr diagnostics available to `claim-plane report`;
+- allow bounded Ruff lint and formatter checks as guarded development feedback while keeping source-mutating Ruff modes fail-closed;
+- restore the technical-preview test baseline to Ruff-format-clean state before interactive dogfood resumes.
+
 ## [0.37.11] — 2026-08-07
 
 ### Fixed

@@ -668,6 +668,15 @@ def test_controlled_run_retries_failed_stop_verification_with_project_acceptance
     assert result.completion["acceptance_passed"] is True
     assert result.acceptance["command_count"] == 1
     assert result.acceptance["commands"] == ["python -m pytest"]
+    assert len(result.acceptance["results"]) == 1
+    acceptance_result = result.acceptance["results"][0]
+    assert acceptance_result["command"] == "python -m pytest"
+    assert acceptance_result["returncode"] == 0
+    assert acceptance_result["passed"] is True
+    assert acceptance_result["sandbox_backend"] == "tree"
+    assert acceptance_result["sandbox_enforced"] is False
+    persisted = load_controlled_run(repo, result.run_id)
+    assert persisted["acceptance"]["results"] == result.acceptance["results"]
     assert result.lifecycle is not None
     assert result.lifecycle["valid"] is True
     assert result.lifecycle["verified"] is True
@@ -763,6 +772,58 @@ def test_evidence_report_and_replay_are_deterministic_after_restart(
     serialized = json.dumps(first, ensure_ascii=False)
     assert task not in serialized
     assert "Updated app.py and verified the change." not in serialized
+
+
+def test_cli_report_surfaces_failed_acceptance_command_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = {
+        "run_id": "cpr_failed_acceptance",
+        "outcome": "REJECTED",
+        "evidence_digest": "e" * 64,
+        "task": {"sha256": "a" * 64, "length": 12},
+        "agent": {"adapter": "codex", "session_id": "session-1"},
+        "inspection": {},
+        "intent": {},
+        "policy": {
+            "name": "guarded",
+            "risk": {"highest_risk": "medium", "final_action": "ALLOW"},
+        },
+        "changes": {
+            "file_count": 0,
+            "total_additions": 0,
+            "total_deletions": 0,
+            "total_hunks": 0,
+            "files": [],
+        },
+        "decisions": {"blocked_count": 0, "observed_count": 0, "amendment_count": 0},
+        "acceptance": {
+            "passed": False,
+            "classification": "COMMAND_FAILED",
+            "command_count": 1,
+            "results": [
+                {
+                    "command": "./scripts/check.sh",
+                    "returncode": 1,
+                    "passed": False,
+                    "duration_ms": 1430,
+                    "stdout_tail": "[2/10] Ruff format\n3 files would be reformatted\n",
+                    "stderr_tail": "",
+                }
+            ],
+        },
+        "determinism": {},
+        "execution": {"duration_seconds": 2.0, "runtime_returncode": 0},
+        "integrity": {"valid": True, "findings": []},
+    }
+    monkeypatch.setattr(cli, "build_evidence_report", lambda root, selector: payload)
+
+    assert cli.main(["report", "latest", "--repo", "."]) == 0
+    output = capsys.readouterr().out
+    assert "Acceptance: COMMAND_FAILED (1 configured commands)" in output
+    assert "Failed: ./scripts/check.sh · exit 1 · 1430ms" in output
+    assert "Last output: 3 files would be reformatted" in output
 
 
 def test_cli_report_and_replay_support_latest_selector(

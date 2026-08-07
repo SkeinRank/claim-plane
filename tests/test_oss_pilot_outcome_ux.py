@@ -58,7 +58,8 @@ def test_stale_recheck_is_not_applied_to_current_candidate() -> None:
 
 
 def test_status_cli_prints_delivery_before_acceptance_recheck(
-    monkeypatch, capsys
+    monkeypatch,
+    capsys,
 ) -> None:
     monkeypatch.setattr(
         cli,
@@ -121,7 +122,9 @@ def test_replay_keeps_delivery_outcome_separate_from_recheck() -> None:
     assert "  delivery remains REJECTED" in lines
 
 
-def test_guarded_validation_never_upgrades_rejected_delivery_after_pass_recheck() -> None:
+def test_guarded_validation_never_upgrades_rejected_delivery_after_pass_recheck() -> (
+    None
+):
     report = {
         "outcome": "REJECTED",
         "current_candidate_verdict": "MATCHES_PASSING_ACCEPTANCE_RECHECK",
@@ -130,7 +133,9 @@ def test_guarded_validation_never_upgrades_rejected_delivery_after_pass_recheck(
     assert validation._guarded_delivery_accepted(report, task_success=True) is False
 
 
-def test_guarded_validation_accepts_verified_delivery_with_matching_pass_recheck() -> None:
+def test_guarded_validation_accepts_verified_delivery_with_matching_pass_recheck() -> (
+    None
+):
     report = {
         "outcome": "VERIFIED",
         "current_candidate_verdict": "MATCHES_PASSING_ACCEPTANCE_RECHECK",

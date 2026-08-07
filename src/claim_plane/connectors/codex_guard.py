@@ -592,6 +592,36 @@ def _compile_feedback_shell(root: Path, command: str) -> bool:
     return True
 
 
+def _ruff_feedback(argv: Sequence[str]) -> bool:
+    """Return whether one Ruff invocation is bounded development feedback.
+
+    Ruff lint and formatter check modes may create tool caches, but they must never
+    rewrite source files through this path. Source-mutating fix/format modes remain
+    fail-closed and are handled as opaque shell execution.
+    """
+
+    if not argv or posixpath.basename(argv[0]).casefold() != "ruff":
+        return False
+    if len(argv) < 2:
+        return False
+    args = tuple(argv[1:])
+    command = args[0]
+    mutating_flags = {"--fix", "--fix-only", "--add-noqa", "--output-file", "-o"}
+    if any(
+        item in mutating_flags
+        or item.startswith("--fix=")
+        or item.startswith("--fix-only=")
+        or item.startswith("--output-file=")
+        for item in args[1:]
+    ):
+        return False
+    if command == "check":
+        return True
+    if command == "format":
+        return "--check" in args[1:]
+    return False
+
+
 def _test_feedback_shell(root: Path, command: str) -> bool:
     argv = _shell_argv(command)
     if argv is None or not argv:
@@ -599,6 +629,8 @@ def _test_feedback_shell(root: Path, command: str) -> bool:
     if _authoritative_acceptance_shell(root, command):
         return False
     if _compile_feedback_shell(root, command):
+        return True
+    if _ruff_feedback(argv):
         return True
     pytest_args = _pytest_arguments(argv)
     if pytest_args is not None:

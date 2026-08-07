@@ -918,6 +918,10 @@ def _print_evidence_report(payload: Mapping[str, Any]) -> None:
     for item in acceptance.get("results") or ():
         if not isinstance(item, Mapping) or item.get("passed"):
             continue
+        command = str(item.get("command") or "<unknown command>")
+        returncode = int(item.get("returncode") or 0)
+        duration_ms = int(item.get("duration_ms") or 0)
+        print(f"  Failed: {command} · exit {returncode} · {duration_ms}ms")
         detail = str(item.get("detail") or "")
         if detail:
             print(f"  {detail}")

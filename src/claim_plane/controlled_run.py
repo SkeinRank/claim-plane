@@ -787,6 +787,8 @@ def _acceptance_summary(root: Path, completion: Mapping[str, Any]) -> dict[str, 
             "duration_ms": int(raw.get("duration_ms") or 0),
             "stdout_tail": str(raw.get("stdout_tail") or ""),
             "stderr_tail": str(raw.get("stderr_tail") or ""),
+            "sandbox_backend": str(raw.get("sandbox_backend") or "tree"),
+            "sandbox_enforced": bool(raw.get("sandbox_enforced")),
         }
         if metadata is not None:
             metadata_classification = str(metadata.get("classification") or "")
@@ -1703,7 +1705,7 @@ def run_controlled_task(
         result_git,
         preexisting=start_worktree_baseline,
     )
-    acceptance = _acceptance_summary(resolved_root, completion)
+    acceptance = _acceptance_summary(resolved_root, completion_payload)
     lifecycle = _lifecycle_summary(resolved_root, session_id)
     scope = _scope_summary(
         normalized_scope, locked=lock_scope, adapter_status=adapter_status
@@ -2073,7 +2075,7 @@ def run_interactive_codex(
         result_git,
         preexisting=start_worktree_baseline,
     )
-    acceptance = _acceptance_summary(resolved_root, completion)
+    acceptance = _acceptance_summary(resolved_root, completion_payload)
     lifecycle = _lifecycle_summary(resolved_root, session_id)
 
     prompt_sha = None
