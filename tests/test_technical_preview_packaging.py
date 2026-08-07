@@ -52,7 +52,7 @@ def test_preview_version_and_public_contract_are_consistent() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = technical_preview_manifest(ROOT)
 
-    assert __version__ == "0.37.9"
+    assert __version__ == "0.37.10"
     assert project["project"]["version"] == __version__
     assert manifest["version"] == __version__
     assert manifest["channel"] == "single-agent-codex"
@@ -230,3 +230,20 @@ def test_interactive_codex_command_parses_without_manual_scope() -> None:
     assert automatic.scope is None
     assert guided.task == "Fix timeout handling"
     assert guided.scope == ["src/connector.py"]
+
+
+def test_release_build_backend_is_provisioned_explicitly() -> None:
+    gate = (ROOT / "scripts/check-technical-preview.sh").read_text(encoding="utf-8")
+    publish = (ROOT / ".github/workflows/publish.yml").read_text(
+        encoding="utf-8"
+    )
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    releasing = (ROOT / "docs/RELEASING.md").read_text(encoding="utf-8")
+
+    assert "setuptools>=77.0.3 is required for release builds" in gate
+    assert "--no-build-isolation" in gate
+    assert '"setuptools>=77.0.3" wheel build twine' in publish
+    assert "python -m build --no-isolation" in publish
+    assert '"setuptools>=77.0.3" wheel build twine' in ci
+    assert "python -m build --no-isolation" in ci
+    assert '"setuptools>=77.0.3" wheel build twine' in releasing

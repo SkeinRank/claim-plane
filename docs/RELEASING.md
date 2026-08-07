@@ -15,10 +15,10 @@ Claim Plane uses the distribution name `claim-plane`, the import package
 3. Run the complete quality and packaging checks:
 
    ```bash
+   python -m pip install --upgrade "setuptools>=77.0.3" wheel build twine
    ./scripts/check.sh
    ./scripts/check-technical-preview.sh --build
-   python -m pip install --upgrade build twine
-   python -m build
+   python -m build --no-isolation
    python -m twine check dist/*
    ```
 

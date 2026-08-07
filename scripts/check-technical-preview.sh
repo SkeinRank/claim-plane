@@ -75,6 +75,37 @@ PY
 ./scripts/technical-preview-demo.sh >/dev/null
 
 if [[ "${BUILD}" -eq 1 ]]; then
+  python - <<'PY'
+from __future__ import annotations
+
+import re
+from importlib.metadata import PackageNotFoundError, version
+
+required = (77, 0, 3)
+try:
+    installed_text = version("setuptools")
+except PackageNotFoundError as exc:
+    raise SystemExit(
+        'setuptools>=77.0.3 is required for release builds; run: '
+        'python -m pip install -U "setuptools>=77.0.3" wheel'
+    ) from exc
+
+parts = tuple(int(item) for item in re.findall(r"\d+", installed_text)[:3])
+installed = parts + (0,) * (3 - len(parts))
+if installed < required:
+    raise SystemExit(
+        f"setuptools>=77.0.3 is required for release builds; found {installed_text}. "
+        'Run: python -m pip install -U "setuptools>=77.0.3" wheel'
+    )
+
+try:
+    import setuptools.build_meta  # noqa: F401
+except Exception as exc:
+    raise SystemExit(
+        "setuptools.build_meta is not importable in the release environment"
+    ) from exc
+PY
+
   DIST="$(mktemp -d "${TMPDIR:-/tmp}/claim-plane-dist.XXXXXX")"
   python -m pip wheel . --no-deps --no-build-isolation --wheel-dir "${DIST}" >/dev/null
   python - "${DIST}" <<'PY'

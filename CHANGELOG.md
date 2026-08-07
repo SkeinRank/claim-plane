@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.10] — 2026-08-06
+
+### Fixed
+
+- provision `setuptools>=77.0.3` explicitly in CI and publication jobs before release validation;
+- build the technical-preview wheel and final distributions from the provisioned release environment, avoiding an implicit second network fetch during the package gate;
+- keep setuptools restricted to the build system and release toolchain, without adding it to Claim Plane runtime dependencies.
+
 ## [0.37.9] — 2026-08-06
 
 ### Fixed
