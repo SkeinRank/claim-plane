@@ -234,9 +234,7 @@ def test_interactive_codex_command_parses_without_manual_scope() -> None:
 
 def test_release_build_backend_is_provisioned_explicitly() -> None:
     gate = (ROOT / "scripts/check-technical-preview.sh").read_text(encoding="utf-8")
-    publish = (ROOT / ".github/workflows/publish.yml").read_text(
-        encoding="utf-8"
-    )
+    publish = (ROOT / ".github/workflows/publish.yml").read_text(encoding="utf-8")
     ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     releasing = (ROOT / "docs/RELEASING.md").read_text(encoding="utf-8")
 
