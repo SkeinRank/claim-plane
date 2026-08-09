@@ -8,7 +8,7 @@ The experiment code follows three rules:
 2. Run artifacts use a stable directory layout with atomic checkpoints for resume.
 3. Secrets are never written into study declarations or run manifests.
 
-The shared foundation is model-free. Planner v1 is preserved as a separate research module. The published six-pair study and the frozen-plan 30-pair × 3-seed study are executable from this directory without Jupyter.
+The shared foundation is model-free. Planner v1 is preserved as a separate research module. The published six-pair study and the published 30-pair × 3-seed confirmatory study are executable from this directory without Jupyter.
 
 ## Study declaration
 
@@ -122,7 +122,7 @@ gold replacement text is shown to the planner or coder. API calls are physically
 sequential; the parallel arm represents logical topology in which both workers start
 from the same immutable base.
 
-## Frozen-plan 30-pair × 3-seed study
+## Published confirmatory 30-pair × 3-seed study
 
 `confirmatory_30x3/` converts the V9 notebook protocol into a resumable CLI workflow.
 The protocol is deliberately staged so pair selection, planning, and coding variance are
@@ -233,7 +233,7 @@ OPENROUTER_API_KEY=... \
   ./scripts/cooperbench-docker.sh reproduce /absolute/path/to/CooperBench
 ```
 
-The same image can freeze and execute the confirmatory protocol:
+The same image can reproduce the published confirmatory protocol:
 
 ```bash
 ./scripts/cooperbench-docker.sh confirmatory-prepare /absolute/path/to/CooperBench
@@ -293,4 +293,4 @@ that define those six pairs.
 
 ## Scope
 
-The shared study foundation does not call an LLM or download CooperBench. Live model access exists only in research modules, and the runtime package remains model-agnostic. The published study and confirmatory study keep protocol-specific selection and execution policy outside `src/claim_plane` while sharing the same deterministic runtime mechanisms.
+The shared study foundation does not call an LLM or download CooperBench. Live model access exists only in research modules, and the runtime package remains model-agnostic. Both published studies keep protocol-specific selection and execution policy outside `src/claim_plane` while sharing the same deterministic runtime mechanisms.

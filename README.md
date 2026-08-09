@@ -302,7 +302,9 @@ mismatched cells instead of filling gaps.
 See [`benchmark/single-agent-validation/README.md`](benchmark/single-agent-validation/README.md)
 for the full workflow and release gate semantics.
 
-## Research paper
+## Research papers
+
+### Paper #1 — Enforceable change intents and dynamic scope
 
 **Claim Plane: Enforceable Change Intents and Dynamic Scope for Parallel Coding Agents**  
 Maxim Nikolaev · Software Engineering (`cs.SE`) · 2026
@@ -313,7 +315,19 @@ Maxim Nikolaev · Software Engineering (`cs.SE`) · 2026
 - [Paper metadata and citation](papers/claim-plane-2026/README.md)
 - [Published six-pair CooperBench reproduction](experiments/cooperbench/paper_6pair/)
 
-Repository-level software citation metadata is available in [`CITATION.cff`](CITATION.cff), and the paper-specific BibTeX entry is available in [`papers/claim-plane-2026/citation.bib`](papers/claim-plane-2026/citation.bib).
+### Paper #2 — 30-pair, three-seed confirmatory study
+
+**Claim Plane: Reliability Gains and the Limits of Selective Concurrency for Parallel Coding Agents: A 30-Pair, Three-Seed Confirmatory Study of Deterministic Pre-Write Admission**  
+Maxim Nikolaev · Software Engineering (`cs.SE`) · 2026
+
+- [arXiv abstract](https://arxiv.org/abs/2608.00947)
+- [PDF](https://arxiv.org/pdf/2608.00947)
+- [DOI: 10.48550/arXiv.2608.00947](https://doi.org/10.48550/arXiv.2608.00947)
+- [Paper metadata and citation](papers/claim-plane-confirmatory-2026/README.md)
+- [Published 30-pair × 3-seed CooperBench reproduction](experiments/cooperbench/confirmatory_30x3/)
+- [Public study artifacts](https://huggingface.co/datasets/skeinrank/claim-plane-confirmatory-30x3)
+
+Repository-level software citation metadata is available in [`CITATION.cff`](CITATION.cff). Paper-specific BibTeX entries are available in [`papers/claim-plane-2026/citation.bib`](papers/claim-plane-2026/citation.bib) and [`papers/claim-plane-confirmatory-2026/citation.bib`](papers/claim-plane-confirmatory-2026/citation.bib).
 
 ## More ways to run
 
@@ -1304,7 +1318,7 @@ Claim Plane remains an alpha coordination kernel.
 - The default `tree` sandbox detects repository mutations but does not isolate network or the host filesystem; strict OS isolation requires an available supported backend.
 - HMAC evidence provides shared-secret authenticity, not public-key identity or hardware attestation.
 - The router is deterministic and heuristic, not learned.
-- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The repository includes the frozen Planner v1 policy, an executable reproduction of the published six-pair CooperBench mechanism check, the frozen-plan 30-pair × 3-seed runner, and deterministic publication aggregation. Confirmatory conclusions remain unpublished until the full study is completed and the resulting analysis is reviewed.
+- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The published 30-pair × 3-seed confirmatory study found strong reliability gains for conservative static admission, but also showed that static admission largely collapsed toward serialization and that dynamic admission exposed region undercoverage and insufficient amendment handling. Provider calls were physically sequential, so the study does not establish wall-clock parallel speedup.
 
 The comparative evaluation requirements are documented in [docs/BENCHMARK.md](docs/BENCHMARK.md), and the study infrastructure is described in [experiments/cooperbench/README.md](experiments/cooperbench/README.md).
 
