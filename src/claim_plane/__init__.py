@@ -133,6 +133,14 @@ from claim_plane.core import (
     RepairAction,
     RepairActionKind,
     RepairPlan,
+    PYTHON_STRUCTURAL_INDEX_PROTOCOL,
+    PythonStructuralExtractionError,
+    PythonStructuralIndex,
+    PythonSymbolDefinition,
+    PythonSymbolKind,
+    extract_python_file,
+    extract_python_files,
+    extract_python_structure,
     ResourceKind,
     ScopeCommitment,
     ResourceRef,
@@ -325,7 +333,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.13"
+__version__ = "0.37.14"
 
 __all__ = [
     "VALIDATION_ACCEPTANCE_TIMEOUTS",
@@ -546,6 +554,14 @@ __all__ = [
     "RepairAction",
     "RepairActionKind",
     "RepairPlan",
+    "PYTHON_STRUCTURAL_INDEX_PROTOCOL",
+    "PythonStructuralExtractionError",
+    "PythonStructuralIndex",
+    "PythonSymbolDefinition",
+    "PythonSymbolKind",
+    "extract_python_file",
+    "extract_python_files",
+    "extract_python_structure",
     "ResourceKind",
     "ScopeCommitment",
     "ResourceRef",

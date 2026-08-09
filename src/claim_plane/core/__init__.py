@@ -33,6 +33,16 @@ from claim_plane.core.models import (
     VerdictKind,
     WorkerTier,
 )
+from claim_plane.core.python_structure import (
+    PYTHON_STRUCTURAL_INDEX_PROTOCOL,
+    PythonStructuralExtractionError,
+    PythonStructuralIndex,
+    PythonSymbolDefinition,
+    PythonSymbolKind,
+    extract_python_file,
+    extract_python_files,
+    extract_python_structure,
+)
 from claim_plane.core.resource_ir import (
     SEMANTIC_RESOURCE_IR_PROTOCOL,
     ResourceAuthority,
@@ -91,6 +101,14 @@ __all__ = [
     "RepairAction",
     "RepairActionKind",
     "RepairPlan",
+    "PYTHON_STRUCTURAL_INDEX_PROTOCOL",
+    "PythonStructuralExtractionError",
+    "PythonStructuralIndex",
+    "PythonSymbolDefinition",
+    "PythonSymbolKind",
+    "extract_python_file",
+    "extract_python_files",
+    "extract_python_structure",
     "ResourceKind",
     "ScopeCommitment",
     "ResourceRef",

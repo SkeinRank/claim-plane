@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.13.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.14.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -854,6 +854,31 @@ concrete path being requested rather than promoted as one broad write reservatio
 Contingent surfaces may be inspected read-only before promotion, and those possible read
 premises still participate in coordination against active writers.
 
+## Python structural extraction
+
+Python repositories can be projected into Semantic Resource IR v2 without importing or
+executing project code. The standard-library AST extractor records classes, functions,
+methods, async definitions, signatures, decorators, lexical owners, and inclusive source
+spans. Stable symbol identity is based on repository path plus qualified name, so moving a
+definition or evolving its signature does not silently create a new authority coordinate.
+
+```python
+from claim_plane import extract_python_structure
+
+index = extract_python_structure(source, path="src/parser.py")
+owners = index.owners_for_region(40, 52)
+for resource in owners:
+    print(resource.identity)
+```
+
+`owner_for_line()` returns the most specific enclosing symbol and falls back to the file
+resource for module-level code. Decorator lines belong to the decorated definition. Repeated
+logical definitions such as `typing.overload` declarations share one stable semantic identity
+while retaining distinct source occurrences in the structural index. Syntax errors fail closed
+with file/line coordinates, and file-based extraction is confined to an explicit repository
+root. The extractor intentionally does not infer call/import/type dependency edges yet; those
+are built by the dependency-graph stage on top of this structural index.
+
 ## Admission semantics
 
 | Outcome | Meaning |
@@ -1309,8 +1334,8 @@ without persisting API keys.
 Claim Plane remains an alpha coordination kernel.
 
 - It consumes structured intents; it does not yet generate the task graph.
-- Built-in source extraction is Python-first.
-- Semantic Resource IR v2 preserves stable symbol and contract coordinates when structured qualified identities are available; automatic AST extraction and ownership mapping remain Python-first follow-on work.
+- Built-in source extraction is Python-first; other languages currently remain at file/declared-resource granularity unless an external adapter supplies structured semantic resources.
+- Python AST extraction now provides stable symbol coordinates, lexical ownership, signatures, and changed-line ownership mapping. Cross-symbol dependency edges, contract propagation, and semantic conflict classification remain separate follow-on stages.
 - Documentation semantic checking is surface-oriented, not a full code-to-doc factual verifier.
 - `SQLitePlaneStore` is a single-host backend. The OS lock is derived from Git's canonical common directory, so separate local databases cannot choose independent lock namespaces. Multi-host deployments still require one network-authoritative registry such as PostgreSQL plus distributed leases and fencing.
 - The verified pipeline includes non-ignored untracked files, but ignored build/cache artifacts are intentionally excluded.

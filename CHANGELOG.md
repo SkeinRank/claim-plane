@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.14] — 2026-08-09
+
+### Added
+
+- add a Python structural extractor that parses repository source without importing or executing it and projects classes, functions, methods, async definitions, signatures, decorators, and lexical ownership into Semantic Resource IR v2 symbols;
+- add deterministic line-to-owner mapping so later Git-hunk admission can resolve a changed line to the most specific enclosing symbol while preserving file-level fallback;
+- add a versioned Python structural index format, packaged JSON Schema, stable source fingerprinting, syntax-error fail-closed behavior, encoding-aware file loading, and repository-root confinement.
+
 ## [0.37.13] — 2026-08-09
 
 ### Added

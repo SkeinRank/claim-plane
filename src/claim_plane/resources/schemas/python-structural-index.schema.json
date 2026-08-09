@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/python-structural-index.schema.json",
+  "title": "Claim Plane Python Structural Index",
+  "type": "object",
+  "required": ["protocol", "path", "source_digest", "file_resource", "definitions"],
+  "properties": {
+    "protocol": {"const": "claim-plane.python-structural-index.v1"},
+    "path": {"type": "string", "minLength": 1},
+    "source_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "file_resource": {"$ref": "#/$defs/semanticResource"},
+    "definitions": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/definition"}
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "semanticResource": {
+      "type": "object",
+      "required": [
+        "protocol", "layer", "kind", "stable_id", "identity", "identifier",
+        "path", "region", "language", "qualified_name", "signature",
+        "concept_id", "subject_concept_id", "parent_identity", "metadata"
+      ],
+      "properties": {
+        "protocol": {"const": "claim-plane.semantic-resource-ir.v2"},
+        "layer": {"enum": ["file", "region", "symbol", "contract", "resource"]},
+        "kind": {"type": "string"},
+        "stable_id": {"type": "string", "pattern": "^sr2_[0-9a-f]{24}$"},
+        "identity": {"type": "string", "minLength": 1},
+        "identifier": {"type": "string", "minLength": 1},
+        "path": {"type": ["string", "null"]},
+        "region": {"type": ["string", "null"]},
+        "language": {"type": ["string", "null"]},
+        "qualified_name": {"type": ["string", "null"]},
+        "signature": {"type": ["string", "null"]},
+        "concept_id": {"type": ["string", "null"]},
+        "subject_concept_id": {"type": ["string", "null"]},
+        "parent_identity": {"type": ["string", "null"]},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "definition": {
+      "type": "object",
+      "required": [
+        "resource", "symbol_kind", "qualified_name", "owner_qualified_name",
+        "owner_identity", "definition_start_line", "definition_line",
+        "body_start_line", "end_line", "depth", "decorators", "occurrence",
+        "metadata"
+      ],
+      "properties": {
+        "resource": {"$ref": "#/$defs/semanticResource"},
+        "symbol_kind": {
+          "enum": ["class", "function", "async_function", "method", "async_method"]
+        },
+        "qualified_name": {"type": "string", "minLength": 1},
+        "owner_qualified_name": {"type": ["string", "null"]},
+        "owner_identity": {"type": ["string", "null"]},
+        "definition_start_line": {"type": "integer", "minimum": 1},
+        "definition_line": {"type": "integer", "minimum": 1},
+        "body_start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "depth": {"type": "integer", "minimum": 0},
+        "decorators": {"type": "array", "items": {"type": "string"}},
+        "occurrence": {"type": "integer", "minimum": 1},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  }
+}
