@@ -136,6 +136,14 @@ from claim_plane.core import (
     ResourceKind,
     ScopeCommitment,
     ResourceRef,
+    ResourceAuthority,
+    ResourceLayer,
+    SemanticResource,
+    SemanticResourceIR,
+    SEMANTIC_RESOURCE_IR_PROTOCOL,
+    normalize_change_intent,
+    normalize_intent_operation,
+    normalize_resource_ref,
     RouteRecommendation,
     SemanticIdentityResolver,
     SQLitePlaneStore,
@@ -317,7 +325,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.12"
+__version__ = "0.37.13"
 
 __all__ = [
     "VALIDATION_ACCEPTANCE_TIMEOUTS",
@@ -541,6 +549,14 @@ __all__ = [
     "ResourceKind",
     "ScopeCommitment",
     "ResourceRef",
+    "ResourceAuthority",
+    "ResourceLayer",
+    "SemanticResource",
+    "SemanticResourceIR",
+    "SEMANTIC_RESOURCE_IR_PROTOCOL",
+    "normalize_change_intent",
+    "normalize_intent_operation",
+    "normalize_resource_ref",
     "RouteRecommendation",
     "SemanticIdentityResolver",
     "SQLitePlaneStore",

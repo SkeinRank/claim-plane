@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/semantic-resource-ir.schema.json",
+  "title": "Claim Plane Semantic Resource IR v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "intent_id", "task_id", "base_revision", "authorities"],
+  "properties": {
+    "protocol": {"const": "claim-plane.semantic-resource-ir.v2"},
+    "intent_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "minLength": 1},
+    "base_revision": {"type": "string", "minLength": 1},
+    "authorities": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/authority"}
+    }
+  },
+  "$defs": {
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["access", "commitment", "required", "resource"],
+      "properties": {
+        "access": {
+          "enum": ["read", "write", "extend", "delete", "rename", "document", "test"]
+        },
+        "commitment": {"enum": ["committed", "contingent"]},
+        "required": {"type": "boolean"},
+        "resource": {"$ref": "#/$defs/resource"}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "layer",
+        "kind",
+        "stable_id",
+        "identity",
+        "identifier",
+        "metadata"
+      ],
+      "properties": {
+        "protocol": {"const": "claim-plane.semantic-resource-ir.v2"},
+        "layer": {"enum": ["file", "region", "symbol", "contract", "resource"]},
+        "kind": {
+          "enum": ["file", "symbol", "concept", "contract", "document", "config", "route", "schema"]
+        },
+        "stable_id": {"type": "string", "pattern": "^sr2_[0-9a-f]{24}$"},
+        "identity": {"type": "string", "minLength": 1},
+        "identifier": {"type": "string", "minLength": 1},
+        "path": {"type": ["string", "null"]},
+        "region": {"type": ["string", "null"]},
+        "language": {"type": ["string", "null"]},
+        "qualified_name": {"type": ["string", "null"]},
+        "signature": {"type": ["string", "null"]},
+        "concept_id": {"type": ["string", "null"]},
+        "subject_concept_id": {"type": ["string", "null"]},
+        "parent_identity": {"type": ["string", "null"]},
+        "metadata": {"type": "object"}
+      }
+    }
+  }
+}

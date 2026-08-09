@@ -33,6 +33,16 @@ from claim_plane.core.models import (
     VerdictKind,
     WorkerTier,
 )
+from claim_plane.core.resource_ir import (
+    SEMANTIC_RESOURCE_IR_PROTOCOL,
+    ResourceAuthority,
+    ResourceLayer,
+    SemanticResource,
+    SemanticResourceIR,
+    normalize_change_intent,
+    normalize_intent_operation,
+    normalize_resource_ref,
+)
 from claim_plane.core.plane import Plane
 from claim_plane.core.registry import ClaimRegistry
 from claim_plane.core.semantic import SemanticIdentityResolver
@@ -85,6 +95,14 @@ __all__ = [
     "ScopeCommitment",
     "ResourceRef",
     "RouteRecommendation",
+    "SEMANTIC_RESOURCE_IR_PROTOCOL",
+    "ResourceAuthority",
+    "ResourceLayer",
+    "SemanticResource",
+    "SemanticResourceIR",
+    "normalize_change_intent",
+    "normalize_intent_operation",
+    "normalize_resource_ref",
     "SemanticIdentityResolver",
     "SQLitePlaneStore",
     "Verdict",

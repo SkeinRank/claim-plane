@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.12.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.13.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -371,6 +371,7 @@ installation.
 - structured `ChangeIntent` operations: read, write, extend, delete, rename, document, and test;
 - adaptive committed/contingent scope with just-in-time atomic re-admission before first mutation;
 - exact files, globs, bounded line regions, symbols, concepts, contracts, routes, schemas, configs, and documents;
+- versioned Semantic Resource IR v2 with canonical `file → region → symbol → contract` coordinates and stable symbol/contract identities for downstream dependency analysis;
 - strict optional Agent Lexicon resolution: requested semantic mode fails closed when unavailable;
 - concept-bound contracts through `subject_concept_id`;
 - deterministic outcomes for independent work, compatible overlap, contract dependencies, constrained parallelism, serialization, replanning, and rejection;
@@ -1309,7 +1310,7 @@ Claim Plane remains an alpha coordination kernel.
 
 - It consumes structured intents; it does not yet generate the task graph.
 - Built-in source extraction is Python-first.
-- Line-region admission is supported; stable AST-node ownership across edits is future work.
+- Semantic Resource IR v2 preserves stable symbol and contract coordinates when structured qualified identities are available; automatic AST extraction and ownership mapping remain Python-first follow-on work.
 - Documentation semantic checking is surface-oriented, not a full code-to-doc factual verifier.
 - `SQLitePlaneStore` is a single-host backend. The OS lock is derived from Git's canonical common directory, so separate local databases cannot choose independent lock namespaces. Multi-host deployments still require one network-authoritative registry such as PostgreSQL plus distributed leases and fencing.
 - The verified pipeline includes non-ignored untracked files, but ignored build/cache artifacts are intentionally excluded.

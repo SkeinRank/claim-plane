@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.13] — 2026-08-09
+
+### Added
+
+- introduce Semantic Resource IR v2 as a versioned, language-neutral authority normal form with explicit file, region, symbol, and contract layers;
+- derive deterministic stable identities that keep symbols and contracts anchored across line movement and signature evolution while retaining mutable coordinates as evidence;
+- expose intent-level normalized authority projections and a packaged JSON Schema for later dependency, conflict, and concurrency analysis.
+
 ## [0.37.12] — 2026-08-07
 
 ### Fixed
