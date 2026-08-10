@@ -25,6 +25,10 @@ from claim_plane.core.registry import ClaimRegistry
 AdmissionEvaluator = Callable[
     [ChangeIntent, list[ChangeIntent], set[str]], AdmissionDecision
 ]
+AmendmentPreflight = Callable[
+    [ChangeIntent, ChangeIntent, list[ChangeIntent]],
+    tuple[bool, Mapping[str, object], str],
+]
 
 
 class ClaimStore(Protocol):
@@ -54,6 +58,7 @@ class IntentStore(Protocol):
         evaluator: AdmissionEvaluator,
         *,
         expected_version: int | None = None,
+        amendment_preflight: AmendmentPreflight | None = None,
     ) -> AdmissionDecision: ...
 
     def promote_contingent_operations(

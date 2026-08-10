@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.19] — 2026-08-09
+
+### Added
+
+- add Semantic Amendment Protocol v2, which treats scope growth as a bounded authority decision over Semantic Resource IR v2 and Dependency Graph v2 rather than an unchecked operation append;
+- require monotonic intent growth, cap newly committed operations, paths, semantic roots, impact breadth, traversal depth, and contract changes, and keep unresolved dependency boundaries fail-closed;
+- evaluate new authority against other active intents inside the same registry transaction as amendment admission, persist source-bound semantic preflight evidence, and surface ordered overlap for the upcoming runtime-fencing layer instead of silently granting it.
+
 ## [0.37.18] — 2026-08-09
 
 ### Added

@@ -902,6 +902,11 @@ class ClaimRegistry:
         ],
         *,
         expected_version: int | None = None,
+        amendment_preflight: Callable[
+            [ChangeIntent, ChangeIntent, list[ChangeIntent]],
+            tuple[bool, Mapping[str, object], str],
+        ]
+        | None = None,
     ) -> AdmissionDecision:
         with self._immediate():
             self._expire_intents_locked()
@@ -926,6 +931,29 @@ class ClaimRegistry:
                 raise ValueError(f"cannot amend intent in state {current_state.value}")
             old_intent = ChangeIntent.from_dict(json.loads(row["payload_json"]))
             active = self._active_intents_locked(exclude=intent.intent_id)
+            preflight_payload: dict[str, object] = {}
+            if amendment_preflight is not None:
+                preflight_allowed, payload, guidance = amendment_preflight(
+                    old_intent, intent, active
+                )
+                preflight_payload = dict(payload)
+                if not preflight_allowed:
+                    decision = AdmissionDecision(
+                        kind=AdmissionKind.REPLAN,
+                        intent=intent,
+                        allowed=False,
+                        guidance=guidance,
+                    )
+                    self._event_locked(
+                        "intent_amendment_rejected",
+                        intent.intent_id,
+                        intent.owner,
+                        {
+                            "decision": decision.to_dict(),
+                            "amendment_preflight": preflight_payload,
+                        },
+                    )
+                    return decision
             decision = evaluator(
                 intent, active, self._known_intent_ids_locked() | {intent.intent_id}
             )
@@ -978,6 +1006,7 @@ class ClaimRegistry:
                     "decision": decision.to_dict(),
                     "changed_resources": changed_keys,
                     "stale_dependents": stale,
+                    "amendment_preflight": preflight_payload,
                 },
             )
             return decision

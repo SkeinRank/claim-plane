@@ -52,6 +52,14 @@ that declared symbol mutations are independent or explicitly commutative. Ordere
 dependencies become scheduler serialization edges in the required direction. Missing semantic roots,
 unresolved evidence, direct conflicts, and explicit serialize/deny policy remain fail-closed.
 
+Semantic Amendment Protocol v2 applies repository semantics to scope growth before the canonical
+amendment transaction commits. It permits only monotonic candidates, isolates newly committed
+mutation authority, projects that authority onto the semantic graph, propagates downstream impact,
+and enforces hard breadth limits. The same transaction compares the new surface with active intents.
+Independent or explicitly commutative relationships may proceed; conflicts and unknown relationships
+fail closed. Ordered overlap is returned as an ordering requirement rather than approved because the
+current runtime does not yet fence and refresh an already active worker.
+
 ### Dependency graph
 
 Edges are stored as `consumer -> producer`. Claim Plane validates the complete candidate graph inside the same transaction as admission or amendment. The external graph representation also exposes a producer-first topological order.

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/semantic-amendment.schema.json",
+  "title": "Claim Plane Semantic Amendment Protocol v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "intent_id",
+    "current_fingerprint",
+    "candidate_fingerprint",
+    "graph_fingerprint",
+    "disposition",
+    "reason",
+    "allowed",
+    "requires_ordering",
+    "new_operations",
+    "new_paths",
+    "semantic_changes",
+    "impact",
+    "active_relations",
+    "bounds",
+    "detail",
+    "metadata"
+  ],
+  "properties": {
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "protocol": {"const": "claim-plane.semantic-amendment.v2"},
+    "intent_id": {"type": "string", "minLength": 1},
+    "current_fingerprint": {"type": "string", "pattern": "^[0-9a-f]+$"},
+    "candidate_fingerprint": {"type": "string", "pattern": "^[0-9a-f]+$"},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "disposition": {"enum": ["approve", "order", "deny"]},
+    "reason": {
+      "enum": [
+        "bounded_safe",
+        "no_new_authority",
+        "non_monotonic",
+        "bound_exceeded",
+        "missing_semantic_root",
+        "unresolved_boundary",
+        "active_conflict",
+        "active_unknown",
+        "active_ordering_required"
+      ]
+    },
+    "allowed": {"type": "boolean"},
+    "requires_ordering": {"type": "boolean"},
+    "new_operations": {"type": "array", "items": {"type": "object"}},
+    "new_paths": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "semantic_changes": {"type": "array", "items": {"type": "object"}},
+    "impact": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+    "active_relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["intent_id", "owner", "decision"],
+        "properties": {
+          "intent_id": {"type": "string", "minLength": 1},
+          "owner": {"type": "string", "minLength": 1},
+          "decision": {"type": "object"}
+        }
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_new_operations",
+        "max_new_paths",
+        "max_semantic_roots",
+        "max_impact_resources",
+        "max_impact_depth",
+        "max_contract_changes",
+        "allow_new_files",
+        "deny_unresolved_boundaries"
+      ],
+      "properties": {
+        "max_new_operations": {"type": "integer", "minimum": 0},
+        "max_new_paths": {"type": "integer", "minimum": 0},
+        "max_semantic_roots": {"type": "integer", "minimum": 0},
+        "max_impact_resources": {"type": "integer", "minimum": 0},
+        "max_impact_depth": {"type": "integer", "minimum": 0},
+        "max_contract_changes": {"type": "integer", "minimum": 0},
+        "allow_new_files": {"type": "boolean"},
+        "deny_unresolved_boundaries": {"type": "boolean"}
+      }
+    },
+    "detail": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

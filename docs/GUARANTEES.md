@@ -72,5 +72,12 @@ Repository-bound planning derives this semantic evidence from the exact pinned G
 swarm session. A dirty working tree is not used as the proof source. The resulting decision and graph
 fingerprint are persisted with the concurrency plan.
 
+Semantic Amendment Protocol v2 adds a separate fail-closed preflight for new mutation authority.
+The preflight is executed inside the same registry transaction as amendment admission, requires
+monotonic intent growth, applies explicit operation/path/root/impact/contract bounds, preserves
+unresolved dependency boundaries, and evaluates the newly granted semantic surface against active
+intents. A rejected preflight does not replace the previously admitted intent. Ordered overlap is
+recorded but not granted until a runtime layer can establish the required execution order.
+
 Existing runtime intent ordering, stale-state propagation, Git hunk verification, and brokered
 mutation enforcement remain the authoritative execution controls.

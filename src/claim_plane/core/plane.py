@@ -9,6 +9,13 @@ from typing import Iterable, Mapping
 from claim_plane.arbiter.base import Arbiter, ExactMatchArbiter
 from claim_plane.coordination import AdmissionEngine, build_context_pack
 from claim_plane.core.governance import GovernancePolicy
+from claim_plane.core.amendment import (
+    SemanticAmendmentAssessment,
+    SemanticAmendmentBounds,
+    SemanticAmendmentExecution,
+    assess_semantic_amendment,
+)
+from claim_plane.core.dependency_graph import SemanticDependencyGraph
 from claim_plane.core.models import (
     AdmissionDecision,
     ChangeIntent,
@@ -180,6 +187,52 @@ class Plane:
             self._admission.evaluate,
             expected_version=expected_version,
         )
+
+    def amend_bounded(
+        self,
+        intent: ChangeIntent,
+        semantic_graph: SemanticDependencyGraph,
+        *,
+        bounds: SemanticAmendmentBounds | None = None,
+        expected_version: int | None = None,
+    ) -> SemanticAmendmentExecution:
+        """Atomically gate an amendment through semantic bounds and active work.
+
+        The semantic preflight runs inside the same registry transaction as ordinary
+        amendment admission.  Ordered overlap is deliberately not auto-approved yet:
+        the next runtime-fencing layer must establish the required execution order
+        before the blocked mutation is retried.
+        """
+
+        enriched = self._semantic.enrich_intent(self._govern_intent(intent))
+        enriched = replace(enriched, metadata={**enriched.metadata, "_amendment": True})
+        captured: dict[str, SemanticAmendmentAssessment] = {}
+
+        def preflight(
+            current: ChangeIntent,
+            candidate: ChangeIntent,
+            active: list[ChangeIntent],
+        ) -> tuple[bool, Mapping[str, object], str]:
+            assessment = assess_semantic_amendment(
+                current,
+                candidate,
+                semantic_graph,
+                active,
+                bounds=bounds,
+            )
+            captured["assessment"] = assessment
+            return assessment.allowed, assessment.to_dict(), assessment.detail
+
+        decision = self._registry.amend_intent(
+            enriched,
+            self._admission.evaluate,
+            expected_version=expected_version,
+            amendment_preflight=preflight,
+        )
+        assessment = captured.get("assessment")
+        if assessment is None:
+            raise RuntimeError("semantic amendment preflight did not execute")
+        return SemanticAmendmentExecution(assessment=assessment, admission=decision)
 
     def promote_contingent_scope(
         self,

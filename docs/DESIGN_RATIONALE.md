@@ -57,3 +57,9 @@ Planner-declared read sets are useful but incomplete. A tool adapter can emit ac
 ## Why HMAC before public-key attestation
 
 HMAC is dependency-free and sufficient for a CI service and verifier that share a secret. It does not establish public identity. The evidence format keeps signing separate so Sigstore, KMS, or hardware-backed adapters can be added later without changing the verified payload.
+
+## Why scope growth is a semantic authority decision
+
+A denied mutation can be necessary without making arbitrary scope expansion safe. Semantic Amendment Protocol v2 therefore treats additional authority as a new deterministic admission problem. The candidate must be monotonic: it cannot change the task identity, owner, pinned base, dependencies, acceptance criteria, preserve requirements, lease, or revoke existing operations. Newly committed mutation authority is projected onto the pinned semantic graph, propagated to dependents, bounded, and compared with other active intents inside the same registry transaction as amendment admission.
+
+The protocol does not infer that an ordered relationship is safe merely because an order exists. An already active worker may have built premises against the previous state, so `ordered` expansion remains blocked until runtime fencing can pause, refresh, and resume the affected execution. This keeps semantic amendment evidence useful without claiming execution guarantees the runtime cannot yet enforce.

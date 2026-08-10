@@ -102,6 +102,14 @@ from claim_plane.oss_pilot import (
     run_oss_pilot_acceptance,
 )
 from claim_plane.core import (
+    SEMANTIC_AMENDMENT_PROTOCOL,
+    ActiveAmendmentRelation,
+    SemanticAmendmentAssessment,
+    SemanticAmendmentBounds,
+    SemanticAmendmentDisposition,
+    SemanticAmendmentExecution,
+    SemanticAmendmentReason,
+    assess_semantic_amendment,
     SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL,
     CommutativityProof,
     SemanticConflictDecision,
@@ -366,9 +374,17 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.18"
+__version__ = "0.37.19"
 
 __all__ = [
+    "SEMANTIC_AMENDMENT_PROTOCOL",
+    "ActiveAmendmentRelation",
+    "SemanticAmendmentAssessment",
+    "SemanticAmendmentBounds",
+    "SemanticAmendmentDisposition",
+    "SemanticAmendmentExecution",
+    "SemanticAmendmentReason",
+    "assess_semantic_amendment",
     "SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL",
     "CommutativityProof",
     "SemanticConflictDecision",

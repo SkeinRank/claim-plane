@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.18.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.19.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -377,7 +377,7 @@ installation.
 - concept-bound contracts through `subject_concept_id`;
 - deterministic outcomes for independent work, compatible overlap, contract dependencies, constrained parallelism, serialization, replanning, and rejection;
 - safe broad-scope admission: known glob/file overlap is serialized rather than optimistically admitted;
-- versioned intent amendments with optimistic version checks;
+- versioned intent amendments with optimistic version checks and Semantic Amendment Protocol v2 for bounded semantic scope growth;
 - an atomically enforced runtime intent-dependency graph with producer-first topological order;
 - resource-scoped direct invalidation followed by transitive stale propagation, structured notices, and acknowledgement;
 - bounded worker context packs instead of replaying planner conversations;
@@ -421,6 +421,7 @@ installation.
 - versioned swarm budget policies with hard worker, graph-size, launch, token, cost, wall-time, retry, and concurrency ceilings that the planner cannot widen silently;
 - adaptive concurrency plans that combine the dependency DAG with region, overlap, contract, schema, and worker-budget constraints to produce deterministic execution waves or a fail-closed `replan_required` result;
 - Same-file Admission v2 that can admit unknown-region same-file work when graph-backed symbol mutations are proven `independent` or explicitly `commutative`, while preserving explicit deny/serialize policy and deterministic ordering for semantic producer-consumer dependencies;
+- Semantic Amendment Protocol v2 that requires monotonic scope growth, caps new authority and propagated impact, checks additional semantic resources against active intents inside the amendment transaction, and leaves ordered overlap blocked for runtime fencing;
 - shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, and promotes serialization constraints into effective dependencies;
 - a dynamic dependency scheduler that releases only admitted, prerequisite-complete work within current worker capacity and distinguishes runnable, active, retryable, terminal, and dependency-blocked items;
 - a deterministic merge queue that snapshots successful worker worktrees, integrates results on a Claim Plane-owned branch in effective-dependency order, blocks downstream workers until prerequisites are integrated, captures real Git conflicts, and leaves the user target branch untouched;
@@ -970,6 +971,39 @@ not from dirty working-tree content, and stores each Same-file Admission v2 deci
 fingerprint in the concurrency-plan metadata. This keeps the concurrency proof tied to the same
 repository state as the work graph.
 
+Semantic Amendment Protocol v2 applies the same semantic evidence to authority growth. A candidate
+amendment must preserve the task identity, owner, pinned base, dependencies, acceptance criteria,
+preserve requirements, and already committed operations. Only newly committed mutation authority
+is analyzed. Claim Plane projects that authority onto graph-backed resources, propagates downstream
+impact, applies hard bounds to operations, paths, semantic roots, impact breadth, traversal depth, and
+contract changes, and checks the new surface against other active intents in the same registry
+transaction as amendment admission.
+
+`independent` and explicitly proven `commutative` relationships may proceed. `conflicting`,
+`unknown`, unresolved dependency boundaries, non-monotonic changes, and exceeded bounds fail closed.
+An `ordered` relationship is surfaced as `order` rather than silently admitted: the current runtime
+does not yet pause and refresh an already active worker, so runtime fencing must establish that order
+before the mutation is retried. The preflight evidence is persisted with the amendment audit event.
+
+```python
+from claim_plane import SemanticAmendmentBounds
+
+result = plane.amend_bounded(
+    candidate_intent,
+    graph,
+    bounds=SemanticAmendmentBounds(
+        max_new_operations=4,
+        max_new_paths=2,
+        max_impact_resources=64,
+    ),
+    expected_version=current_version,
+)
+print(result.assessment.disposition.value, result.allowed)
+```
+
+The machine-readable assessment format is documented by
+[`schemas/semantic-amendment.schema.json`](schemas/semantic-amendment.schema.json).
+
 ## Admission semantics
 
 | Outcome | Meaning |
@@ -1432,7 +1466,7 @@ Claim Plane remains an alpha coordination kernel.
 
 - It consumes structured intents; it does not yet generate the task graph.
 - Built-in source extraction is Python-first; other languages currently remain at file/declared-resource granularity unless an external adapter supplies structured semantic resources.
-- Python AST extraction now provides stable symbol coordinates, lexical ownership, signatures, and changed-line ownership mapping. Cross-symbol dependency edges, contract propagation, and semantic conflict classification remain separate follow-on stages.
+- Python semantic analysis now provides stable symbol coordinates, dependency edges, downstream impact propagation, conflict classification, same-file admission evidence, and bounded semantic amendment preflight. Runtime pause/refresh/resume and deterministic integration ordering remain separate execution stages.
 - Documentation semantic checking is surface-oriented, not a full code-to-doc factual verifier.
 - `SQLitePlaneStore` is a single-host backend. The OS lock is derived from Git's canonical common directory, so separate local databases cannot choose independent lock namespaces. Multi-host deployments still require one network-authoritative registry such as PostgreSQL plus distributed leases and fencing.
 - The verified pipeline includes non-ignored untracked files, but ignored build/cache artifacts are intentionally excluded.
