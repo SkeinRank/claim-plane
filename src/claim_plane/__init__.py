@@ -108,6 +108,17 @@ from claim_plane.core import (
     AdmissionDecision,
     AdmissionKind,
     Artifact,
+    SEMANTIC_IMPACT_PROTOCOL,
+    ImpactBoundary,
+    ImpactPath,
+    ImpactedResource,
+    SemanticChange,
+    SemanticChangeKind,
+    SemanticImpactReport,
+    analyze_graph_change_impact,
+    analyze_semantic_impact,
+    compare_semantic_graphs,
+    project_contract_resource,
     DependencyEdge,
     DependencyNode,
     DependencyRelation,
@@ -341,7 +352,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.15"
+__version__ = "0.37.16"
 
 __all__ = [
     "VALIDATION_ACCEPTANCE_TIMEOUTS",
@@ -502,6 +513,17 @@ __all__ = [
     "AdmissionDecision",
     "AdmissionKind",
     "Artifact",
+    "SEMANTIC_IMPACT_PROTOCOL",
+    "ImpactBoundary",
+    "ImpactPath",
+    "ImpactedResource",
+    "SemanticChange",
+    "SemanticChangeKind",
+    "SemanticImpactReport",
+    "analyze_graph_change_impact",
+    "analyze_semantic_impact",
+    "compare_semantic_graphs",
+    "project_contract_resource",
     "DependencyEdge",
     "DependencyNode",
     "DependencyRelation",

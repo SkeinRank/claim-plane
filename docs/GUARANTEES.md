@@ -51,5 +51,11 @@ Unresolved relationships remain explicit so later admission stages can fail clos
 assuming independence.
 
 The graph currently exposes repository structure and dependency queries for downstream impact
-and conflict analysis. Existing runtime intent ordering, stale-state propagation, Git hunk
-verification, and brokered mutation enforcement remain the authoritative execution controls.
+and conflict analysis. Semantic impact reports may classify stable-symbol signature changes as
+contract-sensitive and trace their downstream consumers, but they are evidence rather than an
+automatic allow or deny decision. Body-only changes require an authoritative changed-resource surface
+from source ownership or Git-hunk mapping when the dependency graph itself is unchanged. External
+and unresolved boundaries remain explicit and cannot be interpreted as proof of independence.
+
+Existing runtime intent ordering, stale-state propagation, Git hunk verification, and brokered
+mutation enforcement remain the authoritative execution controls.

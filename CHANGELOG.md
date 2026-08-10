@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.16] — 2026-08-09
+
+### Added
+
+- add deterministic semantic impact analysis over Dependency Graph v2, with shortest-path evidence from changed resources to callers, type users, subclasses, importers, shared-state consumers, and tests;
+- detect stable-symbol contract changes across graph snapshots, project callable signatures onto Semantic Resource IR v2 contract coordinates, and propagate contract-sensitive effects without treating implementation-only edits as equivalent API changes;
+- keep external and unresolved dependency boundaries explicit in impact reports, add deterministic report fingerprints and a packaged JSON Schema, and accept authoritative changed-symbol identities from later Git-hunk ownership mapping when AST shape alone cannot reveal a body-only edit.
+
 ## [0.37.15] — 2026-08-09
 
 ### Added

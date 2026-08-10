@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.15.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.16.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -900,6 +900,29 @@ for dependent in graph.dependents("symbol:src/parser.py#ParseResult", transitive
 Graph fingerprint is deterministic for identical source inputs, and every edge retains its typed
 relation, resolution class, and source locations. Repository extraction remains static analysis:
 Claim Plane does not import or execute target modules while building the graph.
+
+Semantic impact analysis consumes that immutable graph and a bounded set of known mutations.
+Callable signature changes are classified as contract changes against stable symbol identities, while
+body-only edits can be supplied from Git hunk ownership even when the AST dependency shape is
+unchanged. Contract changes propagate through callers, type users, subclasses, importers, shared
+state consumers, and tests; implementation-only changes use a narrower propagation surface.
+
+```python
+from claim_plane import analyze_graph_change_impact
+
+impact = analyze_graph_change_impact(
+    before_graph,
+    after_graph,
+    changed_identities={"symbol:src/parser.py#Parser.parse"},
+)
+for item in impact.impacted:
+    print(item.node.identity, item.min_distance, item.contract_sensitive)
+```
+
+Every reached resource retains a deterministic shortest dependency path back to the mutation root.
+External and unresolved edges touching impacted code are emitted as explicit analysis boundaries, not
+as evidence that the change is safe. This layer produces impact evidence only; admission policy and
+runtime mutation enforcement remain separate.
 
 ## Admission semantics
 

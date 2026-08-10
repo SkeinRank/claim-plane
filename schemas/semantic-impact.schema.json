@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/semantic-impact.schema.json",
+  "title": "Claim Plane Semantic Impact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "fingerprint", "graph_fingerprint", "changes", "impacted", "boundaries", "metadata"],
+  "properties": {
+    "protocol": {"const": "claim-plane.semantic-impact.v1"},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "changes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/change"}
+    },
+    "impacted": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/impacted"}
+    },
+    "boundaries": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/boundary"}
+    },
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "required": ["protocol", "layer", "kind", "stable_id", "identity", "identifier", "metadata"],
+      "properties": {
+        "protocol": {"const": "claim-plane.semantic-resource-ir.v2"},
+        "layer": {"enum": ["file", "region", "symbol", "contract", "resource"]},
+        "kind": {"type": "string"},
+        "stable_id": {"type": "string"},
+        "identity": {"type": "string"},
+        "identifier": {"type": "string"},
+        "path": {"type": ["string", "null"]},
+        "region": {"type": ["string", "null"]},
+        "language": {"type": ["string", "null"]},
+        "qualified_name": {"type": ["string", "null"]},
+        "signature": {"type": ["string", "null"]},
+        "concept_id": {"type": ["string", "null"]},
+        "subject_concept_id": {"type": ["string", "null"]},
+        "parent_identity": {"type": ["string", "null"]},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "public", "test", "external", "metadata"],
+      "properties": {
+        "resource": {"$ref": "#/$defs/resource"},
+        "public": {"type": "boolean"},
+        "test": {"type": "boolean"},
+        "external": {"type": "boolean"},
+        "metadata": {"type": "object"}
+      }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "kind", "before_resource", "after_resource", "contract_resource", "metadata"],
+      "properties": {
+        "identity": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["implementation", "contract", "state", "structure", "added", "removed", "unknown"]},
+        "before_resource": {"anyOf": [{"$ref": "#/$defs/resource"}, {"type": "null"}]},
+        "after_resource": {"anyOf": [{"$ref": "#/$defs/resource"}, {"type": "null"}]},
+        "contract_resource": {"anyOf": [{"$ref": "#/$defs/resource"}, {"type": "null"}]},
+        "metadata": {"type": "object"}
+      }
+    },
+    "path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_identity", "target_identity", "identities", "relations", "distance"],
+      "properties": {
+        "root_identity": {"type": "string", "minLength": 1},
+        "target_identity": {"type": "string", "minLength": 1},
+        "identities": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
+        "relations": {
+          "type": "array",
+          "items": {"enum": ["defines", "imports", "calls", "reads", "writes", "inherits", "types", "tests", "public_api"]}
+        },
+        "distance": {"type": "integer", "minimum": 0}
+      }
+    },
+    "impacted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "root_identities", "paths", "min_distance", "relations", "contract_sensitive", "public", "test"],
+      "properties": {
+        "node": {"$ref": "#/$defs/node"},
+        "root_identities": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "paths": {"type": "array", "items": {"$ref": "#/$defs/path"}},
+        "min_distance": {"type": "integer", "minimum": 0},
+        "relations": {
+          "type": "array",
+          "items": {"enum": ["defines", "imports", "calls", "reads", "writes", "inherits", "types", "tests", "public_api"]},
+          "uniqueItems": true
+        },
+        "contract_sensitive": {"type": "boolean"},
+        "public": {"type": "boolean"},
+        "test": {"type": "boolean"}
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_identity", "target_identity", "relation", "resolution", "root_identities", "locations"],
+      "properties": {
+        "source_identity": {"type": "string", "minLength": 1},
+        "target_identity": {"type": "string", "minLength": 1},
+        "relation": {"enum": ["defines", "imports", "calls", "reads", "writes", "inherits", "types", "tests", "public_api"]},
+        "resolution": {"enum": ["external", "unresolved"]},
+        "root_identities": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "locations": {"type": "array", "items": {"type": "integer", "minimum": 1}, "uniqueItems": true}
+      }
+    }
+  }
+}
