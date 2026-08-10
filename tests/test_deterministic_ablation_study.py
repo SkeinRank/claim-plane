@@ -297,3 +297,84 @@ def test_full_v2_uses_qualified_symbol_identity_for_same_named_methods(
 
     assert verdict["serialized"] is False
     assert verdict["kind"] == "parallel"
+
+
+def test_full_v2_anchors_explicit_intent_symbol_when_line_coordinates_drift(
+    tmp_path: Path,
+) -> None:
+    repo, base = _repo(
+        tmp_path,
+        {
+            "src/click/core.py": (
+                "def helper_a():\n"
+                "    return 1\n"
+                "\n"
+                "class Option:\n"
+                "    def __init__(self, value=None):\n"
+                "        self.value = value\n"
+                "\n"
+                "def helper_b():\n"
+                "    return 2\n"
+            )
+        },
+    )
+    plan_a = {
+        "files": [
+            {
+                "path": "src/click/core.py",
+                "action": "modify",
+                "commitment": "committed",
+                "line_start": 1,
+                "line_end": 2,
+                "what": "Add required_if parameter to Option.__init__",
+            }
+        ]
+    }
+    plan_b = {
+        "files": [
+            {
+                "path": "src/click/core.py",
+                "action": "modify",
+                "commitment": "committed",
+                "line_start": 8,
+                "line_end": 9,
+                "what": "Add cache parameter to Option.__init__ and store it",
+            }
+        ]
+    }
+
+    full = deterministic_ablation_verdict(
+        repo,
+        base_commit=base,
+        plan_a=plan_a,
+        plan_b=plan_b,
+        profile="full_v2",
+    )
+    baseline = deterministic_ablation_verdict(
+        repo,
+        base_commit=base,
+        plan_a=plan_a,
+        plan_b=plan_b,
+        profile="file_region_baseline",
+    )
+
+    assert full["serialized"] is True
+    assert full["kind"] == "ordered"
+    assert baseline["serialized"] is False
+    assert baseline["kind"] == "parallel"
+
+    admissions = full["ablation_evidence"]["concurrency_plan"]["metadata"][
+        "same_file_admissions"
+    ]
+    assert len(admissions) == 1
+    admission = admissions[0]
+    assert admission["action"] == "serialize"
+    assert admission["reason"] == "semantic_conflicting"
+    assert admission["semantic_kind"] == "conflicting"
+    anchors = full["ablation_evidence"]["intent_ast_anchors"]
+    assert anchors["A"][0]["qualified_identifier"] == "Option.__init__"
+    assert anchors["A"][0]["change_kind"] == "contract"
+    assert anchors["B"][0]["qualified_identifier"] == "Option.__init__"
+    assert anchors["B"][0]["change_kind"] == "contract"
+    assert "symbol:src/click/core.py#Option.__init__" in admission["left_changes"]
+    assert "symbol:src/click/core.py#Option.__init__" in admission["right_changes"]

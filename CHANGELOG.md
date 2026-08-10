@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.30] — 2026-08-10
+
+### Changed
+
+- Anchored explicit dotted Python symbols in Planner declarations against the pinned AST before semantic admission, so references such as `Option.__init__` remain source-bound even when Planner line coordinates drift. Ambiguous or non-qualified mentions do not create semantic authority.
+- Extended `region_safe` same-file refinement to graph-backed textually disjoint declarations, allowing semantic identity and dependency evidence to override a misleading line-only independence proof while preserving the existing fallback when semantic roots are unavailable.
+- Recorded source-bound intent/AST anchors in deterministic ablation evidence for auditability and confirmatory trace analysis.
+
+### Fixed
+
+- Prevented two declarations that explicitly target the same Python symbol or callable contract from being admitted in parallel solely because their Planner line ranges do not overlap.
+- Added regressions for qualified-symbol mention resolution, drifted planner coordinates, contract-sensitive intent anchoring, and same-file semantic conflict detection across disjoint declared regions.
+
 ## [0.37.29] — 2026-08-10
 
 ### Fixed

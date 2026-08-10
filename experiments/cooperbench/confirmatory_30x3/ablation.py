@@ -267,6 +267,79 @@ def _file_operation(item: Mapping[str, Any]) -> dict[str, Any]:
     return operation
 
 
+def _intent_contract_sensitive(text: str) -> bool:
+    normalized = " ".join(text.casefold().replace("_", " ").split())
+    markers = (
+        " parameter",
+        " argument",
+        " signature",
+        " return type",
+        " return annotation",
+        " public api",
+    )
+    padded = f" {normalized}"
+    return any(marker in padded for marker in markers)
+
+
+def _intent_symbol_operations(
+    item: Mapping[str, Any], sources: Mapping[str, str]
+) -> tuple[dict[str, Any], ...]:
+    """Anchor explicit qualified symbols in Planner prose against the pinned AST.
+
+    Planner line coordinates are useful evidence but can drift from the frozen source.
+    An explicit dotted symbol mention such as ``Option.__init__`` is stronger semantic
+    evidence when it resolves uniquely in the declared repository path. Ambiguous or
+    missing mentions add no authority and leave the ordinary region/graph logic intact.
+    """
+
+    path = str(item.get("path") or "")
+    source = sources.get(path)
+    what = str(item.get("what") or "").strip()
+    if source is None or not what:
+        return ()
+    try:
+        index = extract_python_structure(source, path=path)
+    except PythonStructuralExtractionError:
+        return ()
+    definitions = index.resolve_explicit_symbol_mentions(what)
+    if not definitions:
+        return ()
+
+    commitment = _commitment_for_item(item)
+    change_kind = "contract" if _intent_contract_sensitive(what) else "implementation"
+    operations: list[dict[str, Any]] = []
+    for definition in definitions:
+        owner = definition.resource
+        metadata = {
+            "path": path,
+            "language": owner.language or "python",
+            "qualified_identifier": definition.qualified_name,
+            "semantic_source": "planner_what_ast_anchor",
+            "planner_what": what,
+            "anchor_kind": "explicit_qualified_symbol",
+            "definition_line": definition.definition_line,
+        }
+        if owner.signature:
+            metadata["signature"] = owner.signature
+        operation: dict[str, Any] = {
+            "access": _access_for_action(item.get("action")),
+            "resource": {
+                "kind": "symbol",
+                "identifier": definition.qualified_name,
+                "signature": owner.signature,
+                "metadata": metadata,
+            },
+            "metadata": {
+                "semantic_change_kind": change_kind,
+                "semantic_anchor": "planner_what_ast",
+            },
+        }
+        if commitment is ScopeCommitment.CONTINGENT:
+            operation["commitment"] = commitment.value
+        operations.append(operation)
+    return tuple(operations)
+
+
 def _symbol_operations(
     item: Mapping[str, Any], sources: Mapping[str, str]
 ) -> tuple[dict[str, Any], ...]:
@@ -336,6 +409,7 @@ def _work_item_from_plan(
         operations.append(_file_operation(raw))
         if add_symbol_resources:
             operations.extend(_symbol_operations(raw, sources))
+            operations.extend(_intent_symbol_operations(raw, sources))
     if not operations:
         raise ValueError(f"planner declaration for {work_id} contains no resources")
     return {
@@ -344,6 +418,39 @@ def _work_item_from_plan(
         "goal": f"Execute frozen Planner v1 declaration {work_id}",
         "operations": operations,
     }
+
+
+def _intent_ast_anchor_evidence(graph: WorkGraph) -> dict[str, list[dict[str, Any]]]:
+    evidence: dict[str, list[dict[str, Any]]] = {}
+    for work_item in graph.work_items:
+        anchors: list[dict[str, Any]] = []
+        for operation in work_item.operations:
+            if operation.metadata.get("semantic_anchor") != "planner_what_ast":
+                continue
+            anchors.append(
+                {
+                    "identity": (
+                        f"symbol:{operation.resource.metadata.get('path')}#"
+                        f"{operation.resource.metadata.get('qualified_identifier')}"
+                    ),
+                    "path": operation.resource.metadata.get("path"),
+                    "qualified_identifier": operation.resource.metadata.get(
+                        "qualified_identifier"
+                    ),
+                    "change_kind": operation.metadata.get("semantic_change_kind"),
+                    "commitment": operation.commitment.value,
+                    "source": operation.resource.metadata.get("semantic_source"),
+                }
+            )
+        evidence[work_item.work_id] = sorted(
+            anchors,
+            key=lambda item: (
+                str(item.get("path") or ""),
+                str(item.get("qualified_identifier") or ""),
+                str(item.get("change_kind") or ""),
+            ),
+        )
+    return evidence
 
 
 def _policy() -> SwarmBudgetPolicy:
@@ -442,6 +549,7 @@ def deterministic_ablation_verdict(
         ),
         "semantic_graph_error": graph_error,
         "work_graph_fingerprint": graph.fingerprint(),
+        "intent_ast_anchors": _intent_ast_anchor_evidence(graph),
         "concurrency_plan": concurrency.to_dict(),
         "execution_waves": waves,
     }

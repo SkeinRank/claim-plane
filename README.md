@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.29.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.30.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 

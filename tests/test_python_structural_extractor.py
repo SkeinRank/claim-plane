@@ -214,3 +214,33 @@ def test_multi_file_extraction_is_path_sorted(tmp_path: Path) -> None:
 
     indexes = extract_python_files(["b.py", "a.py"], repository_root=repo)
     assert [item.path for item in indexes] == ["a.py", "b.py"]
+
+
+def test_explicit_qualified_symbol_mentions_resolve_only_when_unambiguous() -> None:
+    index = extract_python_structure(
+        (
+            "class Option:\n"
+            "    def __init__(self, value=None):\n"
+            "        self.value = value\n"
+            "\n"
+            "class Other:\n"
+            "    def __init__(self):\n"
+            "        pass\n"
+        ),
+        path="src/click/core.py",
+    )
+
+    direct = index.resolve_explicit_symbol_mentions(
+        "Add required_if parameter to Option.__init__."
+    )
+    qualified = index.resolve_explicit_symbol_mentions(
+        "Update click.core.Option.__init__ without changing Other.__init__."
+    )
+    bare = index.resolve_explicit_symbol_mentions("Update __init__ parameters.")
+
+    assert [item.qualified_name for item in direct] == ["Option.__init__"]
+    assert [item.qualified_name for item in qualified] == [
+        "Option.__init__",
+        "Other.__init__",
+    ]
+    assert bare == ()

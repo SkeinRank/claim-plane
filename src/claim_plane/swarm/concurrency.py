@@ -582,9 +582,10 @@ def _operation_findings(
                 relation = _path_relation(left_op, right_op)
                 resource = _normal_path(left_resource.identifier)
                 if relation in {
+                    "same_file_disjoint_region",
                     "same_file_unknown_region",
                     "same_file_overlapping_region",
-                }:
+                } and semantic_graph is not None:
                     decision = evaluated_same_file.get(resource)
                     if decision is None:
                         decision = evaluate_same_file_admission(

@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 import tokenize
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,6 +22,12 @@ from claim_plane.core.models import ResourceKind, ResourceRef
 from claim_plane.core.resource_ir import SemanticResource, normalize_resource_ref
 
 PYTHON_STRUCTURAL_INDEX_PROTOCOL = "claim-plane.python-structural-index.v1"
+
+_QUALIFIED_SYMBOL_MENTION = re.compile(
+    r"(?<![A-Za-z0-9_.])"
+    r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)"
+    r"(?!(?:[A-Za-z0-9_]|\.[A-Za-z_]))"
+)
 
 
 class PythonSymbolKind(str, Enum):
@@ -310,6 +317,63 @@ class PythonStructuralIndex:
     ) -> tuple[PythonSymbolDefinition, ...]:
         return tuple(
             item for item in self.definitions if item.qualified_name == qualified_name
+        )
+
+    def resolve_explicit_symbol_mentions(
+        self, text: str
+    ) -> tuple[PythonSymbolDefinition, ...]:
+        """Resolve explicit dotted Python symbol mentions against this source index.
+
+        Only dotted identifier tokens such as ``Option.__init__`` or
+        ``Parser.validate`` are eligible. A token must resolve to exactly one logical
+        definition in this file; ambiguous/repeated definitions are intentionally
+        ignored so free-form planner text cannot invent semantic authority. Module-
+        qualified tokens may use an unambiguous suffix match.
+        """
+
+        requested = tuple(
+            dict.fromkeys(
+                match.group(1) for match in _QUALIFIED_SYMBOL_MENTION.finditer(text)
+            )
+        )
+        if not requested:
+            return ()
+
+        by_name: dict[str, tuple[PythonSymbolDefinition, ...]] = {}
+        for definition in self.definitions:
+            by_name.setdefault(definition.qualified_name, ())
+            by_name[definition.qualified_name] = (
+                *by_name[definition.qualified_name],
+                definition,
+            )
+
+        resolved: dict[str, PythonSymbolDefinition] = {}
+        for token in requested:
+            direct = by_name.get(token, ())
+            if len(direct) == 1:
+                definition = direct[0]
+                resolved.setdefault(definition.resource.identity, definition)
+                continue
+
+            suffix_matches = [
+                definitions[0]
+                for name, definitions in by_name.items()
+                if len(definitions) == 1 and token.endswith(f".{name}")
+            ]
+            unique = {item.resource.identity: item for item in suffix_matches}
+            if len(unique) == 1:
+                definition = next(iter(unique.values()))
+                resolved.setdefault(definition.resource.identity, definition)
+
+        return tuple(
+            sorted(
+                resolved.values(),
+                key=lambda item: (
+                    item.definition_start_line,
+                    item.qualified_name,
+                    item.occurrence,
+                ),
+            )
         )
 
     def owner_for_line(self, line: int) -> SemanticResource:
