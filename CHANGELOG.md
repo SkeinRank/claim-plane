@@ -8,6 +8,20 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.25] — 2026-08-10
+
+### Added
+
+- Added Physical Parallel Benchmark v2 with measured per-agent wall-clock intervals, overlap duration, overlap fraction, and observed inner concurrency instead of logical-latency inference.
+- Added bounded outer pair execution through isolated subprocesses with configurable `--max-parallel-pairs`, one-based pair selection, parent-observed worker intervals, peak active worker accounting, and durable batch reports.
+- Added `confirmatory physical-run` and `confirmatory physical-pair` execution paths plus a machine-readable physical benchmark schema.
+
+### Changed
+
+- The experimental `parallel`, statically admitted Claim Plane, and dynamically admitted Claim Plane paths can launch both workers physically at the same time while preserving the historical execution mode by default.
+- Dynamic physical execution records rejected optimistic work and deterministically falls back to serial continuation when scope promotion blocks one or both workers.
+- Concurrent pair processes use isolated repository caches and worktree roots so Git checkout/reset state is never shared across active benchmark pairs.
+
 ## [0.37.24] — 2026-08-10
 
 ### Added

@@ -6,8 +6,11 @@ import copy
 import hashlib
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+
+from claim_plane import Plane
 
 from ..common import (
     CheckpointStore,
@@ -18,6 +21,7 @@ from ..common import (
     create_run,
 )
 from ..environment import runtime_environment
+from ..physical_parallel import ActivityInterval, interval_overlap
 from ..planner_v1 import (
     OpenRouterClient,
     PLANNER_MODEL,
@@ -64,6 +68,7 @@ from .scope import (
     admission_verdict,
     build_scope_plane,
     build_single_scope_plane,
+    prepare_threadsafe_scope_registry,
     declared_committed_files,
     declared_contingent_files,
     declared_files,
@@ -191,6 +196,59 @@ def _run_agent(
     )
 
 
+def _run_agents_physically_capture(left_call, right_call):
+    """Execute two workers concurrently and capture both outcomes before deciding."""
+
+    def timed(label, call):
+        started_ns = time.time_ns()
+        try:
+            value = call()
+            error = None
+        except BaseException as exc:  # outcome is interpreted after both workers join
+            value = None
+            error = exc
+        finished_ns = time.time_ns()
+        return value, error, ActivityInterval(label, started_ns, finished_ns)
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="claim-plane-pair") as pool:
+        left_future = pool.submit(timed, "agent-a", left_call)
+        right_future = pool.submit(timed, "agent-b", right_call)
+        left_value, left_error, left_interval = left_future.result()
+        right_value, right_error, right_interval = right_future.result()
+
+    metrics = interval_overlap(left_interval, right_interval)
+    timing = {
+        "agent_a": left_interval.to_dict(),
+        "agent_b": right_interval.to_dict(),
+        **metrics.to_dict(),
+    }
+    return left_value, left_error, right_value, right_error, timing
+
+
+def _run_agents_physically(left_call, right_call):
+    """Execute two benchmark workers at the same time and propagate failures."""
+
+    left_value, left_error, right_value, right_error, timing = (
+        _run_agents_physically_capture(left_call, right_call)
+    )
+    if left_error is not None:
+        raise left_error
+    if right_error is not None:
+        raise right_error
+    return left_value, right_value, timing
+
+
+def _record_physical_timing(record, timing, *, reason):
+    record["physical_timing"] = timing
+    record["physical_concurrency_observed"] = bool(timing.get("concurrent"))
+    record["physical_overlap_seconds"] = float(timing.get("overlap_seconds", 0.0) or 0.0)
+    record["physical_union_seconds"] = float(timing.get("union_seconds", 0.0) or 0.0)
+    record["physical_overlap_fraction_of_shorter"] = float(
+        timing.get("overlap_fraction_of_shorter", 0.0) or 0.0
+    )
+    record["physical_parallel_reason"] = reason
+
+
 def _single_scope_controller(
     plan,
     *,
@@ -287,6 +345,221 @@ def _partial_cost(
     }
 
 
+def _run_dynamic_physically(
+    *,
+    repo,
+    worktrees,
+    safe_name,
+    base,
+    task_dir,
+    feature_a,
+    feature_b,
+    seed_a,
+    seed_b,
+    run_id,
+    scope_db_path,
+    plan_a,
+    plan_b,
+    record,
+):
+    """Run an admitted Dynamic pair concurrently with deterministic serial fallback."""
+
+    def concurrent_attempt(*, intent_id, agent, feature_dir, seed, label):
+        plane = Plane.open(scope_db_path)
+        try:
+            controller = DynamicScopeController(
+                plane,
+                intent_id,
+                agent=agent,
+                event_sink=record["scope_events"],
+            )
+            return _run_agent(
+                repo,
+                worktrees,
+                path=_new_agent_path(safe_name, label),
+                base_commit=base,
+                task_dir=task_dir,
+                feature_dir=feature_dir,
+                seed=seed,
+                message=f"feature {agent}",
+                trace_id=(f"{run_id}|agent={agent}|attempt=parallel"),
+                mutation_guard=(controller.before_mutation),
+                scope_base_commit=base,
+            )
+        finally:
+            plane.close()
+
+    left, left_error, right, right_error, timing = _run_agents_physically_capture(
+        lambda: concurrent_attempt(
+            intent_id="A",
+            agent="A",
+            feature_dir=feature_a,
+            seed=seed_a,
+            label="A0",
+        ),
+        lambda: concurrent_attempt(
+            intent_id="B",
+            agent="B",
+            feature_dir=feature_b,
+            seed=seed_b,
+            label="B0",
+        ),
+    )
+    _record_physical_timing(record, timing, reason="claim_plane_dynamic_admitted")
+
+    for error in (left_error, right_error):
+        if error is not None and not isinstance(error, DynamicScopeBlocked):
+            raise error
+        if isinstance(error, DynamicScopeBlocked) and error.block_type != "promotion_rejected":
+            raise error
+
+    if left_error is None and right_error is None:
+        tree_a, result_a = left
+        tree_b, result_b = right
+        merged = _merge_parallel_worktrees(tree_a, tree_b)
+        record["integration_success"] = merged["integration_success"]
+        record["clean_merge"] = merged["clean_merge"]
+        record["coder_latency_critical"] = max(
+            result_a["logical_latency"], result_b["logical_latency"]
+        )
+        return tree_a, result_a, tree_b, result_b, merged["final_tree"]
+
+    wasted_a = _partial_cost(left_error) if isinstance(left_error, DynamicScopeBlocked) else None
+    wasted_b = _partial_cost(right_error) if isinstance(right_error, DynamicScopeBlocked) else None
+    for wasted in (wasted_a, wasted_b):
+        if wasted is None:
+            continue
+        record["dynamic_wasted_coder_cost"] += wasted["logical_cost"]
+        record["dynamic_wasted_coder_latency"] += wasted["logical_latency"]
+        record["dynamic_wasted_steps"] += wasted["steps_used"]
+
+    record["runtime_serialized"] = True
+    record["serialized"] = True
+    record["effective_gate_kind"] = "runtime_serialize"
+
+    if left_error is not None and right_error is None:
+        tree_b, result_b = right
+        record["dynamic_serialization_order"] = "B->A"
+        record["dynamic_restart_count"] += 1
+        controller_a_serial = _single_scope_controller(
+            plan_a,
+            intent_id="A",
+            owner="agent-a",
+            agent="A",
+            force_all_committed=False,
+            scope_events=record["scope_events"],
+            base_commit=base,
+        )
+        tree_a, result_a = _run_agent(
+            repo,
+            worktrees,
+            path=_new_agent_path(safe_name, "A1"),
+            base_commit=result_b["head"],
+            task_dir=task_dir,
+            feature_dir=feature_a,
+            seed=seed_a,
+            message="feature A",
+            trace_id=(f"{run_id}|agent=A|attempt=serial-restart"),
+            mutation_guard=(controller_a_serial.before_mutation),
+            scope_base_commit=base,
+        )
+        record["integration_success"] = True
+        record["clean_merge"] = True
+        record["coder_latency_critical"] = max(
+            wasted_a["logical_latency"], result_b["logical_latency"]
+        ) + result_a["logical_latency"]
+        return tree_a, result_a, tree_b, result_b, tree_a
+
+    if left_error is None and right_error is not None:
+        tree_a, result_a = left
+        record["dynamic_serialization_order"] = "A->B"
+        record["dynamic_restart_count"] += 1
+        controller_b_serial = _single_scope_controller(
+            plan_b,
+            intent_id="B",
+            owner="agent-b",
+            agent="B",
+            force_all_committed=False,
+            scope_events=record["scope_events"],
+            base_commit=base,
+        )
+        tree_b, result_b = _run_agent(
+            repo,
+            worktrees,
+            path=_new_agent_path(safe_name, "B1"),
+            base_commit=result_a["head"],
+            task_dir=task_dir,
+            feature_dir=feature_b,
+            seed=seed_b,
+            message="feature B",
+            trace_id=(f"{run_id}|agent=B|attempt=serial-restart"),
+            mutation_guard=(controller_b_serial.before_mutation),
+            scope_base_commit=base,
+        )
+        record["integration_success"] = True
+        record["clean_merge"] = True
+        record["coder_latency_critical"] = max(
+            result_a["logical_latency"], wasted_b["logical_latency"]
+        ) + result_b["logical_latency"]
+        return tree_a, result_a, tree_b, result_b, tree_b
+
+    # Both optimistic workers requested incompatible promotions.  Neither partial
+    # result is authoritative, so restart from the pinned base in a deterministic A->B order.
+    assert wasted_a is not None and wasted_b is not None
+    record["dynamic_serialization_order"] = "A->B"
+    record["dynamic_restart_count"] += 2
+    controller_a_serial = _single_scope_controller(
+        plan_a,
+        intent_id="A",
+        owner="agent-a",
+        agent="A",
+        force_all_committed=False,
+        scope_events=record["scope_events"],
+        base_commit=base,
+    )
+    tree_a, result_a = _run_agent(
+        repo,
+        worktrees,
+        path=_new_agent_path(safe_name, "A1"),
+        base_commit=base,
+        task_dir=task_dir,
+        feature_dir=feature_a,
+        seed=seed_a,
+        message="feature A",
+        trace_id=(f"{run_id}|agent=A|attempt=serial-restart"),
+        mutation_guard=(controller_a_serial.before_mutation),
+        scope_base_commit=base,
+    )
+    controller_b_serial = _single_scope_controller(
+        plan_b,
+        intent_id="B",
+        owner="agent-b",
+        agent="B",
+        force_all_committed=False,
+        scope_events=record["scope_events"],
+        base_commit=base,
+    )
+    tree_b, result_b = _run_agent(
+        repo,
+        worktrees,
+        path=_new_agent_path(safe_name, "B1"),
+        base_commit=result_a["head"],
+        task_dir=task_dir,
+        feature_dir=feature_b,
+        seed=seed_b,
+        message="feature B",
+        trace_id=(f"{run_id}|agent=B|attempt=serial-restart"),
+        mutation_guard=(controller_b_serial.before_mutation),
+        scope_base_commit=base,
+    )
+    record["integration_success"] = True
+    record["clean_merge"] = True
+    record["coder_latency_critical"] = max(
+        wasted_a["logical_latency"], wasted_b["logical_latency"]
+    ) + result_a["logical_latency"] + result_b["logical_latency"]
+    return tree_a, result_a, tree_b, result_b, tree_b
+
+
 def _task_inputs(pair: dict[str, Any]) -> tuple[TaskInfo, Path, Path, str]:
     task = tasks[(str(pair["repo"]), int(pair["tid"]))]
     feature_a = task.features[int(pair["a"])]
@@ -301,6 +574,7 @@ def run_pair(
     *,
     coder_seed=None,
     frozen_plans=None,
+    physical_parallel=False,
 ):
     assert arm in ARMS
 
@@ -346,6 +620,7 @@ def run_pair(
         "plan",
     )
 
+    pair_started_ns = time.time_ns()
     record = {
         "pair": pair_id,
         "arm": arm,
@@ -494,9 +769,21 @@ def run_pair(
         "agent_execution_failure": False,
         "harness_failure": False,
         "error": None,
+        "physical_parallel_enabled": bool(physical_parallel),
+        "physical_concurrency_observed": False,
+        "physical_overlap_seconds": 0.0,
+        "physical_union_seconds": 0.0,
+        "physical_overlap_fraction_of_shorter": 0.0,
+        "physical_timing": None,
+        "physical_parallel_reason": None,
+        "physical_pair_started_ns": pair_started_ns,
+        "physical_pair_finished_ns": None,
+        "physical_pair_wall_time_seconds": None,
     }
 
     worktrees = []
+    scope_planes = []
+    scope_db_path = None
     result_a = None
     result_b = None
     final_tree = None
@@ -787,37 +1074,61 @@ def run_pair(
             record["coder_latency_critical"] = (
                 result_a["logical_latency"] + result_b["logical_latency"]
             )
+            record["physical_parallel_reason"] = "always_serial_baseline"
 
         elif arm == "parallel":
-            tree_a, result_a = _run_agent(
-                repo,
-                worktrees,
-                path=_new_agent_path(
-                    safe_name,
-                    "A",
-                ),
-                base_commit=base,
-                task_dir=task_dir,
-                feature_dir=feature_a,
-                seed=seed_a,
-                message="feature A",
-                trace_id=(f"{run_id}|agent=A"),
-            )
-
-            tree_b, result_b = _run_agent(
-                repo,
-                worktrees,
-                path=_new_agent_path(
-                    safe_name,
-                    "B",
-                ),
-                base_commit=base,
-                task_dir=task_dir,
-                feature_dir=feature_b,
-                seed=seed_b,
-                message="feature B",
-                trace_id=(f"{run_id}|agent=B"),
-            )
+            if physical_parallel:
+                left, right, timing = _run_agents_physically(
+                    lambda: _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "A"),
+                        base_commit=base,
+                        task_dir=task_dir,
+                        feature_dir=feature_a,
+                        seed=seed_a,
+                        message="feature A",
+                        trace_id=(f"{run_id}|agent=A"),
+                    ),
+                    lambda: _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "B"),
+                        base_commit=base,
+                        task_dir=task_dir,
+                        feature_dir=feature_b,
+                        seed=seed_b,
+                        message="feature B",
+                        trace_id=(f"{run_id}|agent=B"),
+                    ),
+                )
+                tree_a, result_a = left
+                tree_b, result_b = right
+                _record_physical_timing(record, timing, reason="naive_parallel")
+            else:
+                tree_a, result_a = _run_agent(
+                    repo,
+                    worktrees,
+                    path=_new_agent_path(safe_name, "A"),
+                    base_commit=base,
+                    task_dir=task_dir,
+                    feature_dir=feature_a,
+                    seed=seed_a,
+                    message="feature A",
+                    trace_id=(f"{run_id}|agent=A"),
+                )
+                tree_b, result_b = _run_agent(
+                    repo,
+                    worktrees,
+                    path=_new_agent_path(safe_name, "B"),
+                    base_commit=base,
+                    task_dir=task_dir,
+                    feature_dir=feature_b,
+                    seed=seed_b,
+                    message="feature B",
+                    trace_id=(f"{run_id}|agent=B"),
+                )
+                record["physical_parallel_reason"] = "legacy_logical_parallel"
 
             record["single_a_pass"] = result_a["feature_pass"]
             record["single_b_pass"] = result_b["feature_pass"]
@@ -901,6 +1212,7 @@ def run_pair(
                 record["coder_latency_critical"] = (
                     result_a["logical_latency"] + result_b["logical_latency"]
                 )
+                record["physical_parallel_reason"] = "claim_plane_static_serialized"
 
             else:
                 controller_a = _single_scope_controller(
@@ -923,37 +1235,64 @@ def run_pair(
                     base_commit=base,
                 )
 
-                tree_a, result_a = _run_agent(
-                    repo,
-                    worktrees,
-                    path=_new_agent_path(
-                        safe_name,
-                        "A",
-                    ),
-                    base_commit=base,
-                    task_dir=task_dir,
-                    feature_dir=feature_a,
-                    seed=seed_a,
-                    message="feature A",
-                    trace_id=(f"{run_id}|agent=A"),
-                    mutation_guard=None,
-                )
-
-                tree_b, result_b = _run_agent(
-                    repo,
-                    worktrees,
-                    path=_new_agent_path(
-                        safe_name,
-                        "B",
-                    ),
-                    base_commit=base,
-                    task_dir=task_dir,
-                    feature_dir=feature_b,
-                    seed=seed_b,
-                    message="feature B",
-                    trace_id=(f"{run_id}|agent=B"),
-                    mutation_guard=None,
-                )
+                if physical_parallel:
+                    left, right, timing = _run_agents_physically(
+                        lambda: _run_agent(
+                            repo,
+                            worktrees,
+                            path=_new_agent_path(safe_name, "A"),
+                            base_commit=base,
+                            task_dir=task_dir,
+                            feature_dir=feature_a,
+                            seed=seed_a,
+                            message="feature A",
+                            trace_id=(f"{run_id}|agent=A"),
+                            mutation_guard=None,
+                        ),
+                        lambda: _run_agent(
+                            repo,
+                            worktrees,
+                            path=_new_agent_path(safe_name, "B"),
+                            base_commit=base,
+                            task_dir=task_dir,
+                            feature_dir=feature_b,
+                            seed=seed_b,
+                            message="feature B",
+                            trace_id=(f"{run_id}|agent=B"),
+                            mutation_guard=None,
+                        ),
+                    )
+                    tree_a, result_a = left
+                    tree_b, result_b = right
+                    _record_physical_timing(
+                        record, timing, reason="claim_plane_static_admitted"
+                    )
+                else:
+                    tree_a, result_a = _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "A"),
+                        base_commit=base,
+                        task_dir=task_dir,
+                        feature_dir=feature_a,
+                        seed=seed_a,
+                        message="feature A",
+                        trace_id=(f"{run_id}|agent=A"),
+                        mutation_guard=None,
+                    )
+                    tree_b, result_b = _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "B"),
+                        base_commit=base,
+                        task_dir=task_dir,
+                        feature_dir=feature_b,
+                        seed=seed_b,
+                        message="feature B",
+                        trace_id=(f"{run_id}|agent=B"),
+                        mutation_guard=None,
+                    )
+                    record["physical_parallel_reason"] = "physical_mode_disabled"
 
                 merged = _merge_parallel_worktrees(
                     tree_a,
@@ -1031,142 +1370,82 @@ def run_pair(
                 record["coder_latency_critical"] = (
                     result_a["logical_latency"] + result_b["logical_latency"]
                 )
+                record["physical_parallel_reason"] = "claim_plane_dynamic_serialized"
 
             else:
-                session = build_scope_plane(
-                    plan_a,
-                    plan_b,
-                    force_all_committed=False,
-                    base_commit=base,
-                )
-
-                controller_a = DynamicScopeController(
-                    session["plane"],
-                    "A",
-                    agent="A",
-                    event_sink=record["scope_events"],
-                )
-
-                controller_b = DynamicScopeController(
-                    session["plane"],
-                    "B",
-                    agent="B",
-                    event_sink=record["scope_events"],
-                )
-
-                try:
-                    tree_a, result_a = _run_agent(
-                        repo,
-                        worktrees,
-                        path=_new_agent_path(
-                            safe_name,
-                            "A0",
-                        ),
-                        base_commit=base,
-                        task_dir=task_dir,
-                        feature_dir=feature_a,
-                        seed=seed_a,
-                        message="feature A",
-                        trace_id=(f"{run_id}|agent=A|attempt=parallel"),
-                        mutation_guard=(controller_a.before_mutation),
-                        scope_base_commit=base,
-                    )
-
-                except DynamicScopeBlocked as exc:
-                    if exc.block_type != "promotion_rejected":
-                        raise
-
-                    wasted = _partial_cost(exc)
-
-                    record["dynamic_wasted_coder_cost"] += wasted["logical_cost"]
-                    record["dynamic_wasted_coder_latency"] += wasted["logical_latency"]
-                    record["dynamic_wasted_steps"] += wasted["steps_used"]
-
-                    record["runtime_serialized"] = True
-                    record["serialized"] = True
-                    record["effective_gate_kind"] = "runtime_serialize"
-                    record["dynamic_serialization_order"] = "B->A"
-                    record["dynamic_restart_count"] += 1
-
-                    controller_b_serial = _single_scope_controller(
-                        plan_b,
-                        intent_id="B",
-                        owner="agent-b",
-                        agent="B",
-                        force_all_committed=False,
-                        scope_events=record["scope_events"],
-                        base_commit=base,
-                    )
-
-                    tree_b, result_b = _run_agent(
-                        repo,
-                        worktrees,
-                        path=_new_agent_path(
-                            safe_name,
-                            "B1",
-                        ),
-                        base_commit=base,
-                        task_dir=task_dir,
-                        feature_dir=feature_b,
-                        seed=seed_b,
-                        message="feature B",
-                        trace_id=(f"{run_id}|agent=B|attempt=serial"),
-                        mutation_guard=(controller_b_serial.before_mutation),
-                    )
-
-                    controller_a_serial = _single_scope_controller(
+                if physical_parallel:
+                    scope_db_path = AGENT_WORKSPACE_ROOT / f"{safe_name}-scope.db"
+                    prepare_threadsafe_scope_registry(
                         plan_a,
-                        intent_id="A",
-                        owner="agent-a",
-                        agent="A",
+                        plan_b,
                         force_all_committed=False,
-                        scope_events=record["scope_events"],
+                        base_commit=base,
+                        db_path=scope_db_path,
+                    )
+                    controller_a = None
+                    controller_b = None
+                else:
+                    session = build_scope_plane(
+                        plan_a,
+                        plan_b,
+                        force_all_committed=False,
                         base_commit=base,
                     )
+                    scope_planes.append(session["plane"])
+                    controller_a = DynamicScopeController(
+                        session["plane"],
+                        "A",
+                        agent="A",
+                        event_sink=record["scope_events"],
+                    )
+                    controller_b = DynamicScopeController(
+                        session["plane"],
+                        "B",
+                        agent="B",
+                        event_sink=record["scope_events"],
+                    )
 
-                    tree_a, result_a = _run_agent(
-                        repo,
-                        worktrees,
-                        path=_new_agent_path(
-                            safe_name,
-                            "A1",
-                        ),
-                        base_commit=result_b["head"],
+                if physical_parallel:
+                    (
+                        tree_a,
+                        result_a,
+                        tree_b,
+                        result_b,
+                        final_tree,
+                    ) = _run_dynamic_physically(
+                        repo=repo,
+                        worktrees=worktrees,
+                        safe_name=safe_name,
+                        base=base,
                         task_dir=task_dir,
-                        feature_dir=feature_a,
-                        seed=seed_a,
-                        message="feature A",
-                        trace_id=(f"{run_id}|agent=A|attempt=serial-restart"),
-                        mutation_guard=(controller_a_serial.before_mutation),
+                        feature_a=feature_a,
+                        feature_b=feature_b,
+                        seed_a=seed_a,
+                        seed_b=seed_b,
+                        run_id=run_id,
+                        scope_db_path=scope_db_path,
+                        plan_a=plan_a,
+                        plan_b=plan_b,
+                        record=record,
                     )
-
-                    final_tree = tree_a
-                    record["integration_success"] = True
-                    record["clean_merge"] = True
-                    record["coder_latency_critical"] = (
-                        max(
-                            wasted["logical_latency"],
-                            result_b["logical_latency"],
-                        )
-                        + result_a["logical_latency"]
-                    )
-
                 else:
+                    record["physical_parallel_reason"] = "physical_mode_disabled"
                     try:
-                        tree_b, result_b = _run_agent(
+                        tree_a, result_a = _run_agent(
                             repo,
                             worktrees,
                             path=_new_agent_path(
                                 safe_name,
-                                "B0",
+                                "A0",
                             ),
                             base_commit=base,
                             task_dir=task_dir,
-                            feature_dir=feature_b,
-                            seed=seed_b,
-                            message="feature B",
-                            trace_id=(f"{run_id}|agent=B|attempt=parallel"),
-                            mutation_guard=(controller_b.before_mutation),
+                            feature_dir=feature_a,
+                            seed=seed_a,
+                            message="feature A",
+                            trace_id=(f"{run_id}|agent=A|attempt=parallel"),
+                            mutation_guard=(controller_a.before_mutation),
+                            scope_base_commit=base,
                         )
 
                     except DynamicScopeBlocked as exc:
@@ -1176,15 +1455,13 @@ def run_pair(
                         wasted = _partial_cost(exc)
 
                         record["dynamic_wasted_coder_cost"] += wasted["logical_cost"]
-                        record["dynamic_wasted_coder_latency"] += wasted[
-                            "logical_latency"
-                        ]
+                        record["dynamic_wasted_coder_latency"] += wasted["logical_latency"]
                         record["dynamic_wasted_steps"] += wasted["steps_used"]
 
                         record["runtime_serialized"] = True
                         record["serialized"] = True
                         record["effective_gate_kind"] = "runtime_serialize"
-                        record["dynamic_serialization_order"] = "A->B"
+                        record["dynamic_serialization_order"] = "B->A"
                         record["dynamic_restart_count"] += 1
 
                         controller_b_serial = _single_scope_controller(
@@ -1204,41 +1481,140 @@ def run_pair(
                                 safe_name,
                                 "B1",
                             ),
-                            base_commit=result_a["head"],
+                            base_commit=base,
                             task_dir=task_dir,
                             feature_dir=feature_b,
                             seed=seed_b,
                             message="feature B",
-                            trace_id=(f"{run_id}|agent=B|attempt=serial-restart"),
+                            trace_id=(f"{run_id}|agent=B|attempt=serial"),
                             mutation_guard=(controller_b_serial.before_mutation),
-                            scope_base_commit=base,
                         )
 
-                        final_tree = tree_b
+                        controller_a_serial = _single_scope_controller(
+                            plan_a,
+                            intent_id="A",
+                            owner="agent-a",
+                            agent="A",
+                            force_all_committed=False,
+                            scope_events=record["scope_events"],
+                            base_commit=base,
+                        )
+
+                        tree_a, result_a = _run_agent(
+                            repo,
+                            worktrees,
+                            path=_new_agent_path(
+                                safe_name,
+                                "A1",
+                            ),
+                            base_commit=result_b["head"],
+                            task_dir=task_dir,
+                            feature_dir=feature_a,
+                            seed=seed_a,
+                            message="feature A",
+                            trace_id=(f"{run_id}|agent=A|attempt=serial-restart"),
+                            mutation_guard=(controller_a_serial.before_mutation),
+                        )
+
+                        final_tree = tree_a
                         record["integration_success"] = True
                         record["clean_merge"] = True
                         record["coder_latency_critical"] = (
                             max(
-                                result_a["logical_latency"],
                                 wasted["logical_latency"],
+                                result_b["logical_latency"],
                             )
-                            + result_b["logical_latency"]
+                            + result_a["logical_latency"]
                         )
 
                     else:
-                        merged = _merge_parallel_worktrees(
-                            tree_a,
-                            tree_b,
-                        )
+                        try:
+                            tree_b, result_b = _run_agent(
+                                repo,
+                                worktrees,
+                                path=_new_agent_path(
+                                    safe_name,
+                                    "B0",
+                                ),
+                                base_commit=base,
+                                task_dir=task_dir,
+                                feature_dir=feature_b,
+                                seed=seed_b,
+                                message="feature B",
+                                trace_id=(f"{run_id}|agent=B|attempt=parallel"),
+                                mutation_guard=(controller_b.before_mutation),
+                            )
 
-                        record["integration_success"] = merged["integration_success"]
-                        record["clean_merge"] = merged["clean_merge"]
-                        final_tree = merged["final_tree"]
+                        except DynamicScopeBlocked as exc:
+                            if exc.block_type != "promotion_rejected":
+                                raise
 
-                        record["coder_latency_critical"] = max(
-                            result_a["logical_latency"],
-                            result_b["logical_latency"],
-                        )
+                            wasted = _partial_cost(exc)
+
+                            record["dynamic_wasted_coder_cost"] += wasted["logical_cost"]
+                            record["dynamic_wasted_coder_latency"] += wasted[
+                                "logical_latency"
+                            ]
+                            record["dynamic_wasted_steps"] += wasted["steps_used"]
+
+                            record["runtime_serialized"] = True
+                            record["serialized"] = True
+                            record["effective_gate_kind"] = "runtime_serialize"
+                            record["dynamic_serialization_order"] = "A->B"
+                            record["dynamic_restart_count"] += 1
+
+                            controller_b_serial = _single_scope_controller(
+                                plan_b,
+                                intent_id="B",
+                                owner="agent-b",
+                                agent="B",
+                                force_all_committed=False,
+                                scope_events=record["scope_events"],
+                                base_commit=base,
+                            )
+
+                            tree_b, result_b = _run_agent(
+                                repo,
+                                worktrees,
+                                path=_new_agent_path(
+                                    safe_name,
+                                    "B1",
+                                ),
+                                base_commit=result_a["head"],
+                                task_dir=task_dir,
+                                feature_dir=feature_b,
+                                seed=seed_b,
+                                message="feature B",
+                                trace_id=(f"{run_id}|agent=B|attempt=serial-restart"),
+                                mutation_guard=(controller_b_serial.before_mutation),
+                                scope_base_commit=base,
+                            )
+
+                            final_tree = tree_b
+                            record["integration_success"] = True
+                            record["clean_merge"] = True
+                            record["coder_latency_critical"] = (
+                                max(
+                                    result_a["logical_latency"],
+                                    wasted["logical_latency"],
+                                )
+                                + result_b["logical_latency"]
+                            )
+
+                        else:
+                            merged = _merge_parallel_worktrees(
+                                tree_a,
+                                tree_b,
+                            )
+
+                            record["integration_success"] = merged["integration_success"]
+                            record["clean_merge"] = merged["clean_merge"]
+                            final_tree = merged["final_tree"]
+
+                            record["coder_latency_critical"] = max(
+                                result_a["logical_latency"],
+                                result_b["logical_latency"],
+                            )
 
         # -------------------------------------------------------------
         # Persist scope-event metrics.
@@ -1513,6 +1889,11 @@ def run_pair(
         record["error"] = str(exc)[:3000]
 
     finally:
+        pair_finished_ns = time.time_ns()
+        record["physical_pair_finished_ns"] = pair_finished_ns
+        record["physical_pair_wall_time_seconds"] = (
+            pair_finished_ns - pair_started_ns
+        ) / 1_000_000_000
         record["logical_total_cost"] = record["planner_cost"] + record["coder_cost"]
         record["logical_system_cost_estimate"] = record["coder_cost"] + (
             record["frozen_planner_cost_pair"]
@@ -1532,6 +1913,18 @@ def run_pair(
                 repo,
                 worktree,
             )
+        for plane in scope_planes:
+            try:
+                plane.close()
+            except Exception:
+                pass
+        if scope_db_path is not None:
+            for suffix in ("", "-wal", "-shm"):
+                candidate = Path(str(scope_db_path) + suffix)
+                try:
+                    candidate.unlink()
+                except FileNotFoundError:
+                    pass
 
     return record
 

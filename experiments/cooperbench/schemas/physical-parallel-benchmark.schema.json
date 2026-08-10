@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/physical-parallel-benchmark.schema.json",
+  "title": "Claim Plane Physical Parallel Benchmark v2",
+  "type": "object",
+  "required": [
+    "protocol",
+    "max_parallel_pairs",
+    "batch_started_ns",
+    "batch_finished_ns",
+    "batch_wall_time_seconds",
+    "outer_concurrency",
+    "complete",
+    "workers"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.physical-parallel-benchmark.v2"
+    },
+    "max_parallel_pairs": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "batch_started_ns": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "batch_finished_ns": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "batch_wall_time_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "outer_concurrency": {
+      "type": "object",
+      "required": [
+        "worker_count",
+        "wall_time_seconds",
+        "sum_worker_seconds",
+        "parallel_efficiency",
+        "peak_active_workers"
+      ],
+      "properties": {
+        "worker_count": {"type": "integer", "minimum": 0},
+        "wall_time_seconds": {"type": "number", "minimum": 0},
+        "sum_worker_seconds": {"type": "number", "minimum": 0},
+        "parallel_efficiency": {"type": "number", "minimum": 0},
+        "peak_active_workers": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "complete": {"type": "boolean"},
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "returncode", "interval"],
+        "properties": {
+          "label": {"type": "string", "minLength": 1},
+          "returncode": {"type": "integer"},
+          "interval": {
+            "type": "object",
+            "required": [
+              "label",
+              "started_ns",
+              "finished_ns",
+              "duration_seconds"
+            ],
+            "properties": {
+              "label": {"type": "string", "minLength": 1},
+              "started_ns": {"type": "integer", "minimum": 1},
+              "finished_ns": {"type": "integer", "minimum": 1},
+              "duration_seconds": {"type": "number", "minimum": 0}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

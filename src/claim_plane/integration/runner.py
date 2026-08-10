@@ -1313,7 +1313,7 @@ def _package_version() -> str:
     try:
         return importlib.metadata.version("claim-plane")
     except importlib.metadata.PackageNotFoundError:
-        return "0.37.24+source"
+        return "0.37.25+source"
 
 
 def _path_sha256(path: Path) -> str | None:

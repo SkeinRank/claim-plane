@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.24.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.25.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -1489,6 +1489,25 @@ python -m experiments.cooperbench confirmatory aggregate
 python -m experiments.cooperbench confirmatory verify-analysis
 ```
 
+A physical-parallel execution layer can reuse the same frozen 30-pair workload and
+Planner v1 declarations while changing only execution instrumentation. Independent pair
+processes are isolated and scheduled through a bounded worker pool, and admitted workers
+inside a pair record actual wall-clock overlap rather than inferring parallelism from
+logical latency:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory physical-run \
+  --cooperbench /path/to/CooperBench \
+  --seed 101 \
+  --pairs 1-6 \
+  --max-parallel-pairs 6
+```
+
+The outer worker pool is an experiment-throughput optimization and is reported separately
+from inner pair overlap. It therefore cannot be counted as Claim Plane speedup. Each outer
+pair receives an isolated repository cache and worktree root so concurrent runs do not
+share mutable Git state.
+
 Aggregation is intentionally strict: it requires all nine completed shards and the full
 360-row pair/seed/arm matrix before writing final analysis artifacts. The output includes
 arm, feature-pair, and repository-task cluster summaries, task-cluster bootstrap confidence
@@ -1516,7 +1535,7 @@ Claim Plane remains an alpha coordination kernel.
 - The default `tree` sandbox detects repository mutations but does not isolate network or the host filesystem; strict OS isolation requires an available supported backend.
 - HMAC evidence provides shared-secret authenticity, not public-key identity or hardware attestation.
 - The router is deterministic and heuristic, not learned.
-- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The published 30-pair × 3-seed confirmatory study found strong reliability gains for conservative static admission, but also showed that static admission largely collapsed toward serialization and that dynamic admission exposed region undercoverage and insufficient amendment handling. Provider calls were physically sequential, so the study does not establish wall-clock parallel speedup.
+- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The published 30-pair × 3-seed confirmatory study found strong reliability gains for conservative static admission, but also showed that static admission largely collapsed toward serialization and that dynamic admission exposed region undercoverage and insufficient amendment handling. Provider calls in that published study were physically sequential, so those published results do not establish wall-clock parallel speedup. Physical Parallel Benchmark v2 can now measure actual inner worker overlap and bounded outer experiment concurrency, but new confirmatory measurements are still required before claiming a speedup.
 
 The comparative evaluation requirements are documented in [docs/BENCHMARK.md](docs/BENCHMARK.md), and the study infrastructure is described in [experiments/cooperbench/README.md](experiments/cooperbench/README.md).
 

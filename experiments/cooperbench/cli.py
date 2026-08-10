@@ -382,6 +382,37 @@ def cmd_confirmatory_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_confirmatory_physical_pair(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.physical import run_physical_pair
+
+    result = run_physical_pair(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        pair_index=args.pair,
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0
+
+
+def cmd_confirmatory_physical_run(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.physical import run_physical_batch
+    from .physical_parallel import parse_pair_indexes
+
+    pair_indexes = parse_pair_indexes(args.pairs, pair_count=30)
+    result = run_physical_batch(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        pair_indexes=pair_indexes,
+        max_parallel_pairs=args.max_parallel_pairs,
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0 if result.get("complete") else 1
+
+
 def cmd_confirmatory_status(args: argparse.Namespace) -> int:
     from .confirmatory_30x3.runner import study_status
 
@@ -463,6 +494,41 @@ def _add_confirmatory_commands(sub: Any) -> None:
         help="Refuse to reuse a shard that already contains completed units.",
     )
     run.set_defaults(func=cmd_confirmatory_run)
+
+    physical = confirmatory_sub.add_parser(
+        "physical-run",
+        help=(
+            "Run frozen pairs through a bounded subprocess pool and measure actual "
+            "worker overlap."
+        ),
+    )
+    _add_confirmatory_paths(physical)
+    physical.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    physical.add_argument(
+        "--pairs",
+        default="1-6",
+        help="One-based pair indexes or ranges, for example 1-6,9,12.",
+    )
+    physical.add_argument(
+        "--max-parallel-pairs",
+        type=int,
+        default=6,
+        help="Maximum number of independent pair processes active at once.",
+    )
+    physical.add_argument("--repo", default=".")
+    physical.add_argument("--no-resume", action="store_true")
+    physical.set_defaults(func=cmd_confirmatory_physical_run)
+
+    physical_pair = confirmatory_sub.add_parser(
+        "physical-pair",
+        help="Execute one frozen pair with inner physical-concurrency instrumentation.",
+    )
+    _add_confirmatory_paths(physical_pair)
+    physical_pair.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    physical_pair.add_argument("--pair", required=True, type=int, choices=range(1, 31))
+    physical_pair.add_argument("--repo", default=".")
+    physical_pair.add_argument("--no-resume", action="store_true")
+    physical_pair.set_defaults(func=cmd_confirmatory_physical_pair)
 
     status = confirmatory_sub.add_parser(
         "status", help="Report planner-freeze and nine-shard completion state."

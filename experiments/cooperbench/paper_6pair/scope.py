@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any, Iterable
 
 from claim_plane import Plane, ScopeCommitment
@@ -73,6 +74,62 @@ def build_scope_plane(
         "intent_b": intent_b,
         "decision_a": decision_a,
         "decision_b": decision_b,
+    }
+
+
+def prepare_threadsafe_scope_registry(
+    plan_a: dict[str, Any],
+    plan_b: dict[str, Any],
+    *,
+    force_all_committed: bool,
+    base_commit: str,
+    db_path: str | Path,
+) -> dict[str, Any]:
+    """Create two independent Plane connections over one shared SQLite registry.
+
+    The published harness used one in-memory Plane because provider calls were
+    sequential. Physical worker threads cannot safely share that SQLite connection,
+    so each controller receives its own connection while registry decisions remain
+    serialized by SQLite transactions.
+    """
+
+    path = Path(db_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        candidate = Path(str(path) + suffix)
+        if candidate.exists():
+            candidate.unlink()
+
+    intent_a = plan_to_intent(
+        "A",
+        "agent-a",
+        plan_a,
+        force_all_committed=force_all_committed,
+        base_commit=base_commit,
+    )
+    intent_b = plan_to_intent(
+        "B",
+        "agent-b",
+        plan_b,
+        force_all_committed=force_all_committed,
+        base_commit=base_commit,
+    )
+    if intent_a is None or intent_b is None:
+        raise ValueError("Cannot build a scope plane from an empty declaration.")
+
+    admin = Plane.open(path)
+    try:
+        decision_a = admin.admit(intent_a)
+        decision_b = admin.admit(intent_b)
+    finally:
+        admin.close()
+
+    return {
+        "intent_a": intent_a,
+        "intent_b": intent_b,
+        "decision_a": decision_a,
+        "decision_b": decision_b,
+        "db_path": path,
     }
 
 
@@ -258,6 +315,7 @@ __all__ = [
     "admission_verdict",
     "build_scope_plane",
     "build_single_scope_plane",
+    "prepare_threadsafe_scope_registry",
     "declared_committed_files",
     "declared_contingent_files",
     "declared_files",

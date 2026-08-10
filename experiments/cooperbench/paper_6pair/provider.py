@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
@@ -26,15 +27,17 @@ class ProviderStats:
 
 LLM_CACHE: dict[str, dict[str, Any]] = {}
 STATS = ProviderStats()
+_STATE_LOCK = threading.RLock()
 
 
 def reset_provider_state() -> None:
-    LLM_CACHE.clear()
-    STATS.api_attempts = 0
-    STATS.http_200_responses = 0
-    STATS.accepted_responses = 0
-    STATS.actual_cost = 0.0
-    STATS.cost_by_role = {"planner": 0.0, "coder": 0.0}
+    with _STATE_LOCK:
+        LLM_CACHE.clear()
+        STATS.api_attempts = 0
+        STATS.http_200_responses = 0
+        STATS.accepted_responses = 0
+        STATS.actual_cost = 0.0
+        STATS.cost_by_role = {"planner": 0.0, "coder": 0.0}
 
 
 def _cache_key(
@@ -89,8 +92,10 @@ def llm(
         parallel_tool_calls=parallel_tool_calls,
         response_format=response_format,
     )
-    if key in LLM_CACHE:
-        cached = dict(LLM_CACHE[key])
+    with _STATE_LOCK:
+        cached_value = LLM_CACHE.get(key)
+    if cached_value is not None:
+        cached = dict(cached_value)
         cached["cached"] = True
         return cached
 
@@ -100,7 +105,8 @@ def llm(
 
     last_error = ""
     for attempt in range(HTTP_RETRIES):
-        STATS.api_attempts += 1
+        with _STATE_LOCK:
+            STATS.api_attempts += 1
         request_payload: dict[str, Any] = {
             "model": model,
             "messages": list(messages),
@@ -152,11 +158,12 @@ def llm(
                 time.sleep(5 * (attempt + 1))
             continue
 
-        STATS.http_200_responses += 1
         data = json.loads(raw.decode("utf-8"))
         cost = float((data.get("usage") or {}).get("cost", 0) or 0)
-        STATS.actual_cost += cost
-        STATS.cost_by_role[role] = STATS.cost_by_role.get(role, 0.0) + cost
+        with _STATE_LOCK:
+            STATS.http_200_responses += 1
+            STATS.actual_cost += cost
+            STATS.cost_by_role[role] = STATS.cost_by_role.get(role, 0.0) + cost
 
         choices = data.get("choices") or []
         if not choices:
@@ -199,8 +206,9 @@ def llm(
             "phase": phase,
             "model": model,
         }
-        LLM_CACHE[key] = dict(result)
-        STATS.accepted_responses += 1
+        with _STATE_LOCK:
+            LLM_CACHE[key] = dict(result)
+            STATS.accepted_responses += 1
         return result
 
     raise RuntimeError(

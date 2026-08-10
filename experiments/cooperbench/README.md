@@ -206,6 +206,42 @@ The protocol source artifacts live under
 `.claim-plane/experiments/claim-plane-confirmatory-30x3/protocol/`. Once created, the
 30-pair study declaration is immutable for that artifact root.
 
+## Physical Parallel Benchmark v2
+
+The frozen confirmatory workload can also be executed with physical concurrency
+instrumentation without changing its pair selection, coder seeds, plans, or arm names.
+The execution layer distinguishes two independent measurements:
+
+- **inner overlap**: the measured wall-clock intersection of agent A and agent B inside one
+  pair when the arm admits concurrent execution;
+- **outer concurrency**: a bounded pool of independent pair subprocesses used only to
+  reduce experiment turnaround time.
+
+Run six pairs concurrently with a hard six-process ceiling:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory physical-run \
+  --cooperbench /path/to/CooperBench \
+  --seed 101 \
+  --pairs 1-6 \
+  --max-parallel-pairs 6
+```
+
+Each pair subprocess receives its own repository cache and worktree root. This avoids the
+unsafe pattern where concurrent benchmark processes reset or check out the same mutable Git
+clone. Parent-observed process intervals are persisted separately from per-arm agent
+intervals. Outer throughput is never interpreted as Claim Plane speedup.
+
+`parallel`, statically admitted Claim Plane work, and dynamically admitted Claim Plane work
+can now launch their two workers simultaneously. If Dynamic scope expansion rejects one or
+both optimistic workers, the harness records the wasted parallel attempt and falls back to
+a deterministic serial order. Serialized arms remain sequential by construction.
+
+The physical execution artifacts are written under
+`.claim-plane/experiments/physical-parallel-v2/` and use the
+`claim-plane.physical-parallel-benchmark.v2` protocol. The historical published results are
+left untouched; fresh measurements are required before any wall-clock speedup claim.
+
 ## Pinned Linux environment
 
 A Docker image is provided for runs that should not depend on the host Python toolchain.
