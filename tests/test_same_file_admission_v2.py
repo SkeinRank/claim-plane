@@ -115,6 +115,35 @@ def test_same_file_different_methods_are_admitted_in_parallel() -> None:
     assert restored.parallel_safe is True
 
 
+def test_same_file_implementation_dependency_stays_parallel() -> None:
+    semantic = build_python_dependency_graph(
+        {
+            "app.py": dedent(
+                """
+                def parse(value: str) -> str:
+                    return value
+
+                def consume(value: str) -> str:
+                    return parse(value)
+                """
+            ).lstrip()
+        }
+    )
+    graph = _graph(
+        _item("consumer", "app.py", "consume"),
+        _item("producer", "app.py", "parse"),
+    )
+
+    plan = compute_concurrency_plan(graph, _policy(), semantic_graph=semantic)
+
+    assert [wave.work_ids for wave in plan.waves] == [("consumer", "producer")]
+    assert plan.constraints == ()
+    evidence = plan.metadata["same_file_admissions"][0]
+    assert evidence["action"] == SameFileAdmissionAction.PARALLEL.value
+    assert evidence["reason"] == SameFileAdmissionReason.SEMANTIC_INDEPENDENT.value
+    assert evidence["semantic_kind"] == "independent"
+
+
 def test_semantic_dependency_orders_same_file_work() -> None:
     semantic = build_python_dependency_graph(
         {

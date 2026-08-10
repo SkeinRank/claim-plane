@@ -449,6 +449,7 @@ def _semantic_rechecks(
             _changes(current_surface.semantic_roots),
             left_id=entry.work_id,
             right_id=work_id,
+            mutation_sensitive_ordering=True,
         )
         declared_dependency = entry.work_id in current_admission.effective_dependencies
         refreshed_on_current_head = current_surface.base_commit == integration_head

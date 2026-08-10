@@ -378,3 +378,86 @@ def test_full_v2_anchors_explicit_intent_symbol_when_line_coordinates_drift(
     assert anchors["B"][0]["change_kind"] == "contract"
     assert "symbol:src/click/core.py#Option.__init__" in admission["left_changes"]
     assert "symbol:src/click/core.py#Option.__init__" in admission["right_changes"]
+
+
+def test_full_v2_does_not_order_stable_contract_caller_callee_edits(
+    tmp_path: Path,
+) -> None:
+    repo, base = _repo(
+        tmp_path,
+        {
+            "src/jinja2/loaders.py": (
+                "def split_template_path(template):\n"
+                "    return template.split('/')\n"
+                "\n"
+                "class FileSystemLoader:\n"
+                "    def get_source(self, template):\n"
+                "        return split_template_path(template)\n"
+                "\n"
+                "class PackageLoader:\n"
+                "    def get_source(self, template):\n"
+                "        return split_template_path(template)\n"
+            )
+        },
+    )
+    plan_a = {
+        "files": [
+            {
+                "path": "src/jinja2/loaders.py",
+                "action": "modify",
+                "commitment": "committed",
+                "line_start": 6,
+                "line_end": 6,
+                "what": (
+                    "Normalize template before split_template_path in "
+                    "FileSystemLoader.get_source"
+                ),
+            },
+            {
+                "path": "src/jinja2/loaders.py",
+                "action": "modify",
+                "commitment": "committed",
+                "line_start": 10,
+                "line_end": 10,
+                "what": (
+                    "Normalize template before split_template_path in "
+                    "PackageLoader.get_source"
+                ),
+            },
+        ]
+    }
+    plan_b = {
+        "files": [
+            {
+                "path": "src/jinja2/loaders.py",
+                "action": "modify",
+                "commitment": "committed",
+                "line_start": 2,
+                "line_end": 2,
+                "what": "Validate template inside split_template_path",
+            }
+        ]
+    }
+
+    verdict = deterministic_ablation_verdict(
+        repo,
+        base_commit=base,
+        plan_a=plan_a,
+        plan_b=plan_b,
+        profile="full_v2",
+    )
+
+    assert verdict["serialized"] is False
+    assert verdict["kind"] == "parallel"
+    admissions = verdict["ablation_evidence"]["concurrency_plan"]["metadata"][
+        "same_file_admissions"
+    ]
+    assert len(admissions) == 1
+    admission = admissions[0]
+    assert admission["action"] == "parallel"
+    assert admission["reason"] == "semantic_independent"
+    assert admission["semantic_kind"] == "independent"
+    anchors = verdict["ablation_evidence"]["intent_ast_anchors"]
+    assert {
+        item["qualified_identifier"] for item in anchors["A"]
+    } == {"FileSystemLoader.get_source", "PackageLoader.get_source"}

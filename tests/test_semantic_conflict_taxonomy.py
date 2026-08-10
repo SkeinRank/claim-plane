@@ -72,6 +72,44 @@ def test_same_file_different_methods_are_semantically_independent() -> None:
     )
 
 
+def test_implementation_dependency_does_not_force_writer_order() -> None:
+    graph = build_python_dependency_graph(
+        {
+            "app.py": dedent(
+                """
+                def parse(value: str) -> str:
+                    return value
+
+                def consume(value: str) -> str:
+                    return parse(value)
+                """
+            ).lstrip()
+        }
+    )
+
+    decision = classify_semantic_conflict(
+        graph,
+        (_change(graph, "symbol:app.py#parse", SemanticChangeKind.IMPLEMENTATION),),
+        (_change(graph, "symbol:app.py#consume", SemanticChangeKind.IMPLEMENTATION),),
+        left_id="callee-implementation",
+        right_id="caller-implementation",
+        mutation_sensitive_ordering=True,
+    )
+
+    assert decision.kind is SemanticConflictKind.INDEPENDENT
+    assert decision.parallel_safe is True
+    dependency = next(
+        item
+        for item in decision.evidence
+        if item.reason is SemanticConflictReason.STABLE_CONTRACT_DEPENDENCY
+    )
+    assert dependency.path == (
+        "symbol:app.py#parse",
+        "symbol:app.py#consume",
+    )
+    assert dependency.order is None
+
+
 def test_contract_producer_change_orders_consumer_after_producer() -> None:
     graph = build_python_dependency_graph(
         {

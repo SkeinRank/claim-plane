@@ -482,6 +482,7 @@ def evaluate_same_file_admission(
         right_id=right.work_id,
         commutativity_proofs=commutativity_proofs,
         max_depth=max_depth,
+        mutation_sensitive_ordering=True,
     )
     return _decision_from_semantic(semantic, path=path, policy=policy)
 

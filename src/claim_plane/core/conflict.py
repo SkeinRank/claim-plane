@@ -56,6 +56,7 @@ class SemanticConflictReason(str, Enum):
 
     DIRECT_RESOURCE_OVERLAP = "direct_resource_overlap"
     SEMANTIC_DEPENDENCY = "semantic_dependency"
+    STABLE_CONTRACT_DEPENDENCY = "stable_contract_dependency"
     MUTUAL_DEPENDENCY = "mutual_dependency"
     EXPLICIT_COMMUTATIVITY = "explicit_commutativity"
     UNKNOWN_CHANGE = "unknown_change"
@@ -473,6 +474,32 @@ def _path_evidence(
     )
 
 
+_ORDER_SENSITIVE_CHANGE_KINDS = frozenset(
+    {
+        SemanticChangeKind.CONTRACT,
+        SemanticChangeKind.STATE,
+        SemanticChangeKind.STRUCTURE,
+        SemanticChangeKind.ADDED,
+        SemanticChangeKind.REMOVED,
+    }
+)
+
+
+def _dependency_requires_order(change: SemanticChange) -> bool:
+    """Return whether a dependency path constrains mutation execution order.
+
+    Dependency Graph v2 describes repository coupling, not temporal authority. An
+    implementation-only edit keeps the existing callable/resource contract stable,
+    so an existing caller/callee edge alone is not proof that the dependent writer
+    must observe the implementation edit first. Contract, state, structural, added,
+    and removed roots can invalidate a dependent mutation premise and therefore retain
+    producer-before-consumer ordering. Unknown changes are handled fail-closed before
+    this helper is called.
+    """
+
+    return change.kind in _ORDER_SENSITIVE_CHANGE_KINDS
+
+
 def classify_semantic_conflict(
     graph: SemanticDependencyGraph,
     left_changes: Sequence[SemanticChange],
@@ -482,15 +509,23 @@ def classify_semantic_conflict(
     right_id: str = "right",
     commutativity_proofs: Iterable[CommutativityProof] = (),
     max_depth: int | None = None,
+    mutation_sensitive_ordering: bool = False,
 ) -> SemanticConflictDecision:
     """Classify two mutation sets using graph and impact evidence.
 
-    ``independent`` means the current deterministic graph proves no semantic coupling
-    between the mutation roots. ``commutative`` is emitted only when an explicit
-    deterministic proof covers a coupling that would otherwise constrain execution.
-    ``ordered`` records one producer-before-consumer direction. ``conflicting`` means
-    both directions are required or the same semantic resource is mutated without a
-    commutativity proof. ``unknown`` preserves incomplete semantic evidence.
+    ``independent`` means the current deterministic graph proves no ordering-sensitive
+    coupling between the mutation roots. ``commutative`` is emitted only when an
+    explicit deterministic proof covers a coupling that would otherwise constrain
+    execution. ``ordered`` records one producer-before-consumer direction.
+    ``conflicting`` means both directions are required or the same semantic resource is
+    mutated without a commutativity proof. ``unknown`` preserves incomplete semantic
+    evidence.
+
+    By default every dependency path remains ordering-sensitive for compatibility with
+    runtime premise and amendment checks. Concurrency/integration callers may enable
+    ``mutation_sensitive_ordering`` so an implementation-only producer change does not
+    create an execution order solely from an existing dependency edge. Contract, state,
+    structural, added, and removed changes remain order-sensitive in that mode.
     """
 
     if max_depth is not None and max_depth < 0:
@@ -598,7 +633,18 @@ def classify_semantic_conflict(
                     )
                     continue
 
-                if left_to_right is not None and right_to_left is not None:
+                left_requires_order = left_to_right is not None and (
+                    not mutation_sensitive_ordering
+                    or _dependency_requires_order(left_change)
+                )
+                right_requires_order = right_to_left is not None and (
+                    not mutation_sensitive_ordering
+                    or _dependency_requires_order(right_change)
+                )
+
+                if left_requires_order and right_requires_order:
+                    assert left_to_right is not None
+                    assert right_to_left is not None
                     pair_kinds.append(SemanticConflictKind.CONFLICTING)
                     evidence.append(
                         _path_evidence(
@@ -608,8 +654,9 @@ def classify_semantic_conflict(
                             order=None,
                             path=left_to_right,
                             detail=(
-                                "left mutation impacts the right mutation root while the "
-                                "right mutation also impacts the left root"
+                                "left mutation changes an order-sensitive semantic premise "
+                                "of the right mutation while the reverse dependency is also "
+                                "order-sensitive"
                             ),
                         )
                     )
@@ -620,12 +667,16 @@ def classify_semantic_conflict(
                             right_identity=right_change.identity,
                             order=None,
                             path=right_to_left,
-                            detail="reverse semantic impact closes a dependency cycle",
+                            detail=(
+                                "reverse order-sensitive semantic impact closes a mutation "
+                                "dependency cycle"
+                            ),
                         )
                     )
                     continue
 
-                if left_to_right is not None:
+                if left_requires_order:
+                    assert left_to_right is not None
                     pair_order = SemanticConflictOrder.LEFT_BEFORE_RIGHT
                     pair_kinds.append(SemanticConflictKind.ORDERED)
                     orders.add(pair_order)
@@ -637,12 +688,14 @@ def classify_semantic_conflict(
                             order=pair_order,
                             path=left_to_right,
                             detail=(
-                                "the right mutation root depends on semantic state changed "
-                                "by the left side"
+                                "the left mutation changes an order-sensitive semantic "
+                                "premise consumed by the right mutation root"
                             ),
                         )
                     )
-                else:
+                    continue
+
+                if right_requires_order:
                     assert right_to_left is not None
                     pair_order = SemanticConflictOrder.RIGHT_BEFORE_LEFT
                     pair_kinds.append(SemanticConflictKind.ORDERED)
@@ -655,8 +708,28 @@ def classify_semantic_conflict(
                             order=pair_order,
                             path=right_to_left,
                             detail=(
-                                "the left mutation root depends on semantic state changed "
-                                "by the right side"
+                                "the right mutation changes an order-sensitive semantic "
+                                "premise consumed by the left mutation root"
+                            ),
+                        )
+                    )
+                    continue
+
+                pair_kinds.append(SemanticConflictKind.INDEPENDENT)
+                for path in (left_to_right, right_to_left):
+                    if path is None:
+                        continue
+                    evidence.append(
+                        _path_evidence(
+                            reason=SemanticConflictReason.STABLE_CONTRACT_DEPENDENCY,
+                            left_identity=left_change.identity,
+                            right_identity=right_change.identity,
+                            order=None,
+                            path=path,
+                            detail=(
+                                "an existing semantic dependency connects the mutation "
+                                "roots, but the producer-side change is implementation-only "
+                                "and preserves the dependency contract"
                             ),
                         )
                     )
@@ -736,19 +809,24 @@ def classify_semantic_conflict(
     else:
         kind = SemanticConflictKind.INDEPENDENT
         decision_order = None
-        evidence.append(
-            SemanticConflictEvidence(
-                reason=SemanticConflictReason.DISJOINT_SEMANTIC_SURFACE,
-                detail=(
-                    "mutation roots have no direct overlap, dependency path, or shared "
-                    "unresolved boundary in the current graph snapshot"
-                ),
-                metadata={
-                    "left_roots": [item.identity for item in left],
-                    "right_roots": [item.identity for item in right],
-                },
+        if not any(
+            item.reason is SemanticConflictReason.STABLE_CONTRACT_DEPENDENCY
+            for item in evidence
+        ):
+            evidence.append(
+                SemanticConflictEvidence(
+                    reason=SemanticConflictReason.DISJOINT_SEMANTIC_SURFACE,
+                    detail=(
+                        "mutation roots have no direct overlap, ordering-sensitive "
+                        "dependency path, or shared unresolved boundary in the current "
+                        "graph snapshot"
+                    ),
+                    metadata={
+                        "left_roots": [item.identity for item in left],
+                        "right_roots": [item.identity for item in right],
+                    },
+                )
             )
-        )
 
     return SemanticConflictDecision(
         graph_fingerprint=graph.fingerprint,
@@ -763,6 +841,7 @@ def classify_semantic_conflict(
         evidence=tuple(evidence),
         metadata={
             "max_depth": max_depth,
+            "mutation_sensitive_ordering": mutation_sensitive_ordering,
             "commutativity_proof_count": len(proofs),
             "classification_order": [
                 SemanticConflictKind.CONFLICTING.value,

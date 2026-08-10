@@ -523,6 +523,7 @@ def _cross_file_semantic_finding(
         left_id=left.work_id,
         right_id=right.work_id,
         commutativity_proofs=commutativity_proofs,
+        mutation_sensitive_ordering=True,
     )
     if decision.kind in {
         SemanticConflictKind.INDEPENDENT,

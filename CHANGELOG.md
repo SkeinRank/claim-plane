@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.31] — 2026-08-10
+
+### Changed
+
+- Distinguished repository dependency from mutation ordering for concurrent writer admission: an existing caller/callee edge no longer forces serialization when the producer-side mutation is implementation-only and preserves the dependency contract.
+- Kept contract, state, structural, added, and removed mutations order-sensitive, preserving deterministic producer-before-consumer handling when a mutation can invalidate the dependent writer's semantic premise.
+- Applied the same mutation-sensitive rule to actual-diff semantic integration rechecks while retaining strict dependency ordering for runtime premise and bounded-amendment safety checks.
+
+### Fixed
+
+- Prevented clean same-file caller/callee implementation edits from being serialized solely because Dependency Graph v2 records an existing call edge.
+- Added end-to-end regressions for stable-contract same-file concurrency and preserved contract-producer ordering and amendment fail-closed behavior.
+
 ## [0.37.30] — 2026-08-10
 
 ### Changed

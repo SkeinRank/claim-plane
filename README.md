@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.30.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.31.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -420,7 +420,7 @@ installation.
 - repository-bound swarm sessions with exact Git bases, planner-proposed work items, deterministic DAG validation, graph fingerprints, dependency layers, and optimistic graph-version replacement;
 - versioned swarm budget policies with hard worker, graph-size, launch, token, cost, wall-time, retry, and concurrency ceilings that the planner cannot widen silently;
 - adaptive concurrency plans that combine the dependency DAG with region, overlap, contract, schema, semantic cross-file dependencies, and worker-budget constraints to produce deterministic execution waves or a fail-closed `replan_required` result;
-- Same-file Admission v2 that can admit unknown-region same-file work when graph-backed symbol mutations are proven `independent` or explicitly `commutative`, while preserving explicit deny/serialize policy and deterministic ordering for semantic producer-consumer dependencies;
+- Same-file Admission v2 that can admit same-file work when graph-backed symbol mutations are proven `independent` or explicitly `commutative`, while preserving explicit deny/serialize policy and deterministic ordering for mutation-sensitive producer-consumer dependencies;
 - Semantic Amendment Protocol v2 that requires monotonic scope growth, caps new authority and propagated impact, checks additional semantic resources against active intents inside the amendment transaction, and leaves ordered overlap explicit until refresh/resume can establish the required order;
 - Runtime Premise Fencing that atomically revokes live broker mutation authority when a tracked premise becomes stale, fails prepared operations, releases the writer lease, and persists source-bound fence evidence;
 - deterministic runtime pause/refresh/resume that keeps stale workers fenced, requires stale-causing producers to complete, re-admits the unchanged authority surface on a new pinned base, and requires an explicit resume before a fresh broker receives a higher fencing token;
@@ -934,9 +934,9 @@ Semantic Conflict Taxonomy v2 turns two such mutation surfaces into a determinis
 
 | Classification | Meaning |
 |---|---|
-| `independent` | No direct mutation overlap, semantic dependency path, or shared unresolved boundary is present in the complete graph evidence. |
+| `independent` | No direct mutation overlap, order-sensitive dependency path, or shared unresolved boundary is present in the complete graph evidence. Existing dependency edges between implementation-only mutations may remain independent when the producer contract is stable. |
 | `commutative` | A coupling exists but an explicit deterministic commutativity proof covers it. |
-| `ordered` | One mutation changes semantic state consumed by the other; the decision records the required direction. |
+| `ordered` | One mutation changes a contract, state, structure, or other semantic premise consumed by the other; the decision records the required direction. |
 | `conflicting` | The same resource is changed without a commutativity proof, or semantic ordering forms a cycle. |
 | `unknown` | Available evidence is incomplete or ambiguous, so independence is not claimed. |
 
@@ -960,7 +960,11 @@ print(decision.kind.value, decision.order.value if decision.order else None)
 
 The taxonomy never grants mutation authority by itself. In particular, `commutative` requires
 explicit deterministic evidence rather than a naming or text-distance heuristic, and `unknown` stays
-fail-closed. Same-file admission consumes this evidence in a later layer.
+fail-closed. Concurrent-writer admission uses mutation-sensitive ordering: an existing dependency edge
+alone does not serialize two implementation-only edits when the producer-side contract remains stable.
+Contract, state, structural, added, and removed mutations remain order-sensitive. Runtime premise and
+amendment checks retain strict dependency ordering because they protect already-active execution state.
+Same-file admission consumes this evidence in a later layer.
 
 Same-file Admission v2 is that policy layer for the swarm concurrency planner. Under
 `same_file = "region_safe"`, an unknown line-region overlap can be upgraded only when both work
@@ -976,9 +980,10 @@ fingerprint in the concurrency-plan metadata. This keeps the concurrency proof t
 repository state as the work graph.
 
 Graph-backed semantic ordering is not limited to same-file work. When two mutation surfaces are on
-disjoint files but one is a contract/type/API producer for the other, the planner adds a deterministic
-producer-before-consumer edge. Missing or unresolved cross-file semantic evidence stays conservative
-instead of being treated as proof that separate Git paths are independent.
+disjoint files and one changes a contract/type/API/state premise consumed by the other, the planner adds
+a deterministic producer-before-consumer edge. An existing dependency between implementation-only
+mutations does not create temporal ordering by itself. Missing or unresolved cross-file semantic evidence
+stays conservative instead of being treated as proof that separate Git paths are independent.
 
 The deterministic concurrency conformance suite exercises these rules without launching agents or
 executing repository code:
