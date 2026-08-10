@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/semantic-conflict-taxonomy.schema.json",
+  "title": "Claim Plane Semantic Conflict Taxonomy v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "graph_fingerprint",
+    "left_id",
+    "right_id",
+    "kind",
+    "order",
+    "left_changes",
+    "right_changes",
+    "left_impact_fingerprint",
+    "right_impact_fingerprint",
+    "parallel_safe",
+    "requires_ordering",
+    "fail_closed",
+    "evidence",
+    "metadata"
+  ],
+  "properties": {
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "protocol": {"const": "claim-plane.semantic-conflict-taxonomy.v2"},
+    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "left_id": {"type": "string", "minLength": 1},
+    "right_id": {"type": "string", "minLength": 1},
+    "kind": {
+      "enum": ["independent", "commutative", "ordered", "conflicting", "unknown"]
+    },
+    "order": {
+      "anyOf": [
+        {"enum": ["left_before_right", "right_before_left"]},
+        {"type": "null"}
+      ]
+    },
+    "left_changes": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "right_changes": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "left_impact_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "right_impact_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "parallel_safe": {"type": "boolean"},
+    "requires_ordering": {"type": "boolean"},
+    "fail_closed": {"type": "boolean"},
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/evidence"}
+    },
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "left_identity",
+        "right_identity",
+        "order",
+        "path",
+        "relations",
+        "boundary_target",
+        "detail",
+        "metadata"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "direct_resource_overlap",
+            "semantic_dependency",
+            "mutual_dependency",
+            "explicit_commutativity",
+            "unknown_change",
+            "missing_graph_root",
+            "bounded_impact",
+            "unresolved_dependency",
+            "disjoint_semantic_surface"
+          ]
+        },
+        "left_identity": {"type": ["string", "null"]},
+        "right_identity": {"type": ["string", "null"]},
+        "order": {
+          "anyOf": [
+            {"enum": ["left_before_right", "right_before_left"]},
+            {"type": "null"}
+          ]
+        },
+        "path": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "defines",
+              "imports",
+              "calls",
+              "reads",
+              "writes",
+              "inherits",
+              "types",
+              "tests",
+              "public_api"
+            ]
+          }
+        },
+        "boundary_target": {"type": ["string", "null"]},
+        "detail": {"type": "string"},
+        "metadata": {"type": "object"}
+      }
+    }
+  }
+}

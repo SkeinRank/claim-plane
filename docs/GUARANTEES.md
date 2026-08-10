@@ -57,5 +57,11 @@ automatic allow or deny decision. Body-only changes require an authoritative cha
 from source ownership or Git-hunk mapping when the dependency graph itself is unchanged. External
 and unresolved boundaries remain explicit and cannot be interpreted as proof of independence.
 
+Semantic Conflict Taxonomy v2 may classify two complete mutation surfaces as `independent`,
+`commutative`, `ordered`, `conflicting`, or `unknown`. `commutative` requires explicit deterministic
+proof evidence; missing graph roots, explicitly unknown changes, shared unresolved boundaries, and
+bounded traversal that cannot prove independence remain `unknown`. The taxonomy is evidence for
+later admission and does not itself grant mutation authority.
+
 Existing runtime intent ordering, stale-state propagation, Git hunk verification, and brokered
 mutation enforcement remain the authoritative execution controls.

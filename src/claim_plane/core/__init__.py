@@ -1,6 +1,16 @@
 """Public protocol models and the Plane facade."""
 
 from claim_plane.core.extract import Artifact, artifacts_to_claims, extract_artifacts
+from claim_plane.core.conflict import (
+    SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL,
+    CommutativityProof,
+    SemanticConflictDecision,
+    SemanticConflictEvidence,
+    SemanticConflictKind,
+    SemanticConflictOrder,
+    SemanticConflictReason,
+    classify_semantic_conflict,
+)
 from claim_plane.core.governance import GovernancePolicy
 from claim_plane.core.dependency_graph import (
     SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL,
@@ -93,6 +103,14 @@ from claim_plane.core.store import (
 )
 
 __all__ = [
+    "SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL",
+    "CommutativityProof",
+    "SemanticConflictDecision",
+    "SemanticConflictEvidence",
+    "SemanticConflictKind",
+    "SemanticConflictOrder",
+    "SemanticConflictReason",
+    "classify_semantic_conflict",
     "AcceptanceResult",
     "AccessMode",
     "AdmissionConflict",

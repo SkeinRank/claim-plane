@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.17] — 2026-08-09
+
+### Added
+
+- add a source-bound semantic conflict taxonomy that classifies two mutation sets as `independent`, `commutative`, `ordered`, `conflicting`, or `unknown` using Dependency Graph v2 and semantic impact evidence;
+- derive producer-before-consumer ordering from directional impact paths, detect direct resource overlap and mutual dependency cycles, and keep missing roots, unknown changes, shared unresolved boundaries, and bounded impact traversal fail-closed;
+- require explicit deterministic evidence before emitting `commutative`, persist typed classification reasons and dependency paths with deterministic fingerprints, and package a machine-readable Semantic Conflict Taxonomy v2 schema for later admission integration.
+
 ## [0.37.16] — 2026-08-09
 
 ### Added

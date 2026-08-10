@@ -102,6 +102,14 @@ from claim_plane.oss_pilot import (
     run_oss_pilot_acceptance,
 )
 from claim_plane.core import (
+    SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL,
+    CommutativityProof,
+    SemanticConflictDecision,
+    SemanticConflictEvidence,
+    SemanticConflictKind,
+    SemanticConflictOrder,
+    SemanticConflictReason,
+    classify_semantic_conflict,
     AcceptanceResult,
     AccessMode,
     AdmissionConflict,
@@ -352,9 +360,17 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.16"
+__version__ = "0.37.17"
 
 __all__ = [
+    "SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL",
+    "CommutativityProof",
+    "SemanticConflictDecision",
+    "SemanticConflictEvidence",
+    "SemanticConflictKind",
+    "SemanticConflictOrder",
+    "SemanticConflictReason",
+    "classify_semantic_conflict",
     "VALIDATION_ACCEPTANCE_TIMEOUTS",
     "VALIDATION_ARMS",
     "VALIDATION_BUNDLE_PROTOCOL",

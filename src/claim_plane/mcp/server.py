@@ -27,7 +27,7 @@ from claim_plane.integration import (
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "claim-plane"
-SERVER_VERSION = "0.37.16"
+SERVER_VERSION = "0.37.17"
 
 
 @dataclass(frozen=True, slots=True)

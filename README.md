@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.16.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.17.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -923,6 +923,38 @@ Every reached resource retains a deterministic shortest dependency path back to 
 External and unresolved edges touching impacted code are emitted as explicit analysis boundaries, not
 as evidence that the change is safe. This layer produces impact evidence only; admission policy and
 runtime mutation enforcement remain separate.
+
+Semantic Conflict Taxonomy v2 turns two such mutation surfaces into a deterministic relationship:
+
+| Classification | Meaning |
+|---|---|
+| `independent` | No direct mutation overlap, semantic dependency path, or shared unresolved boundary is present in the complete graph evidence. |
+| `commutative` | A coupling exists but an explicit deterministic commutativity proof covers it. |
+| `ordered` | One mutation changes semantic state consumed by the other; the decision records the required direction. |
+| `conflicting` | The same resource is changed without a commutativity proof, or semantic ordering forms a cycle. |
+| `unknown` | Available evidence is incomplete or ambiguous, so independence is not claimed. |
+
+```python
+from claim_plane import SemanticChange, SemanticChangeKind, classify_semantic_conflict
+
+left = SemanticChange(
+    identity="symbol:src/parser.py#Parser.parse",
+    kind=SemanticChangeKind.CONTRACT,
+    after_resource=graph.node("symbol:src/parser.py#Parser.parse").resource,
+)
+right = SemanticChange(
+    identity="symbol:src/service.py#parse_request",
+    kind=SemanticChangeKind.IMPLEMENTATION,
+    after_resource=graph.node("symbol:src/service.py#parse_request").resource,
+)
+
+decision = classify_semantic_conflict(graph, (left,), (right,))
+print(decision.kind.value, decision.order.value if decision.order else None)
+```
+
+The taxonomy never grants mutation authority by itself. In particular, `commutative` requires
+explicit deterministic evidence rather than a naming or text-distance heuristic, and `unknown` stays
+fail-closed. Same-file admission consumes this evidence in a later layer.
 
 ## Admission semantics
 
