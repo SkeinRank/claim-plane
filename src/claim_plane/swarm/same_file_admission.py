@@ -201,6 +201,36 @@ def semantic_changes_for_path(
     return tuple(by_identity[key] for key in sorted(by_identity))
 
 
+def semantic_changes_for_item(
+    item: WorkItem,
+    graph: SemanticDependencyGraph,
+) -> tuple[SemanticChange, ...]:
+    """Project all committed semantic mutation roots for one work item.
+
+    The projection is intentionally limited to graph-backed repository resources.
+    File-only declarations remain outside this helper so incomplete semantic scope
+    cannot be mistaken for proof of independence.
+    """
+
+    paths = sorted(
+        {
+            path
+            for operation in item.operations
+            if operation.committed and operation.mutating
+            if operation.resource.kind
+            in {ResourceKind.SYMBOL, ResourceKind.CONTRACT, ResourceKind.SCHEMA}
+            if (path := _operation_path(operation)) is not None
+        }
+    )
+    by_identity: dict[str, SemanticChange] = {}
+    for path in paths:
+        for change in semantic_changes_for_path(item, path, graph):
+            previous = by_identity.get(change.identity)
+            if previous is None or _kind_rank(change.kind) > _kind_rank(previous.kind):
+                by_identity[change.identity] = change
+    return tuple(by_identity[key] for key in sorted(by_identity))
+
+
 @dataclass(frozen=True, slots=True)
 class SameFileAdmissionDecision:
     """Source-bound same-file admission evidence for one work-item pair."""
@@ -433,5 +463,6 @@ __all__ = [
     "SameFileAdmissionDecision",
     "SameFileAdmissionReason",
     "evaluate_same_file_admission",
+    "semantic_changes_for_item",
     "semantic_changes_for_path",
 ]

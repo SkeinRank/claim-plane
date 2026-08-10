@@ -156,3 +156,17 @@ claim-plane --db .claim-plane/plane.db runtime-recoveries <intent-id>
 ```
 
 Refresh re-evaluates admission and dependencies but cannot expand operations, acceptance, preserves, or dependencies. Ordinary activation and broker registration remain blocked while a successful refresh is waiting for `runtime-resume`. Any broker started after resume receives a fresh fencing token.
+
+## Deterministic concurrency conformance
+
+Run the offline canonical suite for the semantic concurrency controller:
+
+```bash
+claim-plane swarm conformance
+claim-plane swarm conformance --json
+claim-plane swarm conformance --json --out conformance.json
+```
+
+Exit code `0` means every canonical scenario matched its expected deterministic outcome. Exit code `2`
+means at least one scenario regressed. The JSON report is versioned and includes safety/selectivity and
+amendment/recovery metrics; it does not run coding agents or claim physical wall-clock speedup.

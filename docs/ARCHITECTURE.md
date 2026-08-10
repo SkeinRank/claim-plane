@@ -52,6 +52,12 @@ that declared symbol mutations are independent or explicitly commutative. Ordere
 dependencies become scheduler serialization edges in the required direction. Missing semantic roots,
 unresolved evidence, direct conflicts, and explicit serialize/deny policy remain fail-closed.
 
+For graph-backed mutations on disjoint files, the planner also evaluates semantic relationships that
+Git path overlap cannot reveal. A contract, type, or public-API producer may therefore create an
+ordered edge to a consumer in another file. Independent cross-file roots remain parallel; conflicting
+or unresolved semantic evidence remains conservative. This closes the gap between textual separation
+and semantic dependency without treating the dependency graph itself as mutation authority.
+
 Semantic Amendment Protocol v2 applies repository semantics to scope growth before the canonical
 amendment transaction commits. It permits only monotonic candidates, isolates newly committed
 mutation authority, projects that authority onto the semantic graph, propagates downstream impact,
@@ -136,6 +142,13 @@ Git replay is intentionally split from commit creation. The snapshot is applied 
 ### Bounded integration rescue
 
 A merge conflict does not grant permission to improvise a resolution. Integration rescue classifies the durable conflict and chooses from four deterministic outcomes. A transient integration error may retry the same immutable source snapshot. A textual conflict, or an ordered dependency whose worker ran on an older integration head, may prepare serial re-execution by resetting only the Claim Plane-owned worker worktree to the current integration head and superseding that specific successful run for scheduling purposes. Authority violations and post-apply semantic drift require explicit review; unresolved semantic conflict requires replanning. Every automatic repair consumes `retries.max_repairs_per_work_item`, and exhaustion stops fail-closed. Historical runs remain in evidence and continue to count toward total launch, token, and wall-time budgets.
+
+### Deterministic concurrency conformance
+
+The offline conformance suite runs canonical fixtures through the deterministic planning, amendment,
+and runtime-recovery layers. It records stable scenario identities, expected and observed outcomes,
+and aggregate safety/selectivity metrics. The suite is a regression boundary for the controller, not a
+performance benchmark: it launches no coding agents and does not measure physical execution overlap.
 
 ### Verified integration pipeline
 

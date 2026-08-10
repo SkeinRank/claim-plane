@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/deterministic-concurrency-conformance.schema.json",
+  "title": "Claim Plane Deterministic Concurrency Conformance Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "conformance_version",
+    "passed",
+    "summary",
+    "metrics",
+    "scenarios"
+  ],
+  "properties": {
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "protocol": {
+      "const": "claim-plane.deterministic-concurrency-conformance.v1"
+    },
+    "conformance_version": {"const": "1.0"},
+    "passed": {"type": "boolean"},
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "total"],
+      "properties": {
+        "passed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": 1}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "safe_parallel_recall",
+        "false_parallel_rate",
+        "unnecessary_serialization_rate",
+        "ordered_dependency_accuracy",
+        "amendment_recovery_rate",
+        "counts"
+      ],
+      "properties": {
+        "safe_parallel_recall": {"type": "number", "minimum": 0, "maximum": 1},
+        "false_parallel_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "unnecessary_serialization_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "ordered_dependency_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "amendment_recovery_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "counts": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scenario",
+          "expectation",
+          "observed",
+          "status",
+          "detail",
+          "evidence"
+        ],
+        "properties": {
+          "scenario": {"type": "string", "minLength": 1},
+          "expectation": {
+            "enum": [
+              "parallel",
+              "ordered",
+              "serialized",
+              "fail_closed",
+              "amendment_admitted",
+              "amendment_blocked",
+              "recovered"
+            ]
+          },
+          "observed": {
+            "type": ["string", "null"],
+            "enum": [
+              "parallel",
+              "ordered",
+              "serialized",
+              "fail_closed",
+              "amendment_admitted",
+              "amendment_blocked",
+              "recovered",
+              null
+            ]
+          },
+          "status": {"enum": ["passed", "failed"]},
+          "detail": {"type": "string"},
+          "evidence": {"type": "object"}
+        }
+      }
+    }
+  }
+}

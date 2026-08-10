@@ -21,8 +21,10 @@ from claim_plane.core import (
     CommutativityProof,
     IntentOperation,
     ResourceKind,
+    SemanticConflictKind,
     SemanticConflictOrder,
     SemanticDependencyGraph,
+    classify_semantic_conflict,
 )
 from claim_plane.swarm.budget import (
     ConflictPolicy,
@@ -35,6 +37,7 @@ from claim_plane.swarm.same_file_admission import (
     SameFileAdmissionDecision,
     SameFileAdmissionReason,
     evaluate_same_file_admission,
+    semantic_changes_for_item,
 )
 
 SWARM_CONCURRENCY_PLAN_PROTOCOL = "claim-plane.swarm-concurrency-plan.v1"
@@ -465,6 +468,91 @@ def _shared_contract_resources(left: WorkItem, right: WorkItem) -> tuple[str, ..
     return tuple(sorted(resources))
 
 
+def _semantic_mutation_paths(item: WorkItem) -> set[str]:
+    paths: set[str] = set()
+    for operation in _committed_operations(item):
+        if not operation.mutating:
+            continue
+        if operation.resource.kind not in {
+            ResourceKind.SYMBOL,
+            ResourceKind.CONTRACT,
+            ResourceKind.SCHEMA,
+        }:
+            continue
+        metadata = operation.resource.metadata
+        raw = (
+            metadata.get("path")
+            or metadata.get("file")
+            or metadata.get("source_path")
+            or metadata.get("repository_path")
+        )
+        if raw is not None:
+            paths.add(_normal_path(str(raw)))
+    return paths
+
+
+def _cross_file_semantic_finding(
+    left: WorkItem,
+    right: WorkItem,
+    policy: SwarmBudgetPolicy,
+    *,
+    semantic_graph: SemanticDependencyGraph | None,
+    commutativity_proofs: Iterable[CommutativityProof],
+) -> _Finding | None:
+    """Classify graph-backed semantic dependencies across disjoint file surfaces.
+
+    Same-file pairs keep using Same-file Admission v2 because that layer also owns
+    explicit same-file policy.  For disjoint paths, semantic producer/consumer
+    relationships still need ordering even when Git would see no textual overlap.
+    """
+
+    if semantic_graph is None:
+        return None
+    left_paths = _semantic_mutation_paths(left)
+    right_paths = _semantic_mutation_paths(right)
+    if not left_paths or not right_paths or left_paths & right_paths:
+        return None
+    left_changes = semantic_changes_for_item(left, semantic_graph)
+    right_changes = semantic_changes_for_item(right, semantic_graph)
+    if not left_changes or not right_changes:
+        return None
+    decision = classify_semantic_conflict(
+        semantic_graph,
+        left_changes,
+        right_changes,
+        left_id=left.work_id,
+        right_id=right.work_id,
+        commutativity_proofs=commutativity_proofs,
+    )
+    if decision.kind in {
+        SemanticConflictKind.INDEPENDENT,
+        SemanticConflictKind.COMMUTATIVE,
+    }:
+        return None
+    resources = tuple(sorted(set((*decision.left_changes, *decision.right_changes))))
+    if decision.kind is SemanticConflictKind.ORDERED:
+        return _Finding(
+            ConcurrencyConstraintReason.SEMANTIC_ORDER,
+            ConcurrencyConstraintAction.SERIALIZE,
+            resources,
+            "cross-file semantic dependency requires deterministic ordering",
+            order=decision.order,
+        )
+    if decision.kind is SemanticConflictKind.CONFLICTING:
+        return _Finding(
+            ConcurrencyConstraintReason.SEMANTIC_CONFLICT,
+            ConcurrencyConstraintAction.SERIALIZE,
+            resources,
+            "cross-file semantic mutation roots conflict",
+        )
+    return _Finding(
+        ConcurrencyConstraintReason.SEMANTIC_CONFLICT,
+        _conflict_action(policy.concurrency.unknown_overlap),
+        resources,
+        "cross-file semantic evidence is incomplete or unresolved",
+    )
+
+
 def _operation_findings(
     left: WorkItem,
     right: WorkItem,
@@ -543,6 +631,26 @@ def _operation_findings(
                 and right_resource.kind in semantic_kinds
                 and left_resource.semantic_key == right_resource.semantic_key
             ):
+                left_path = (
+                    left_resource.metadata.get("path")
+                    or left_resource.metadata.get("file")
+                    or left_resource.metadata.get("source_path")
+                    or left_resource.metadata.get("repository_path")
+                )
+                right_path = (
+                    right_resource.metadata.get("path")
+                    or right_resource.metadata.get("file")
+                    or right_resource.metadata.get("source_path")
+                    or right_resource.metadata.get("repository_path")
+                )
+                admitted = None
+                if left_path is not None and right_path is not None:
+                    normalized_left = _normal_path(str(left_path))
+                    normalized_right = _normal_path(str(right_path))
+                    if normalized_left == normalized_right:
+                        admitted = evaluated_same_file.get(normalized_left)
+                if admitted is not None and admitted.action is SameFileAdmissionAction.PARALLEL:
+                    continue
                 findings.append(
                     _Finding(
                         ConcurrencyConstraintReason.UNKNOWN_OVERLAP,
@@ -595,6 +703,15 @@ def _pair_constraint(
                 "work items share a contract or its bound subject",
             )
         )
+    semantic_finding = _cross_file_semantic_finding(
+        left,
+        right,
+        policy,
+        semantic_graph=semantic_graph,
+        commutativity_proofs=commutativity_proofs,
+    )
+    if semantic_finding is not None:
+        findings.append(semantic_finding)
     findings.extend(
         _operation_findings(
             left,

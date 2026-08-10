@@ -94,3 +94,11 @@ new Git base contains a semantically correct implementation of the producer resu
 Swarm execution success never authorizes the resulting diff by itself. Before a worker snapshot can become an integration commit, Claim Plane checks its actual changed paths and regions against the admitted work item. When semantic authority is declared for a Python path, changed hunks must map to those admitted structural owners. The staged replay is checked again after composition, and actual semantic overlap with earlier integrated work must be independent, explicitly commutative, or correctly ordered on a refreshed dependency base. Missing structural evidence, semantic drift, unknown overlap, and conflicting actual roots fail closed and restore the prior integration head.
 
 A failed integration also does not authorize automatic conflict resolution. The rescue protocol may only retry an already captured immutable snapshot after a transient integration failure, or supersede one successful run and re-execute that work from the current managed integration head when deterministic evidence identifies textual conflict or a stale ordered dependency. It never synthesizes merge content. Scope violations, staged semantic mismatch, unresolved semantic conflict, and exhausted repair budgets remain blocked. Superseded executions remain durable evidence and continue to count against global resource budgets.
+
+## Deterministic concurrency conformance
+
+`claim-plane swarm conformance` is an offline regression and evidence suite for the deterministic
+control plane. It covers canonical safe-parallel, ordered, conflicting, unresolved, amendment, and
+runtime-recovery cases and emits versioned metrics. A passing report demonstrates consistency with
+those fixtures only. It does not establish workload-level speedup, agent quality, or production safety
+for an arbitrary repository; those claims require separate measured experiments and runtime evidence.

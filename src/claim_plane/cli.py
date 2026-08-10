@@ -146,6 +146,7 @@ from claim_plane.swarm import (
     replace_codex_worker,
     rescue_swarm_integration,
     list_integration_rescues,
+    run_deterministic_concurrency_conformance,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
     resume_swarm_session,
@@ -2023,6 +2024,36 @@ def cmd_swarm_validate(args: argparse.Namespace) -> int:
     result = {"valid": True, **validate_work_graph(payload)}
     _write_json(result)
     return 0
+
+
+def cmd_swarm_conformance(args: argparse.Namespace) -> int:
+    report = run_deterministic_concurrency_conformance()
+    payload = report.to_dict()
+    if args.json or args.out:
+        _write_json(payload, args.out)
+    else:
+        summary = payload["summary"]
+        metrics = payload["metrics"]
+        print(
+            "Deterministic concurrency conformance: "
+            f"{summary['passed']}/{summary['total']} passed."
+        )
+        print(
+            "Metrics: "
+            f"safe_parallel_recall={metrics['safe_parallel_recall']:.3f}; "
+            f"false_parallel_rate={metrics['false_parallel_rate']:.3f}; "
+            f"unnecessary_serialization_rate="
+            f"{metrics['unnecessary_serialization_rate']:.3f}; "
+            f"ordered_dependency_accuracy="
+            f"{metrics['ordered_dependency_accuracy']:.3f}; "
+            f"amendment_recovery_rate={metrics['amendment_recovery_rate']:.3f}"
+        )
+        for item in payload["scenarios"]:
+            print(
+                f"  {item['scenario']}: {item['status']} "
+                f"expected={item['expectation']} observed={item['observed']}"
+            )
+    return 0 if report.passed else 2
 
 
 def cmd_swarm_plan(args: argparse.Namespace) -> int:
@@ -3988,6 +4019,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     swarm_validate.add_argument("--graph", required=True)
     swarm_validate.set_defaults(func=cmd_swarm_validate)
+
+    swarm_conformance = swarm_sub.add_parser(
+        "conformance",
+        help="Run the offline deterministic concurrency conformance suite.",
+    )
+    swarm_conformance.add_argument("--json", action="store_true")
+    swarm_conformance.add_argument("--out")
+    swarm_conformance.set_defaults(func=cmd_swarm_conformance)
 
     swarm_plan = swarm_sub.add_parser(
         "plan",

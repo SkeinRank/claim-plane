@@ -8,6 +8,18 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.24] — 2026-08-10
+
+### Added
+
+- Added an offline deterministic concurrency conformance suite with 14 canonical scenarios covering independent files, same-file symbols, same-class methods, explicit commutativity, type/API dependencies, schema isolation, semantic conflicts, bounded scope growth, and stale-runtime recovery.
+- Added versioned conformance evidence and metrics for `safe_parallel_recall`, `false_parallel_rate`, `unnecessary_serialization_rate`, `ordered_dependency_accuracy`, and `amendment_recovery_rate`, plus `claim-plane swarm conformance` and a packaged JSON Schema.
+
+### Changed
+
+- Cross-file graph-backed producer/consumer relationships now create deterministic semantic ordering constraints even when Git paths are disjoint.
+- A successful Same-file Admission v2 commutativity proof is no longer re-blocked by the older coarse semantic-key overlap fallback.
+
 ## [0.37.23] — 2026-08-10
 
 ### Added
