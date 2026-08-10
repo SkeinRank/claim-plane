@@ -139,7 +139,9 @@ def parse_confirmatory_modes(
     modes: list[ConfirmatoryMode] = []
     seen: set[ConfirmatoryMode] = set()
     for item in raw:
-        mode = item if isinstance(item, ConfirmatoryMode) else ConfirmatoryMode(str(item))
+        mode = (
+            item if isinstance(item, ConfirmatoryMode) else ConfirmatoryMode(str(item))
+        )
         if mode not in seen:
             seen.add(mode)
             modes.append(mode)
@@ -303,7 +305,9 @@ def run_confirmatory_pair(
         pair_index=pair_index,
     )
     mode_key = "+".join(sorted(mode.value for mode in selected_modes))
-    output_file = output_dir / f"result-{hashlib.sha256(mode_key.encode()).hexdigest()[:12]}.json"
+    output_file = (
+        output_dir / f"result-{hashlib.sha256(mode_key.encode()).hexdigest()[:12]}.json"
+    )
     if resume and output_file.exists():
         existing = json.loads(output_file.read_text(encoding="utf-8"))
         if isinstance(existing, dict):
@@ -450,10 +454,16 @@ def _rate(rows: Sequence[Mapping[str, Any]], field: str) -> float | None:
     return sum(1 for row in rows if bool(row.get(field))) / len(rows)
 
 
-def _mode_summary(rows: Sequence[Mapping[str, Any]], mode: ConfirmatoryMode) -> dict[str, Any]:
+def _mode_summary(
+    rows: Sequence[Mapping[str, Any]], mode: ConfirmatoryMode
+) -> dict[str, Any]:
     selected = [row for row in rows if row.get("confirmatory_mode") == mode.value]
-    walls = [float(row.get("confirmatory_wall_time_seconds", 0.0) or 0.0) for row in selected]
-    overlaps = [float(row.get("physical_overlap_seconds", 0.0) or 0.0) for row in selected]
+    walls = [
+        float(row.get("confirmatory_wall_time_seconds", 0.0) or 0.0) for row in selected
+    ]
+    overlaps = [
+        float(row.get("physical_overlap_seconds", 0.0) or 0.0) for row in selected
+    ]
     overlap_fractions = [
         float(row.get("physical_overlap_fraction_of_shorter", 0.0) or 0.0)
         for row in selected
@@ -476,7 +486,9 @@ def _mode_summary(rows: Sequence[Mapping[str, Any]], mode: ConfirmatoryMode) -> 
         "scope_promotion_attempts": sum(
             int(row.get("scope_promotion_attempts", 0) or 0) for row in selected
         ),
-        "dynamic_restarts": sum(int(row.get("dynamic_restart_count", 0) or 0) for row in selected),
+        "dynamic_restarts": sum(
+            int(row.get("dynamic_restart_count", 0) or 0) for row in selected
+        ),
     }
 
 
@@ -495,12 +507,15 @@ def _collect_pair_results(
     result_name = f"result-{hashlib.sha256(mode_key.encode()).hexdigest()[:12]}.json"
     for seed in seeds:
         for pair_index in pair_indexes:
-            path = _pair_dir(
-                paths,
-                fingerprint=fingerprint,
-                coder_seed=seed,
-                pair_index=pair_index,
-            ) / result_name
+            path = (
+                _pair_dir(
+                    paths,
+                    fingerprint=fingerprint,
+                    coder_seed=seed,
+                    pair_index=pair_index,
+                )
+                / result_name
+            )
             if not path.exists():
                 missing.append(f"seed-{seed}/pair-{pair_index:02d}")
                 continue
@@ -547,7 +562,9 @@ def build_confirmatory_report(
         )
 
     summaries = [_mode_summary(rows, mode) for mode in selected_modes]
-    paired_speedups: dict[str, list[float]] = {mode.value: [] for mode in selected_modes}
+    paired_speedups: dict[str, list[float]] = {
+        mode.value: [] for mode in selected_modes
+    }
     serial_rows: dict[tuple[str, int], Mapping[str, Any]] = {
         (str(row.get("pair")), int(row.get("coder_seed", -1))): row
         for row in rows
@@ -561,7 +578,9 @@ def build_confirmatory_report(
         wall = float(row.get("confirmatory_wall_time_seconds", 0.0) or 0.0)
         serial_wall = float(serial.get("confirmatory_wall_time_seconds", 0.0) or 0.0)
         if wall > 0 and serial_wall > 0:
-            paired_speedups[str(row.get("confirmatory_mode"))].append(serial_wall / wall)
+            paired_speedups[str(row.get("confirmatory_mode"))].append(
+                serial_wall / wall
+            )
 
     speedup_summary = {
         mode.value: {
@@ -581,6 +600,7 @@ def build_confirmatory_report(
     v2 = summary_by_mode.get(ConfirmatoryMode.DETERMINISTIC_V2.value)
     direct_delta: dict[str, Any] | None = None
     if legacy is not None and v2 is not None:
+
         def delta(field: str) -> float | None:
             left = legacy.get(field)
             right = v2.get(field)
@@ -731,9 +751,12 @@ def run_confirmatory_batch(
     result["report"] = str(output)
     _atomic_json(output, result)
 
-    if report["complete"] and set(selected_seeds) == set(CODER_SEEDS) and selected_pairs == tuple(
-        range(1, N_PAIRS + 1)
-    ) and tuple(selected_modes) == DEFAULT_MODES:
+    if (
+        report["complete"]
+        and set(selected_seeds) == set(CODER_SEEDS)
+        and selected_pairs == tuple(range(1, N_PAIRS + 1))
+        and tuple(selected_modes) == DEFAULT_MODES
+    ):
         final_path = _root(paths, fingerprint) / "analysis" / "final-report.json"
         _atomic_json(final_path, report)
         result["final_report"] = str(final_path)

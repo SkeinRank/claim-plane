@@ -129,9 +129,7 @@ def _class_signature(node: ast.ClassDef, qualified_name: str) -> str:
         value = _expr(keyword.value) or "..."
         parameters.append(f"{keyword.arg}={value}" if keyword.arg else f"**{value}")
     return (
-        f"{qualified_name}({', '.join(parameters)})"
-        if parameters
-        else qualified_name
+        f"{qualified_name}({', '.join(parameters)})" if parameters else qualified_name
     )
 
 
@@ -150,7 +148,11 @@ def _definition_start(
 
 
 def _definition_end(node: ast.AST) -> int:
-    return int(getattr(node, "end_lineno", None) or getattr(node, "lineno", 1))
+    end_lineno = getattr(node, "end_lineno", None)
+    if end_lineno is not None:
+        return int(end_lineno)
+    lineno = getattr(node, "lineno", None)
+    return 1 if lineno is None else int(lineno)
 
 
 def _body_start(node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -> int:
@@ -186,7 +188,7 @@ class PythonSymbolDefinition:
             object.__setattr__(
                 self,
                 "resource",
-                SemanticResource.from_dict(self.resource),  # type: ignore[arg-type]
+                SemanticResource.from_dict(self.resource),
             )
         object.__setattr__(self, "symbol_kind", PythonSymbolKind(self.symbol_kind))
         if self.resource.kind is not ResourceKind.SYMBOL:
@@ -275,9 +277,7 @@ class PythonStructuralIndex:
             object.__setattr__(
                 self,
                 "file_resource",
-                SemanticResource.from_dict(  # type: ignore[arg-type]
-                    self.file_resource
-                ),
+                SemanticResource.from_dict(self.file_resource),
             )
         if self.file_resource.kind is not ResourceKind.FILE:
             raise ValueError("file_resource must be a file semantic resource")
@@ -286,7 +286,7 @@ class PythonStructuralIndex:
         definitions = tuple(
             item
             if isinstance(item, PythonSymbolDefinition)
-            else PythonSymbolDefinition.from_dict(item)  # type: ignore[arg-type]
+            else PythonSymbolDefinition.from_dict(item)
             for item in self.definitions
         )
         ordered = tuple(
@@ -532,9 +532,7 @@ def extract_python_file(
         with tokenize.open(target) as handle:
             source = handle.read()
     except (OSError, SyntaxError, UnicodeError) as exc:
-        raise PythonStructuralExtractionError(
-            str(exc), path=relative
-        ) from exc
+        raise PythonStructuralExtractionError(str(exc), path=relative) from exc
     return extract_python_structure(source, path=relative)
 
 

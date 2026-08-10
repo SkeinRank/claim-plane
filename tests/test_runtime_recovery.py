@@ -61,7 +61,9 @@ def _producer(signature: str) -> ChangeIntent:
     )
 
 
-def _consumer(signature: str = "load_x()->X", *, base_commit: str = BASE) -> ChangeIntent:
+def _consumer(
+    signature: str = "load_x()->X", *, base_commit: str = BASE
+) -> ChangeIntent:
     return _intent(
         "consumer",
         "agent-consumer",
@@ -117,9 +119,12 @@ def _make_stale_consumer(
         )
         old_token = int(old["fencing_token"])
     assert plane.amend(_producer("load_x(context)->X")).allowed
-    assert next(item for item in plane.intents() if item["intent_id"] == "consumer")[
-        "state"
-    ] == "stale"
+    assert (
+        next(item for item in plane.intents() if item["intent_id"] == "consumer")[
+            "state"
+        ]
+        == "stale"
+    )
     if complete_producer:
         plane.complete("producer")
     return plane, old_token
@@ -183,9 +188,7 @@ def test_stale_intent_refreshes_then_resumes_with_fresh_broker_token() -> None:
 
 
 def test_runtime_refresh_waits_for_stale_causing_producer_to_complete() -> None:
-    plane, _ = _make_stale_consumer(
-        live_broker=False, complete_producer=False
-    )
+    plane, _ = _make_stale_consumer(live_broker=False, complete_producer=False)
     assert plane.amend(_consumer("load_x(context)->X")).allowed
 
     decision, recovery = plane.refresh_runtime(
@@ -232,9 +235,7 @@ def test_manual_runtime_pause_is_durable_and_idempotent() -> None:
     assert record["state"] == "stale"
 
     second = plane.pause_runtime("consumer")
-    assert [item["fence_id"] for item in second] == [
-        item["fence_id"] for item in first
-    ]
+    assert [item["fence_id"] for item in second] == [item["fence_id"] for item in first]
 
 
 def test_runtime_recovery_is_exported_with_audit(tmp_path) -> None:

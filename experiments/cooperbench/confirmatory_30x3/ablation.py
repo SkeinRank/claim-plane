@@ -40,7 +40,11 @@ from ..environment import runtime_environment
 from ..paper_6pair import runner as harness
 from ..paper_6pair.coder import AGENT_TRACE_LOGS, reset_agent_traces
 from ..paper_6pair.provider import STATS as CODER_PROVIDER_STATS, reset_provider_state
-from ..physical_parallel import parse_pair_indexes, python_module_command, run_bounded_pair_processes
+from ..physical_parallel import (
+    parse_pair_indexes,
+    python_module_command,
+    run_bounded_pair_processes,
+)
 from .config import CODER_SEEDS, N_PAIRS, ConfirmatoryPaths
 from .plans import load_plan_bundle, validate_plan_bundle
 from .runner import _legacy_pair, load_confirmatory_study
@@ -119,7 +123,9 @@ _CONTRACT_PROPAGATION_ONLY_RELATIONS = frozenset(
 )
 
 
-def parse_ablation_profiles(value: str | Sequence[str | AblationProfile]) -> tuple[AblationProfile, ...]:
+def parse_ablation_profiles(
+    value: str | Sequence[str | AblationProfile],
+) -> tuple[AblationProfile, ...]:
     """Parse, validate, and de-duplicate profile names while preserving order."""
 
     raw: Iterable[str | AblationProfile]
@@ -130,7 +136,9 @@ def parse_ablation_profiles(value: str | Sequence[str | AblationProfile]) -> tup
     profiles: list[AblationProfile] = []
     seen: set[AblationProfile] = set()
     for item in raw:
-        profile = item if isinstance(item, AblationProfile) else AblationProfile(str(item))
+        profile = (
+            item if isinstance(item, AblationProfile) else AblationProfile(str(item))
+        )
         if profile not in seen:
             seen.add(profile)
             profiles.append(profile)
@@ -168,7 +176,9 @@ def _git_bytes(root: Path, *args: str) -> bytes:
     )
     if completed.returncode != 0:
         stderr = completed.stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(stderr or "git command failed while building ablation evidence")
+        raise RuntimeError(
+            stderr or "git command failed while building ablation evidence"
+        )
     return completed.stdout
 
 
@@ -272,7 +282,9 @@ def _symbol_operations(
         touches_definition = bool(
             definition is not None and low <= definition.definition_line <= high
         )
-        change_kind = "contract" if touches_definition and owner.signature else "implementation"
+        change_kind = (
+            "contract" if touches_definition and owner.signature else "implementation"
+        )
         metadata = {
             "path": path,
             "language": owner.language or "python",
@@ -350,7 +362,9 @@ def deterministic_ablation_verdict(
 ) -> dict[str, Any]:
     """Compute one source-bound deterministic admission verdict for an ablation profile."""
 
-    selected = profile if isinstance(profile, AblationProfile) else AblationProfile(profile)
+    selected = (
+        profile if isinstance(profile, AblationProfile) else AblationProfile(profile)
+    )
     spec = _PROFILE_SPECS[selected]
     root = Path(repo).resolve()
     sources = _python_sources_at_revision(root, base_commit)
@@ -504,7 +518,10 @@ def run_ablation_pair(
         pair_index=pair_index,
     )
     profile_key = "+".join(profile.value for profile in selected_profiles)
-    output_file = output_dir / f"result-{hashlib.sha256(profile_key.encode()).hexdigest()[:12]}.json"
+    output_file = (
+        output_dir
+        / f"result-{hashlib.sha256(profile_key.encode()).hexdigest()[:12]}.json"
+    )
     if resume and output_file.exists():
         existing = json.loads(output_file.read_text(encoding="utf-8"))
         if isinstance(existing, dict):

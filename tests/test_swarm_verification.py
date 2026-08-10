@@ -204,19 +204,26 @@ def test_swarm_verification_produces_durable_two_level_evidence(tmp_path: Path) 
     assert get_swarm_session(repo, "swm-verify").state.value == "completed"
 
 
-def test_swarm_verification_fails_on_integrated_undeclared_path(tmp_path: Path) -> None:
+def test_swarm_integration_fails_closed_on_undeclared_path(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     _session(repo, [_item("a", "src/a.py")])
-    _run_and_merge(repo, _fake_codex(tmp_path, rogue=True), ("a",))
+    codex = _fake_codex(tmp_path, rogue=True)
 
-    result = verify_swarm_session(repo, "swm-verify", run_acceptance=False)
+    run = run_codex_work_item(repo, "swm-verify", "a", codex_binary=str(codex))
+    assert run.state.value == "succeeded"
+    result = integrate_next_swarm_result(repo, "swm-verify")
 
-    assert result["summary"]["status"] == "failed"
+    assert result["integrated"] is False
+    assert result["summary"]["status"] == "conflict"
+    evidence = result["entry"]["integration_evidence"]
+    assert evidence["disposition"] == "reject"
+    assert "undeclared_path" in evidence["reasons"]
     assert any(
-        item["code"] == "undeclared_change" and item["path"] == "rogue.txt"
-        for item in result["verification"]["findings"]
+        item["reason"] == "undeclared_path" and item["path"] == "rogue.txt"
+        for item in evidence["authority_violations"]
     )
-    assert get_swarm_session(repo, "swm-verify").state.value == "failed"
+    integration = Path(result["merge_queue"]["integration_worktree_path"])
+    assert not (integration / "rogue.txt").exists()
 
 
 def test_acceptance_mutation_fails_closed_and_is_cleaned(tmp_path: Path) -> None:

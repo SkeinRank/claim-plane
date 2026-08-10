@@ -199,9 +199,7 @@ def _parent_identity(
             parent_symbol = subject_name
         if parent_symbol:
             return (
-                f"symbol:{path}#{parent_symbol}"
-                if path
-                else f"symbol:{parent_symbol}"
+                f"symbol:{path}#{parent_symbol}" if path else f"symbol:{parent_symbol}"
             )
         if path:
             return f"file:{path}"
@@ -328,7 +326,7 @@ class ResourceAuthority:
             object.__setattr__(
                 self,
                 "resource",
-                SemanticResource.from_dict(self.resource),  # type: ignore[arg-type]
+                SemanticResource.from_dict(self.resource),
             )
 
     @property
@@ -376,7 +374,7 @@ class SemanticResourceIR:
         authorities = tuple(
             item
             if isinstance(item, ResourceAuthority)
-            else ResourceAuthority.from_dict(item)  # type: ignore[arg-type]
+            else ResourceAuthority.from_dict(item)
             for item in self.authorities
         )
         ordered = tuple(
@@ -425,7 +423,7 @@ def normalize_resource_ref(resource: ResourceRef) -> SemanticResource:
     """Normalize a legacy/public ``ResourceRef`` into the v2 semantic resource IR."""
 
     if not isinstance(resource, ResourceRef):
-        resource = ResourceRef.from_dict(resource)  # type: ignore[arg-type]
+        resource = ResourceRef.from_dict(resource)
     path = _resource_path(resource)
     region = _normal_region(resource.region or resource.metadata.get("region"))
     qualified_name = _qualified_name(resource)
@@ -479,7 +477,7 @@ def normalize_intent_operation(operation: IntentOperation) -> ResourceAuthority:
     """Project one intent operation onto a normalized authority record."""
 
     if not isinstance(operation, IntentOperation):
-        operation = IntentOperation.from_dict(operation)  # type: ignore[arg-type]
+        operation = IntentOperation.from_dict(operation)
     return ResourceAuthority(
         access=operation.access,
         resource=normalize_resource_ref(operation.resource),
@@ -492,7 +490,7 @@ def normalize_change_intent(intent: ChangeIntent) -> SemanticResourceIR:
     """Create a deterministic, parser-neutral authority projection for an intent."""
 
     if not isinstance(intent, ChangeIntent):
-        intent = ChangeIntent.from_dict(intent)  # type: ignore[arg-type]
+        intent = ChangeIntent.from_dict(intent)
     return SemanticResourceIR(
         intent_id=intent.intent_id,
         task_id=intent.task_id,

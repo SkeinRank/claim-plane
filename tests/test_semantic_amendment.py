@@ -73,7 +73,9 @@ def test_disjoint_symbol_expansion_is_bounded_and_safe() -> None:
         "symbol:app.py#side"
     ]
     assert assessment.impact is not None
-    assert assessment.fingerprint == assessment.from_dict(assessment.to_dict()).fingerprint
+    assert (
+        assessment.fingerprint == assessment.from_dict(assessment.to_dict()).fingerprint
+    )
 
 
 def test_producer_expansion_requires_ordering_with_active_consumer() -> None:
@@ -162,7 +164,9 @@ def test_plane_amend_bounded_commits_preflight_atomically(tmp_path) -> None:
         assert len(stored.operations) == 2
         # Audit payload is persisted by the authoritative registry transaction.
         events = plane._registry.coordination_events()
-        amended = [item for item in events if item["event_type"] == "intent_amended"][-1]
+        amended = [item for item in events if item["event_type"] == "intent_amended"][
+            -1
+        ]
         assert amended["payload_json"]["amendment_preflight"]["protocol"] == (
             "claim-plane.semantic-amendment.v2"
         )
@@ -170,7 +174,9 @@ def test_plane_amend_bounded_commits_preflight_atomically(tmp_path) -> None:
         plane.close()
 
 
-def test_plane_rejects_ordered_expansion_without_mutating_old_authority(tmp_path) -> None:
+def test_plane_rejects_ordered_expansion_without_mutating_old_authority(
+    tmp_path,
+) -> None:
     graph = build_python_dependency_graph(SOURCE)
     current = _intent("left", _symbol("side"))
     candidate = replace(current, operations=(*current.operations, _symbol("produce")))

@@ -56,9 +56,7 @@ class ConformanceScenario(str, Enum):
     PUBLIC_API_CHANGE_ORDERED = "public_api_change_ordered"
     SCHEMA_CHANGE_SERIALIZED = "schema_change_serialized"
     CONFLICTING_RENAME_SERIALIZED = "conflicting_rename_serialized"
-    HIDDEN_SEMANTIC_DEPENDENCY_FAILS_CLOSED = (
-        "hidden_semantic_dependency_fails_closed"
-    )
+    HIDDEN_SEMANTIC_DEPENDENCY_FAILS_CLOSED = "hidden_semantic_dependency_fails_closed"
     MISSING_SEMANTIC_ROOT_FAILS_CLOSED = "missing_semantic_root_fails_closed"
     LATE_SCOPE_EXPANSION_RECOVERED = "late_scope_expansion_recovered"
     ORDERED_SCOPE_EXPANSION_BLOCKED = "ordered_scope_expansion_blocked"
@@ -94,7 +92,9 @@ class DeterministicConcurrencyScenarioResult:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "scenario", ConformanceScenario(self.scenario))
-        object.__setattr__(self, "expectation", ConformanceExpectation(self.expectation))
+        object.__setattr__(
+            self, "expectation", ConformanceExpectation(self.expectation)
+        )
         if self.observed is not None:
             object.__setattr__(self, "observed", ConformanceExpectation(self.observed))
         object.__setattr__(self, "status", ConformanceStatus(self.status))
@@ -158,7 +158,9 @@ class DeterministicConcurrencyConformanceReport:
 
     def __post_init__(self) -> None:
         if self.protocol != DETERMINISTIC_CONCURRENCY_CONFORMANCE_PROTOCOL:
-            raise ValueError(f"unsupported concurrency conformance protocol {self.protocol!r}")
+            raise ValueError(
+                f"unsupported concurrency conformance protocol {self.protocol!r}"
+            )
         if self.conformance_version != DETERMINISTIC_CONCURRENCY_CONFORMANCE_VERSION:
             raise ValueError(
                 f"unsupported concurrency conformance version {self.conformance_version!r}"
@@ -317,7 +319,9 @@ def _plan_case(
     policy: SwarmBudgetPolicy | None = None,
     proofs: tuple[CommutativityProof, ...] = (),
 ) -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
-    semantic_graph = build_python_dependency_graph(sources) if sources is not None else None
+    semantic_graph = (
+        build_python_dependency_graph(sources) if sources is not None else None
+    )
     plan = compute_concurrency_plan(
         _work_graph(left, right),
         policy or _policy(),
@@ -334,7 +338,9 @@ def _plan_case(
     return observed, evidence, f"planner observed {observed.value}"
 
 
-def _different_files_independent() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _different_files_independent() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {
         "left.py": "def left():\n    return 1\n",
         "right.py": "def right():\n    return 2\n",
@@ -346,10 +352,10 @@ def _different_files_independent() -> tuple[ConformanceExpectation, Mapping[str,
     )
 
 
-def _same_file_different_functions() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
-    sources = {
-        "app.py": "def first():\n    return 1\n\ndef second():\n    return 2\n"
-    }
+def _same_file_different_functions() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
+    sources = {"app.py": "def first():\n    return 1\n\ndef second():\n    return 2\n"}
     return _plan_case(
         sources,
         _work_item("first", "app.py", "first"),
@@ -357,7 +363,9 @@ def _same_file_different_functions() -> tuple[ConformanceExpectation, Mapping[st
     )
 
 
-def _same_class_different_methods() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _same_class_different_methods() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {
         "parser.py": (
             "class Parser:\n"
@@ -391,7 +399,9 @@ def _explicit_commutativity() -> tuple[ConformanceExpectation, Mapping[str, Any]
     )
 
 
-def _shared_return_type_ordered() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _shared_return_type_ordered() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {
         "data.py": (
             "from dataclasses import dataclass\n\n"
@@ -417,7 +427,9 @@ def _shared_return_type_ordered() -> tuple[ConformanceExpectation, Mapping[str, 
     )
 
 
-def _producer_consumer_ordered() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _producer_consumer_ordered() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {
         "producer.py": "def parse(value: str) -> str:\n    return value\n",
         "consumer.py": (
@@ -433,7 +445,9 @@ def _producer_consumer_ordered() -> tuple[ConformanceExpectation, Mapping[str, A
     )
 
 
-def _public_api_change_ordered() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _public_api_change_ordered() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {
         "api.py": "def normalize(value: str) -> str:\n    return value.strip()\n",
         "feature.py": (
@@ -449,19 +463,25 @@ def _public_api_change_ordered() -> tuple[ConformanceExpectation, Mapping[str, A
     )
 
 
-def _schema_change_serialized() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _schema_change_serialized() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {
         "schema.py": "class Record:\n    pass\n",
         "worker.py": "def work():\n    return 1\n",
     }
     return _plan_case(
         sources,
-        _work_item("schema", "schema.py", "Record", change_kind="contract", schema_change=True),
+        _work_item(
+            "schema", "schema.py", "Record", change_kind="contract", schema_change=True
+        ),
         _work_item("worker", "worker.py", "work"),
     )
 
 
-def _conflicting_rename_serialized() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _conflicting_rename_serialized() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {"app.py": "def value():\n    return 1\n"}
     return _plan_case(
         sources,
@@ -470,7 +490,9 @@ def _conflicting_rename_serialized() -> tuple[ConformanceExpectation, Mapping[st
     )
 
 
-def _hidden_semantic_dependency_fails_closed() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _hidden_semantic_dependency_fails_closed() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {
         "left.py": "def left(value):\n    return missing(value)\n",
         "right.py": "def right(value):\n    return missing(value + 1)\n",
@@ -482,7 +504,9 @@ def _hidden_semantic_dependency_fails_closed() -> tuple[ConformanceExpectation, 
     )
 
 
-def _missing_semantic_root_fails_closed() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _missing_semantic_root_fails_closed() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     sources = {"app.py": "def first():\n    return 1\n\ndef second():\n    return 2\n"}
     return _plan_case(
         sources,
@@ -491,7 +515,9 @@ def _missing_semantic_root_fails_closed() -> tuple[ConformanceExpectation, Mappi
     )
 
 
-def _intent_symbol(name: str, *, commitment: ScopeCommitment = ScopeCommitment.COMMITTED) -> IntentOperation:
+def _intent_symbol(
+    name: str, *, commitment: ScopeCommitment = ScopeCommitment.COMMITTED
+) -> IntentOperation:
     return IntentOperation(
         AccessMode.WRITE,
         ResourceRef(
@@ -518,7 +544,9 @@ def _intent(
     )
 
 
-def _late_scope_expansion_recovered() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _late_scope_expansion_recovered() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     semantic_graph = build_python_dependency_graph(
         {
             "app.py": (
@@ -529,7 +557,9 @@ def _late_scope_expansion_recovered() -> tuple[ConformanceExpectation, Mapping[s
         }
     )
     current = _intent("left", _intent_symbol("produce"))
-    candidate = replace(current, operations=(*current.operations, _intent_symbol("side")))
+    candidate = replace(
+        current, operations=(*current.operations, _intent_symbol("side"))
+    )
     plane = Plane.open(":memory:")
     try:
         admitted = plane.admit(current)
@@ -542,17 +572,26 @@ def _late_scope_expansion_recovered() -> tuple[ConformanceExpectation, Mapping[s
             if execution.allowed
             else ConformanceExpectation.AMENDMENT_BLOCKED
         )
+        stored_intent = plane.intent("left")
         evidence = {
             "assessment": execution.assessment.to_dict(),
             "admission": execution.admission.to_dict(),
-            "operation_count": len(plane.intent("left").operations) if plane.intent("left") else 0,
+            "operation_count": (
+                len(stored_intent.operations) if stored_intent is not None else 0
+            ),
         }
-        return observed, evidence, "bounded disjoint scope expansion was re-admitted atomically"
+        return (
+            observed,
+            evidence,
+            "bounded disjoint scope expansion was re-admitted atomically",
+        )
     finally:
         plane.close()
 
 
-def _ordered_scope_expansion_blocked() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _ordered_scope_expansion_blocked() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     semantic_graph = build_python_dependency_graph(
         {
             "app.py": (
@@ -563,7 +602,9 @@ def _ordered_scope_expansion_blocked() -> tuple[ConformanceExpectation, Mapping[
         }
     )
     current = _intent("left", _intent_symbol("side"))
-    candidate = replace(current, operations=(*current.operations, _intent_symbol("produce")))
+    candidate = replace(
+        current, operations=(*current.operations, _intent_symbol("produce"))
+    )
     active = _intent("right", _intent_symbol("consume"))
     plane = Plane.open(":memory:")
     try:
@@ -584,12 +625,18 @@ def _ordered_scope_expansion_blocked() -> tuple[ConformanceExpectation, Mapping[
             "assessment": execution.assessment.to_dict(),
             "authority_preserved": bool(stored and len(stored.operations) == 1),
         }
-        return observed, evidence, "ordered expansion remained blocked without fresh execution premise"
+        return (
+            observed,
+            evidence,
+            "ordered expansion remained blocked without fresh execution premise",
+        )
     finally:
         plane.close()
 
 
-def _stale_worker_refresh_resume() -> tuple[ConformanceExpectation, Mapping[str, Any], str]:
+def _stale_worker_refresh_resume() -> tuple[
+    ConformanceExpectation, Mapping[str, Any], str
+]:
     original = _intent("worker", _intent_symbol("side"))
     refreshed = _intent("worker", _intent_symbol("side"), base_commit=_REFRESHED_BASE)
     plane = Plane.open(":memory:")
@@ -598,7 +645,9 @@ def _stale_worker_refresh_resume() -> tuple[ConformanceExpectation, Mapping[str,
             raise RuntimeError("canonical worker was not admitted")
         plane.activate("worker")
         fences = plane.pause_runtime(
-            "worker", reason="conformance_ordered_dependency", resource_keys=("symbol:app.py#side",)
+            "worker",
+            reason="conformance_ordered_dependency",
+            resource_keys=("symbol:app.py#side",),
         )
         decision, recovery = plane.refresh_runtime(refreshed)
         if not decision.allowed or recovery is None:
@@ -611,29 +660,110 @@ def _stale_worker_refresh_resume() -> tuple[ConformanceExpectation, Mapping[str,
             "fences": fences,
             "refresh": recovery.to_dict(),
             "resume": resumed.to_dict(),
-            "state": next(item["state"] for item in plane.intents() if item["intent_id"] == "worker"),
+            "state": next(
+                item["state"]
+                for item in plane.intents()
+                if item["intent_id"] == "worker"
+            ),
         }
-        return observed, evidence, "stale worker refreshed on a new base and resumed explicitly"
+        return (
+            observed,
+            evidence,
+            "stale worker refreshed on a new base and resumed explicitly",
+        )
     finally:
         plane.close()
 
 
 def _canonical_cases() -> tuple[_Case, ...]:
     return (
-        _Case(ConformanceScenario.DIFFERENT_FILES_INDEPENDENT, ConformanceExpectation.PARALLEL, _different_files_independent, safe_parallel=True),
-        _Case(ConformanceScenario.SAME_FILE_DIFFERENT_FUNCTIONS, ConformanceExpectation.PARALLEL, _same_file_different_functions, safe_parallel=True),
-        _Case(ConformanceScenario.SAME_CLASS_DIFFERENT_METHODS, ConformanceExpectation.PARALLEL, _same_class_different_methods, safe_parallel=True),
-        _Case(ConformanceScenario.EXPLICIT_COMMUTATIVITY, ConformanceExpectation.PARALLEL, _explicit_commutativity, safe_parallel=True),
-        _Case(ConformanceScenario.SHARED_RETURN_TYPE_ORDERED, ConformanceExpectation.ORDERED, _shared_return_type_ordered, unsafe_parallel=True, ordered=True),
-        _Case(ConformanceScenario.PRODUCER_CONSUMER_ORDERED, ConformanceExpectation.ORDERED, _producer_consumer_ordered, unsafe_parallel=True, ordered=True),
-        _Case(ConformanceScenario.PUBLIC_API_CHANGE_ORDERED, ConformanceExpectation.ORDERED, _public_api_change_ordered, unsafe_parallel=True, ordered=True),
-        _Case(ConformanceScenario.SCHEMA_CHANGE_SERIALIZED, ConformanceExpectation.SERIALIZED, _schema_change_serialized, unsafe_parallel=True),
-        _Case(ConformanceScenario.CONFLICTING_RENAME_SERIALIZED, ConformanceExpectation.SERIALIZED, _conflicting_rename_serialized, unsafe_parallel=True),
-        _Case(ConformanceScenario.HIDDEN_SEMANTIC_DEPENDENCY_FAILS_CLOSED, ConformanceExpectation.SERIALIZED, _hidden_semantic_dependency_fails_closed, unsafe_parallel=True),
-        _Case(ConformanceScenario.MISSING_SEMANTIC_ROOT_FAILS_CLOSED, ConformanceExpectation.SERIALIZED, _missing_semantic_root_fails_closed, unsafe_parallel=True),
-        _Case(ConformanceScenario.LATE_SCOPE_EXPANSION_RECOVERED, ConformanceExpectation.AMENDMENT_ADMITTED, _late_scope_expansion_recovered, amendment_recovery=True),
-        _Case(ConformanceScenario.ORDERED_SCOPE_EXPANSION_BLOCKED, ConformanceExpectation.AMENDMENT_BLOCKED, _ordered_scope_expansion_blocked, amendment_recovery=True),
-        _Case(ConformanceScenario.STALE_WORKER_REFRESH_RESUME, ConformanceExpectation.RECOVERED, _stale_worker_refresh_resume, amendment_recovery=True),
+        _Case(
+            ConformanceScenario.DIFFERENT_FILES_INDEPENDENT,
+            ConformanceExpectation.PARALLEL,
+            _different_files_independent,
+            safe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.SAME_FILE_DIFFERENT_FUNCTIONS,
+            ConformanceExpectation.PARALLEL,
+            _same_file_different_functions,
+            safe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.SAME_CLASS_DIFFERENT_METHODS,
+            ConformanceExpectation.PARALLEL,
+            _same_class_different_methods,
+            safe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.EXPLICIT_COMMUTATIVITY,
+            ConformanceExpectation.PARALLEL,
+            _explicit_commutativity,
+            safe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.SHARED_RETURN_TYPE_ORDERED,
+            ConformanceExpectation.ORDERED,
+            _shared_return_type_ordered,
+            unsafe_parallel=True,
+            ordered=True,
+        ),
+        _Case(
+            ConformanceScenario.PRODUCER_CONSUMER_ORDERED,
+            ConformanceExpectation.ORDERED,
+            _producer_consumer_ordered,
+            unsafe_parallel=True,
+            ordered=True,
+        ),
+        _Case(
+            ConformanceScenario.PUBLIC_API_CHANGE_ORDERED,
+            ConformanceExpectation.ORDERED,
+            _public_api_change_ordered,
+            unsafe_parallel=True,
+            ordered=True,
+        ),
+        _Case(
+            ConformanceScenario.SCHEMA_CHANGE_SERIALIZED,
+            ConformanceExpectation.SERIALIZED,
+            _schema_change_serialized,
+            unsafe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.CONFLICTING_RENAME_SERIALIZED,
+            ConformanceExpectation.SERIALIZED,
+            _conflicting_rename_serialized,
+            unsafe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.HIDDEN_SEMANTIC_DEPENDENCY_FAILS_CLOSED,
+            ConformanceExpectation.SERIALIZED,
+            _hidden_semantic_dependency_fails_closed,
+            unsafe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.MISSING_SEMANTIC_ROOT_FAILS_CLOSED,
+            ConformanceExpectation.SERIALIZED,
+            _missing_semantic_root_fails_closed,
+            unsafe_parallel=True,
+        ),
+        _Case(
+            ConformanceScenario.LATE_SCOPE_EXPANSION_RECOVERED,
+            ConformanceExpectation.AMENDMENT_ADMITTED,
+            _late_scope_expansion_recovered,
+            amendment_recovery=True,
+        ),
+        _Case(
+            ConformanceScenario.ORDERED_SCOPE_EXPANSION_BLOCKED,
+            ConformanceExpectation.AMENDMENT_BLOCKED,
+            _ordered_scope_expansion_blocked,
+            amendment_recovery=True,
+        ),
+        _Case(
+            ConformanceScenario.STALE_WORKER_REFRESH_RESUME,
+            ConformanceExpectation.RECOVERED,
+            _stale_worker_refresh_resume,
+            amendment_recovery=True,
+        ),
     )
 
 
@@ -641,7 +771,10 @@ def _ratio(numerator: int, denominator: int) -> float:
     return 1.0 if denominator == 0 else numerator / denominator
 
 
-def _metrics(cases: tuple[_Case, ...], results: tuple[DeterministicConcurrencyScenarioResult, ...]) -> DeterministicConcurrencyMetrics:
+def _metrics(
+    cases: tuple[_Case, ...],
+    results: tuple[DeterministicConcurrencyScenarioResult, ...],
+) -> DeterministicConcurrencyMetrics:
     by_scenario = {item.scenario: item for item in results}
     safe = [case for case in cases if case.safe_parallel]
     unsafe = [case for case in cases if case.unsafe_parallel]
@@ -664,7 +797,9 @@ def _metrics(cases: tuple[_Case, ...], results: tuple[DeterministicConcurrencySc
     return DeterministicConcurrencyMetrics(
         safe_parallel_recall=_ratio(safe_parallel, len(safe)),
         false_parallel_rate=_ratio(false_parallel, len(unsafe)) if unsafe else 0.0,
-        unnecessary_serialization_rate=_ratio(len(safe) - safe_parallel, len(safe)) if safe else 0.0,
+        unnecessary_serialization_rate=_ratio(len(safe) - safe_parallel, len(safe))
+        if safe
+        else 0.0,
         ordered_dependency_accuracy=_ratio(ordered_correct, len(ordered)),
         amendment_recovery_rate=_ratio(recovery_correct, len(recovery)),
         counts={
@@ -684,7 +819,9 @@ def run_deterministic_concurrency_conformance(
     selected = {ConformanceScenario(item) for item in scenarios}
     cases = tuple(case for case in _canonical_cases() if case.scenario in selected)
     if not cases:
-        raise ValueError("deterministic concurrency conformance requires at least one scenario")
+        raise ValueError(
+            "deterministic concurrency conformance requires at least one scenario"
+        )
     results: list[DeterministicConcurrencyScenarioResult] = []
     for case in cases:
         try:
@@ -708,7 +845,9 @@ def run_deterministic_concurrency_conformance(
                 expectation=case.expectation,
                 observed=observed,
                 status=ConformanceStatus.PASSED if passed else ConformanceStatus.FAILED,
-                detail=detail if passed else f"expected {case.expectation.value}; {detail}",
+                detail=detail
+                if passed
+                else f"expected {case.expectation.value}; {detail}",
                 evidence=evidence,
             )
         )

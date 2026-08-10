@@ -413,8 +413,6 @@ def cmd_confirmatory_physical_run(args: argparse.Namespace) -> int:
     return 0 if result.get("complete") else 1
 
 
-
-
 def cmd_confirmatory_ablation_pair(args: argparse.Namespace) -> int:
     from .confirmatory_30x3.ablation import parse_ablation_profiles, run_ablation_pair
 
@@ -445,6 +443,7 @@ def cmd_confirmatory_ablation_run(args: argparse.Namespace) -> int:
     )
     _print_json(result)
     return 0 if result.get("complete") else 1
+
 
 def cmd_confirmatory_final_pair(args: argparse.Namespace) -> int:
     from .confirmatory_30x3.final import parse_confirmatory_modes, run_confirmatory_pair
@@ -617,12 +616,13 @@ def _add_confirmatory_commands(sub: Any) -> None:
         help="Execute one frozen pair with inner physical-concurrency instrumentation.",
     )
     _add_confirmatory_paths(physical_pair)
-    physical_pair.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    physical_pair.add_argument(
+        "--seed", required=True, type=int, choices=(101, 202, 303)
+    )
     physical_pair.add_argument("--pair", required=True, type=int, choices=range(1, 31))
     physical_pair.add_argument("--repo", default=".")
     physical_pair.add_argument("--no-resume", action="store_true")
     physical_pair.set_defaults(func=cmd_confirmatory_physical_pair)
-
 
     ablation = confirmatory_sub.add_parser(
         "ablation-run",
@@ -661,7 +661,9 @@ def _add_confirmatory_commands(sub: Any) -> None:
         help="Execute one frozen pair once per deterministic admission profile.",
     )
     _add_confirmatory_paths(ablation_pair)
-    ablation_pair.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    ablation_pair.add_argument(
+        "--seed", required=True, type=int, choices=(101, 202, 303)
+    )
     ablation_pair.add_argument("--pair", required=True, type=int, choices=range(1, 31))
     ablation_pair.add_argument(
         "--profiles",

@@ -1280,9 +1280,7 @@ class ClaimRegistry:
             return fences
 
         for instance in instances:
-            error = (
-                "runtime authority fenced because an execution premise became stale"
-            )
+            error = "runtime authority fenced because an execution premise became stale"
             if producer_intent_id:
                 error += f" after producer {producer_intent_id}"
             self._conn.execute(
@@ -1368,7 +1366,9 @@ class ClaimRegistry:
         reason = str(reason).strip()
         if not reason:
             raise ValueError("runtime pause reason must not be empty")
-        keys = tuple(sorted({str(item).strip() for item in resource_keys if str(item).strip()}))
+        keys = tuple(
+            sorted({str(item).strip() for item in resource_keys if str(item).strip()})
+        )
         with self._immediate():
             row = self._conn.execute(
                 "SELECT owner,state FROM intents WHERE intent_id=?", (intent_id,)
@@ -1383,7 +1383,9 @@ class ClaimRegistry:
                 ).fetchall()
                 return [
                     {
-                        **RuntimeFence.from_dict(json.loads(item["payload_json"])).to_dict(),
+                        **RuntimeFence.from_dict(
+                            json.loads(item["payload_json"])
+                        ).to_dict(),
                         "fingerprint": RuntimeFence.from_dict(
                             json.loads(item["payload_json"])
                         ).fingerprint(),
@@ -1485,7 +1487,9 @@ class ClaimRegistry:
                     f"stale intent version: expected {expected_version}, current {row['version']}"
                 )
             old_intent = ChangeIntent.from_dict(json.loads(row["payload_json"]))
-            if self._refresh_authority_surface(old_intent) != self._refresh_authority_surface(intent):
+            if self._refresh_authority_surface(
+                old_intent
+            ) != self._refresh_authority_surface(intent):
                 raise ValueError(
                     "runtime refresh cannot change declared authority, acceptance, preserves, or dependencies; use amendment admission first"
                 )
@@ -1510,7 +1514,10 @@ class ClaimRegistry:
                 raise ValueError(
                     "runtime refresh requires durable runtime-fence evidence"
                 )
-            fences = [RuntimeFence.from_dict(json.loads(item["payload_json"])) for item in fence_rows]
+            fences = [
+                RuntimeFence.from_dict(json.loads(item["payload_json"]))
+                for item in fence_rows
+            ]
 
             producer_versions: dict[str, int] = {}
             fence_producers = sorted(
@@ -1586,7 +1593,10 @@ class ClaimRegistry:
                     "intent_runtime_refresh_rejected",
                     intent.intent_id,
                     intent.owner,
-                    {"decision": decision.to_dict(), "unresolved_producers": sorted(set(unresolved))},
+                    {
+                        "decision": decision.to_dict(),
+                        "unresolved_producers": sorted(set(unresolved)),
+                    },
                 )
                 return decision, None
 
@@ -1651,7 +1661,9 @@ class ClaimRegistry:
                 sort_keys=True,
                 separators=(",", ":"),
             )
-            recovery_id = "recovery-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+            recovery_id = (
+                "recovery-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+            )
             recovery = RuntimeRecovery(
                 recovery_id=recovery_id,
                 intent_id=intent.intent_id,
@@ -1736,11 +1748,17 @@ class ClaimRegistry:
                 or recovery_row["state"] != RuntimeRecoveryState.REFRESHED.value
             ):
                 raise ValueError("runtime resume requires a successful runtime refresh")
-            recovery = RuntimeRecovery.from_dict(json.loads(recovery_row["payload_json"]))
+            recovery = RuntimeRecovery.from_dict(
+                json.loads(recovery_row["payload_json"])
+            )
             if int(row["content_version"]) != recovery.new_content_version:
-                raise ValueError("refreshed intent content changed before runtime resume")
+                raise ValueError(
+                    "refreshed intent content changed before runtime resume"
+                )
             if str(row["fingerprint"]) != recovery.new_fingerprint:
-                raise ValueError("refreshed intent fingerprint changed before runtime resume")
+                raise ValueError(
+                    "refreshed intent fingerprint changed before runtime resume"
+                )
             bad_dependencies = self._conn.execute(
                 "SELECT depends_on_intent_id,status FROM intent_dependencies WHERE intent_id=? AND status<>'active' ORDER BY depends_on_intent_id",
                 (intent_id,),

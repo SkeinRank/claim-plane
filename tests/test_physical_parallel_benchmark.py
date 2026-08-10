@@ -81,13 +81,18 @@ def test_bounded_pair_process_pool_isolates_processes_and_caps_fanout() -> None:
     assert len(result["workers"]) == 4
     assert result["outer_concurrency"]["peak_active_workers"] == 2
     assert all(worker["payload"] == {"ok": True} for worker in result["workers"])
-    assert result["outer_concurrency"]["sum_worker_seconds"] > result["batch_wall_time_seconds"]
+    assert (
+        result["outer_concurrency"]["sum_worker_seconds"]
+        > result["batch_wall_time_seconds"]
+    )
 
 
 def test_threadsafe_scope_planes_use_independent_sqlite_connections(tmp_path) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
-    from experiments.cooperbench.paper_6pair.scope import prepare_threadsafe_scope_registry
+    from experiments.cooperbench.paper_6pair.scope import (
+        prepare_threadsafe_scope_registry,
+    )
 
     plan_a = {
         "files": [

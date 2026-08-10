@@ -18,7 +18,6 @@ from enum import Enum
 from typing import Any, Iterable, Mapping, Sequence
 
 from claim_plane.core.dependency_graph import (
-    DependencyEdge,
     DependencyNode,
     DependencyRelation,
     DependencyResolution,
@@ -154,9 +153,12 @@ class SemanticChange:
                 object.__setattr__(
                     self,
                     name,
-                    SemanticResource.from_dict(value),  # type: ignore[arg-type]
+                    SemanticResource.from_dict(value),
                 )
-        if self.before_resource is not None and self.before_resource.identity != identity:
+        if (
+            self.before_resource is not None
+            and self.before_resource.identity != identity
+        ):
             raise ValueError("before_resource identity must match semantic change")
         if self.after_resource is not None and self.after_resource.identity != identity:
             raise ValueError("after_resource identity must match semantic change")
@@ -179,10 +181,14 @@ class SemanticChange:
             "identity": self.identity,
             "kind": self.kind.value,
             "before_resource": (
-                self.before_resource.to_dict() if self.before_resource is not None else None
+                self.before_resource.to_dict()
+                if self.before_resource is not None
+                else None
             ),
             "after_resource": (
-                self.after_resource.to_dict() if self.after_resource is not None else None
+                self.after_resource.to_dict()
+                if self.after_resource is not None
+                else None
             ),
             "contract_resource": contract.to_dict() if contract is not None else None,
             "metadata": dict(self.metadata),
@@ -217,7 +223,9 @@ class ImpactPath:
     relations: tuple[DependencyRelation, ...]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "identities", tuple(str(item) for item in self.identities))
+        object.__setattr__(
+            self, "identities", tuple(str(item) for item in self.identities)
+        )
         object.__setattr__(
             self,
             "relations",
@@ -275,15 +283,13 @@ class ImpactedResource:
             object.__setattr__(
                 self,
                 "node",
-                DependencyNode.from_dict(self.node),  # type: ignore[arg-type]
+                DependencyNode.from_dict(self.node),
             )
         roots = tuple(sorted({str(item) for item in self.root_identities}))
         paths = tuple(
             sorted(
                 [
-                    item
-                    if isinstance(item, ImpactPath)
-                    else ImpactPath.from_dict(item)  # type: ignore[arg-type]
+                    item if isinstance(item, ImpactPath) else ImpactPath.from_dict(item)
                     for item in self.paths
                 ],
                 key=lambda item: (
@@ -326,12 +332,17 @@ class ImpactedResource:
     def from_dict(cls, data: Mapping[str, Any]) -> "ImpactedResource":
         result = cls(
             node=DependencyNode.from_dict(data["node"]),
-            root_identities=tuple(str(item) for item in data.get("root_identities") or ()),
+            root_identities=tuple(
+                str(item) for item in data.get("root_identities") or ()
+            ),
             paths=tuple(ImpactPath.from_dict(item) for item in data.get("paths") or ()),
             contract_sensitive=bool(data.get("contract_sensitive", False)),
         )
         supplied_distance = data.get("min_distance")
-        if supplied_distance is not None and int(supplied_distance) != result.min_distance:
+        if (
+            supplied_distance is not None
+            and int(supplied_distance) != result.min_distance
+        ):
             raise ValueError("impacted resource min_distance mismatch")
         supplied_relations = tuple(
             sorted(str(item) for item in data.get("relations") or ())
@@ -391,7 +402,9 @@ class ImpactBoundary:
             target_identity=str(data["target_identity"]),
             relation=DependencyRelation(data["relation"]),
             resolution=DependencyResolution(data["resolution"]),
-            root_identities=tuple(str(item) for item in data.get("root_identities") or ()),
+            root_identities=tuple(
+                str(item) for item in data.get("root_identities") or ()
+            ),
             locations=tuple(int(item) for item in data.get("locations") or ()),
         )
 
@@ -417,7 +430,7 @@ class SemanticImpactReport:
                 [
                     item
                     if isinstance(item, SemanticChange)
-                    else SemanticChange.from_dict(item)  # type: ignore[arg-type]
+                    else SemanticChange.from_dict(item)
                     for item in self.changes
                 ],
                 key=lambda item: item.identity,
@@ -428,7 +441,7 @@ class SemanticImpactReport:
                 [
                     item
                     if isinstance(item, ImpactedResource)
-                    else ImpactedResource.from_dict(item)  # type: ignore[arg-type]
+                    else ImpactedResource.from_dict(item)
                     for item in self.impacted
                 ],
                 key=lambda item: item.node.identity,
@@ -439,7 +452,7 @@ class SemanticImpactReport:
                 [
                     item
                     if isinstance(item, ImpactBoundary)
-                    else ImpactBoundary.from_dict(item)  # type: ignore[arg-type]
+                    else ImpactBoundary.from_dict(item)
                     for item in self.boundaries
                 ],
                 key=lambda item: (
@@ -468,7 +481,9 @@ class SemanticImpactReport:
         return tuple(item for item in self.impacted if item.node.test)
 
     def impacted_resource(self, identity: str) -> ImpactedResource | None:
-        return next((item for item in self.impacted if item.node.identity == identity), None)
+        return next(
+            (item for item in self.impacted if item.node.identity == identity), None
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -525,7 +540,9 @@ def _relations_for_change(kind: SemanticChangeKind) -> frozenset[DependencyRelat
     return _STRUCTURE_RELATIONS
 
 
-def _incident_signature(graph: SemanticDependencyGraph, identity: str) -> tuple[tuple[str, ...], ...]:
+def _incident_signature(
+    graph: SemanticDependencyGraph, identity: str
+) -> tuple[tuple[str, ...], ...]:
     return tuple(
         sorted(
             (
@@ -573,29 +590,38 @@ def compare_semantic_graphs(
         ):
             candidates.add(identity)
             continue
-        if _incident_signature(before, identity) != _incident_signature(after, identity):
+        if _incident_signature(before, identity) != _incident_signature(
+            after, identity
+        ):
             candidates.add(identity)
 
     changes: list[SemanticChange] = []
     for identity in sorted(candidates):
-        left = before_nodes.get(identity)
-        right = after_nodes.get(identity)
-        before_resource = left.resource if left is not None else None
-        after_resource = right.resource if right is not None else None
-        if left is None and right is not None:
+        before_node = before_nodes.get(identity)
+        after_node = after_nodes.get(identity)
+        before_resource = before_node.resource if before_node is not None else None
+        after_resource = after_node.resource if after_node is not None else None
+        if before_node is None and after_node is not None:
             kind = SemanticChangeKind.ADDED
-        elif left is not None and right is None:
+        elif before_node is not None and after_node is None:
             kind = SemanticChangeKind.REMOVED
-        elif left is None and right is None:
-            raise ValueError(f"changed semantic identity is absent from both graphs: {identity}")
-        elif before_resource.signature != after_resource.signature:  # type: ignore[union-attr]
-            kind = SemanticChangeKind.CONTRACT
-        elif bool((right or left).metadata.get("symbol_kind") == "state"):
-            kind = SemanticChangeKind.STATE
-        elif _incident_signature(before, identity) != _incident_signature(after, identity):
-            kind = SemanticChangeKind.STRUCTURE
+        elif before_node is None and after_node is None:
+            raise ValueError(
+                f"changed semantic identity is absent from both graphs: {identity}"
+            )
         else:
-            kind = SemanticChangeKind.IMPLEMENTATION
+            assert before_node is not None and after_node is not None
+            assert before_resource is not None and after_resource is not None
+            if before_resource.signature != after_resource.signature:
+                kind = SemanticChangeKind.CONTRACT
+            elif bool(after_node.metadata.get("symbol_kind") == "state"):
+                kind = SemanticChangeKind.STATE
+            elif _incident_signature(before, identity) != _incident_signature(
+                after, identity
+            ):
+                kind = SemanticChangeKind.STRUCTURE
+            else:
+                kind = SemanticChangeKind.IMPLEMENTATION
         changes.append(
             SemanticChange(
                 identity=identity,
@@ -612,7 +638,9 @@ def compare_semantic_graphs(
     return tuple(changes)
 
 
-def _change_node(graph: SemanticDependencyGraph, change: SemanticChange) -> DependencyNode:
+def _change_node(
+    graph: SemanticDependencyGraph, change: SemanticChange
+) -> DependencyNode:
     existing = graph.node(change.identity)
     if existing is not None:
         return existing
@@ -663,7 +691,7 @@ def analyze_semantic_impact(
     if max_depth is not None and max_depth < 0:
         raise ValueError("max_depth must be non-negative or None")
     normalized = tuple(
-        item if isinstance(item, SemanticChange) else SemanticChange.from_dict(item)  # type: ignore[arg-type]
+        item if isinstance(item, SemanticChange) else SemanticChange.from_dict(item)
         for item in changes
     )
     if len({item.identity for item in normalized}) != len(normalized):
@@ -759,7 +787,9 @@ def analyze_semantic_impact(
             # Only a removed change root can be absent from the selected graph.
             change = next(item for item in normalized if item.identity == identity)
             node = _change_node(graph, change)
-        root_paths = tuple(paths_by_target[identity][key] for key in sorted(paths_by_target[identity]))
+        root_paths = tuple(
+            paths_by_target[identity][key] for key in sorted(paths_by_target[identity])
+        )
         impacted.append(
             ImpactedResource(
                 node=node,
@@ -815,7 +845,9 @@ def analyze_graph_change_impact(
         before, after, changed_identities=changed_identities
     )
     removed = tuple(item for item in changes if item.kind is SemanticChangeKind.REMOVED)
-    current = tuple(item for item in changes if item.kind is not SemanticChangeKind.REMOVED)
+    current = tuple(
+        item for item in changes if item.kind is not SemanticChangeKind.REMOVED
+    )
     reports: list[SemanticImpactReport] = []
     if current:
         reports.append(analyze_semantic_impact(after, current, max_depth=max_depth))
@@ -882,7 +914,9 @@ def analyze_graph_change_impact(
         ImpactedResource(
             node=node_by_identity[identity],
             root_identities=tuple(sorted(path_groups[identity])),
-            paths=tuple(path_groups[identity][key] for key in sorted(path_groups[identity])),
+            paths=tuple(
+                path_groups[identity][key] for key in sorted(path_groups[identity])
+            ),
             contract_sensitive=identity in contract_sensitive,
         )
         for identity in sorted(path_groups)

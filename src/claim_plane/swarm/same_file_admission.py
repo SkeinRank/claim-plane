@@ -92,9 +92,9 @@ def _operation_path(operation: Any) -> str | None:
 
 
 def _change_kind(operation: Any) -> SemanticChangeKind:
-    explicit = operation.metadata.get("semantic_change_kind") or operation.resource.metadata.get(
+    explicit = operation.metadata.get(
         "semantic_change_kind"
-    )
+    ) or operation.resource.metadata.get("semantic_change_kind")
     if explicit is not None:
         return SemanticChangeKind(str(explicit))
     if operation.access is AccessMode.DELETE:
@@ -105,9 +105,10 @@ def _change_kind(operation: Any) -> SemanticChangeKind:
         return SemanticChangeKind.CONTRACT
     if operation.resource.metadata.get("state") is True:
         return SemanticChangeKind.STATE
-    if operation.metadata.get("contract_change") is True or operation.resource.metadata.get(
-        "contract_change"
-    ) is True:
+    if (
+        operation.metadata.get("contract_change") is True
+        or operation.resource.metadata.get("contract_change") is True
+    ):
         return SemanticChangeKind.CONTRACT
     return SemanticChangeKind.IMPLEMENTATION
 
@@ -131,7 +132,11 @@ def _graph_root_for_operation(
     graph: SemanticDependencyGraph,
 ) -> tuple[str, Any] | None:
     resource = operation.resource
-    if resource.kind not in {ResourceKind.SYMBOL, ResourceKind.CONTRACT, ResourceKind.SCHEMA}:
+    if resource.kind not in {
+        ResourceKind.SYMBOL,
+        ResourceKind.CONTRACT,
+        ResourceKind.SCHEMA,
+    }:
         return None
     normalized = normalize_resource_ref(resource)
     if graph.node(normalized.identity) is not None:
@@ -143,7 +148,9 @@ def _graph_root_for_operation(
     candidates: list[str] = []
     if normalized.parent_identity:
         candidates.append(normalized.parent_identity)
-    qualified = normalized.qualified_name or resource.metadata.get("qualified_identifier")
+    qualified = normalized.qualified_name or resource.metadata.get(
+        "qualified_identifier"
+    )
     subject = (
         resource.metadata.get("subject_qualified_identifier")
         or resource.metadata.get("subject_qualified_name")
@@ -252,7 +259,9 @@ class SameFileAdmissionDecision:
 
     def __post_init__(self) -> None:
         if self.protocol != SAME_FILE_ADMISSION_PROTOCOL:
-            raise ValueError(f"unsupported same-file admission protocol {self.protocol!r}")
+            raise ValueError(
+                f"unsupported same-file admission protocol {self.protocol!r}"
+            )
         if not self.left_id or not self.right_id or self.left_id == self.right_id:
             raise ValueError("same-file admission requires distinct work ids")
         path = _normal_path(self.path)
@@ -262,11 +271,18 @@ class SameFileAdmissionDecision:
         object.__setattr__(self, "action", SameFileAdmissionAction(self.action))
         object.__setattr__(self, "reason", SameFileAdmissionReason(self.reason))
         if self.semantic_kind is not None:
-            object.__setattr__(self, "semantic_kind", SemanticConflictKind(self.semantic_kind))
+            object.__setattr__(
+                self, "semantic_kind", SemanticConflictKind(self.semantic_kind)
+            )
         if self.order is not None:
             object.__setattr__(self, "order", SemanticConflictOrder(self.order))
-        if self.order is not None and self.semantic_kind is not SemanticConflictKind.ORDERED:
-            raise ValueError("same-file admission order requires ordered semantic classification")
+        if (
+            self.order is not None
+            and self.semantic_kind is not SemanticConflictKind.ORDERED
+        ):
+            raise ValueError(
+                "same-file admission order requires ordered semantic classification"
+            )
         for name in ("graph_fingerprint", "semantic_decision_fingerprint"):
             value = getattr(self, name)
             if value is not None and (
@@ -274,7 +290,9 @@ class SameFileAdmissionDecision:
             ):
                 raise ValueError(f"{name} must be a lowercase SHA-256 digest")
         object.__setattr__(self, "left_changes", tuple(sorted(set(self.left_changes))))
-        object.__setattr__(self, "right_changes", tuple(sorted(set(self.right_changes))))
+        object.__setattr__(
+            self, "right_changes", tuple(sorted(set(self.right_changes)))
+        )
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     @property
@@ -283,7 +301,9 @@ class SameFileAdmissionDecision:
 
     @property
     def fingerprint(self) -> str:
-        return hashlib.sha256(_canonical_json(self.to_dict(include_fingerprint=False))).hexdigest()
+        return hashlib.sha256(
+            _canonical_json(self.to_dict(include_fingerprint=False))
+        ).hexdigest()
 
     def to_dict(self, *, include_fingerprint: bool = True) -> dict[str, Any]:
         payload = {
@@ -303,7 +323,11 @@ class SameFileAdmissionDecision:
             "detail": self.detail,
             "metadata": dict(self.metadata),
         }
-        return {"fingerprint": self.fingerprint, **payload} if include_fingerprint else payload
+        return (
+            {"fingerprint": self.fingerprint, **payload}
+            if include_fingerprint
+            else payload
+        )
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "SameFileAdmissionDecision":
@@ -334,7 +358,10 @@ class SameFileAdmissionDecision:
         supplied = data.get("fingerprint")
         if supplied is not None and str(supplied) != result.fingerprint:
             raise ValueError("same-file admission fingerprint mismatch")
-        if "parallel_safe" in data and bool(data["parallel_safe"]) != result.parallel_safe:
+        if (
+            "parallel_safe" in data
+            and bool(data["parallel_safe"]) != result.parallel_safe
+        ):
             raise ValueError("same-file admission parallel_safe mismatch")
         return result
 

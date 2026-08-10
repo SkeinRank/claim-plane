@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from experiments.cooperbench.common.identity import study_fingerprint
-from experiments.cooperbench.confirmatory_30x3.config import ConfirmatoryPaths, build_study
+from experiments.cooperbench.confirmatory_30x3.config import (
+    ConfirmatoryPaths,
+    build_study,
+)
 from experiments.cooperbench.confirmatory_30x3.final import (
     ConfirmatoryMode,
     DETERMINISTIC_CONFIRMATORY_PROTOCOL,
@@ -44,7 +47,9 @@ def _study_paths(tmp_path: Path) -> tuple[ConfirmatoryPaths, object]:
         workspace_root=tmp_path / "worktrees",
     )
     _write_json(paths.study_file, study.to_dict())
-    _write_json(paths.frozen_plan_manifest_file, {"study_fingerprint": study_fingerprint(study)})
+    _write_json(
+        paths.frozen_plan_manifest_file, {"study_fingerprint": study_fingerprint(study)}
+    )
     return paths, study
 
 
@@ -131,7 +136,10 @@ def test_confirmatory_report_pairs_wall_clock_against_serial(tmp_path: Path) -> 
             physical=False,
         ),
     ]
-    path = _pair_dir(paths, fingerprint=fingerprint, coder_seed=101, pair_index=1) / result_name
+    path = (
+        _pair_dir(paths, fingerprint=fingerprint, coder_seed=101, pair_index=1)
+        / result_name
+    )
     _write_json(
         path,
         {
@@ -158,7 +166,9 @@ def test_confirmatory_report_pairs_wall_clock_against_serial(tmp_path: Path) -> 
     assert delta["serialization_rate_delta_v2_minus_legacy"] == pytest.approx(-1.0)
     assert delta["pair_pass_rate_delta_v2_minus_legacy"] == pytest.approx(0.0)
     summaries = {item["mode"]: item for item in report["mode_summary"]}
-    assert summaries["deterministic_v2"]["physical_concurrency_rate"] == pytest.approx(1.0)
+    assert summaries["deterministic_v2"]["physical_concurrency_rate"] == pytest.approx(
+        1.0
+    )
 
 
 def test_confirmatory_report_refuses_incomplete_matrix(tmp_path: Path) -> None:

@@ -56,7 +56,9 @@ class IntegrationReason(str, Enum):
 
 
 def _canonical(payload: Mapping[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -68,7 +70,9 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def _git_text(root: Path, *args: str) -> str:
     result = _git(root, *args)
     if result.returncode != 0:
-        raise ValueError(result.stderr.strip() or result.stdout.strip() or "git command failed")
+        raise ValueError(
+            result.stderr.strip() or result.stdout.strip() or "git command failed"
+        )
     return result.stdout
 
 
@@ -119,7 +123,8 @@ def _semantic_operations(item: WorkItem, path: str) -> tuple[IntentOperation, ..
     return tuple(
         operation
         for operation in _committed_mutations(item)
-        if operation.resource.kind in semantic_kinds and _operation_path(operation) == path
+        if operation.resource.kind in semantic_kinds
+        and _operation_path(operation) == path
     )
 
 
@@ -151,7 +156,9 @@ def _commit_regions(root: Path, base: str, commit: str) -> tuple[ChangedRegion, 
 
 def _commit_paths(root: Path, base: str, commit: str) -> tuple[str, ...]:
     output = _git_text(root, "diff", "--name-only", base, commit, "--")
-    return tuple(sorted({_normal_path(line) for line in output.splitlines() if line.strip()}))
+    return tuple(
+        sorted({_normal_path(line) for line in output.splitlines() if line.strip()})
+    )
 
 
 def _show_file(root: Path, revision: str, path: str) -> str | None:
@@ -178,10 +185,14 @@ def _owners_for_regions(
     if not path.endswith((".py", ".pyi")):
         return ()
     after_index = (
-        None if after_source is None else extract_python_structure(after_source, path=path)
+        None
+        if after_source is None
+        else extract_python_structure(after_source, path=path)
     )
     before_index = (
-        None if before_source is None else extract_python_structure(before_source, path=path)
+        None
+        if before_source is None
+        else extract_python_structure(before_source, path=path)
     )
     owners: set[str] = set()
     for region in regions:
@@ -190,11 +201,15 @@ def _owners_for_regions(
         if after_index is not None and region.start_line > 0:
             start = max(1, region.start_line)
             end = max(start, region.end_line)
-            owners.update(item.identity for item in after_index.owners_for_region(start, end))
+            owners.update(
+                item.identity for item in after_index.owners_for_region(start, end)
+            )
         elif before_index is not None and region.old_start_line is not None:
             start = max(1, int(region.old_start_line))
             end = max(start, int(region.old_end_line or region.old_start_line))
-            owners.update(item.identity for item in before_index.owners_for_region(start, end))
+            owners.update(
+                item.identity for item in before_index.owners_for_region(start, end)
+            )
     return tuple(sorted(owners))
 
 
@@ -266,16 +281,28 @@ class DeterministicIntegrationEvidence:
 
     def __post_init__(self) -> None:
         if self.protocol != DETERMINISTIC_INTEGRATION_PROTOCOL:
-            raise ValueError(f"unsupported deterministic integration protocol {self.protocol!r}")
-        object.__setattr__(self, "disposition", IntegrationDisposition(self.disposition))
-        object.__setattr__(self, "reasons", tuple(IntegrationReason(item) for item in self.reasons))
+            raise ValueError(
+                f"unsupported deterministic integration protocol {self.protocol!r}"
+            )
         object.__setattr__(
-            self, "authority_violations", tuple(dict(item) for item in self.authority_violations)
+            self, "disposition", IntegrationDisposition(self.disposition)
         )
-        object.__setattr__(self, "semantic_checks", tuple(dict(item) for item in self.semantic_checks))
+        object.__setattr__(
+            self, "reasons", tuple(IntegrationReason(item) for item in self.reasons)
+        )
+        object.__setattr__(
+            self,
+            "authority_violations",
+            tuple(dict(item) for item in self.authority_violations),
+        )
+        object.__setattr__(
+            self, "semantic_checks", tuple(dict(item) for item in self.semantic_checks)
+        )
         object.__setattr__(self, "staged_paths", tuple(sorted(set(self.staged_paths))))
         object.__setattr__(
-            self, "staged_semantic_roots", tuple(sorted(set(self.staged_semantic_roots)))
+            self,
+            "staged_semantic_roots",
+            tuple(sorted(set(self.staged_semantic_roots))),
         )
         object.__setattr__(self, "metadata", dict(self.metadata))
 
@@ -336,17 +363,27 @@ def inspect_actual_mutation_surface(
     )
 
 
-def _authority_violations(item: WorkItem, surface: ActualMutationSurface) -> list[dict[str, Any]]:
+def _authority_violations(
+    item: WorkItem, surface: ActualMutationSurface
+) -> list[dict[str, Any]]:
     operations = _committed_mutations(item)
     violations: list[dict[str, Any]] = []
     for path in surface.changed_paths:
         if not any(_covers_path(operation, path) for operation in operations):
-            violations.append({"reason": IntegrationReason.UNDECLARED_PATH.value, "path": path})
+            violations.append(
+                {"reason": IntegrationReason.UNDECLARED_PATH.value, "path": path}
+            )
     regions = tuple(ChangedRegion.from_dict(item) for item in surface.changed_regions)
     for region in regions:
-        matching = [operation for operation in operations if _covers_path(operation, region.path)]
+        matching = [
+            operation
+            for operation in operations
+            if _covers_path(operation, region.path)
+        ]
         bounded = [operation for operation in matching if operation.resource.region]
-        if bounded and not any(_region_authorized(operation, region) for operation in bounded):
+        if bounded and not any(
+            _region_authorized(operation, region) for operation in bounded
+        ):
             violations.append(
                 {
                     "reason": IntegrationReason.REGION_VIOLATION.value,
@@ -419,7 +456,10 @@ def _semantic_rechecks(
             SemanticConflictKind.INDEPENDENT,
             SemanticConflictKind.COMMUTATIVE,
         }
-        if decision.kind in {SemanticConflictKind.ORDERED, SemanticConflictKind.CONFLICTING}:
+        if decision.kind in {
+            SemanticConflictKind.ORDERED,
+            SemanticConflictKind.CONFLICTING,
+        }:
             allowed = declared_dependency and refreshed_on_current_head
         checks.append(
             {
@@ -459,8 +499,12 @@ def build_integration_preflight(
     violations = _authority_violations(item, surface)
     semantic_checks: list[dict[str, Any]] = []
     graph_fingerprint: str | None = None
-    reasons = [IntegrationReason(item["reason"]) for item in violations]
-    disposition = IntegrationDisposition.REJECT if reasons else IntegrationDisposition.APPLY
+    reasons: list[IntegrationReason] = [
+        IntegrationReason(item["reason"]) for item in violations
+    ]
+    disposition = (
+        IntegrationDisposition.REJECT if reasons else IntegrationDisposition.APPLY
+    )
     if not reasons:
         reasons = [IntegrationReason.AUTHORITY_VERIFIED]
     return DeterministicIntegrationEvidence(
@@ -487,13 +531,17 @@ def verify_staged_integration(
     integrated_entries: Iterable[Any],
     evidence: DeterministicIntegrationEvidence,
 ) -> DeterministicIntegrationEvidence:
-    patch = _git_text(integration_root, "diff", "--cached", "--no-color", "--unified=0", "--")
+    patch = _git_text(
+        integration_root, "diff", "--cached", "--no-color", "--unified=0", "--"
+    )
     regions = tuple(_parse_changed_regions(patch))
     paths = tuple(
         sorted(
             {
                 _normal_path(line)
-                for line in _git_text(integration_root, "diff", "--cached", "--name-only", "--").splitlines()
+                for line in _git_text(
+                    integration_root, "diff", "--cached", "--name-only", "--"
+                ).splitlines()
                 if line.strip()
             }
         )
@@ -518,7 +566,11 @@ def verify_staged_integration(
             structural_failed = True
             break
 
-    reasons = [reason for reason in evidence.reasons if reason is not IntegrationReason.AUTHORITY_VERIFIED]
+    reasons: list[IntegrationReason] = [
+        reason
+        for reason in evidence.reasons
+        if reason is not IntegrationReason.AUTHORITY_VERIFIED
+    ]
     violations = list(evidence.authority_violations)
     if paths != evidence.source.changed_paths:
         reasons.append(IntegrationReason.STAGED_PATH_MISMATCH)
@@ -552,7 +604,9 @@ def verify_staged_integration(
                         "admitted": sorted(admitted),
                     }
                 )
-    semantic_checks = list(evidence.semantic_checks)
+    semantic_checks: list[dict[str, Any]] = [
+        dict(item) for item in evidence.semantic_checks
+    ]
     graph_fingerprint = evidence.graph_fingerprint
     if not reasons and roots:
         staged_surface = ActualMutationSurface(

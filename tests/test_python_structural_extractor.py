@@ -18,7 +18,7 @@ from claim_plane import (
 )
 
 
-SOURCE = '''\
+SOURCE = """\
 from typing import Iterable
 
 
@@ -41,7 +41,7 @@ class Parser(BaseParser):
 
 def helper(value: str = "x") -> str:
     return value
-'''
+"""
 
 
 def test_extracts_stable_python_symbols_signatures_and_lexical_owners() -> None:
@@ -145,9 +145,10 @@ def test_decorator_lines_are_owned_by_the_decorated_symbol() -> None:
     )
 
 
-def test_repeated_logical_definitions_share_semantic_identity_but_keep_occurrences(
-) -> None:
-    source = '''\
+def test_repeated_logical_definitions_share_semantic_identity_but_keep_occurrences() -> (
+    None
+):
+    source = """\
 from typing import overload
 
 @overload
@@ -158,7 +159,7 @@ def render(value: str) -> str: ...
 
 def render(value: object) -> str:
     return str(value)
-'''
+"""
     index = extract_python_structure(source, path="src/render.py")
     definitions = index.definitions_for_symbol("render")
 

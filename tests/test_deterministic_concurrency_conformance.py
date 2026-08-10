@@ -34,7 +34,9 @@ def _policy() -> SwarmBudgetPolicy:
     )
 
 
-def _item(work_id: str, path: str, symbol: str, *, change_kind: str = "implementation") -> dict:
+def _item(
+    work_id: str, path: str, symbol: str, *, change_kind: str = "implementation"
+) -> dict:
     return {
         "work_id": work_id,
         "title": work_id,

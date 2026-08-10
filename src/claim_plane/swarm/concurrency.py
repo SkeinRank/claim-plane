@@ -649,7 +649,10 @@ def _operation_findings(
                     normalized_right = _normal_path(str(right_path))
                     if normalized_left == normalized_right:
                         admitted = evaluated_same_file.get(normalized_left)
-                if admitted is not None and admitted.action is SameFileAdmissionAction.PARALLEL:
+                if (
+                    admitted is not None
+                    and admitted.action is SameFileAdmissionAction.PARALLEL
+                ):
                     continue
                 findings.append(
                     _Finding(

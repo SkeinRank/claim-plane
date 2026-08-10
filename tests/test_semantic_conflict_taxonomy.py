@@ -32,22 +32,34 @@ def test_same_file_different_methods_are_semantically_independent() -> None:
     graph = build_python_dependency_graph(
         {
             "parser.py": dedent(
-                '''
+                """
                 class Parser:
                     def parse(self, value: str) -> str:
                         return value.strip()
 
                     def validate(self, value: str) -> bool:
                         return bool(value)
-                '''
+                """
             ).lstrip()
         }
     )
 
     decision = classify_semantic_conflict(
         graph,
-        (_change(graph, "symbol:parser.py#Parser.parse", SemanticChangeKind.IMPLEMENTATION),),
-        (_change(graph, "symbol:parser.py#Parser.validate", SemanticChangeKind.IMPLEMENTATION),),
+        (
+            _change(
+                graph,
+                "symbol:parser.py#Parser.parse",
+                SemanticChangeKind.IMPLEMENTATION,
+            ),
+        ),
+        (
+            _change(
+                graph,
+                "symbol:parser.py#Parser.validate",
+                SemanticChangeKind.IMPLEMENTATION,
+            ),
+        ),
         left_id="parse-change",
         right_id="validate-change",
     )
@@ -55,20 +67,22 @@ def test_same_file_different_methods_are_semantically_independent() -> None:
     assert decision.kind is SemanticConflictKind.INDEPENDENT
     assert decision.parallel_safe is True
     assert decision.order is None
-    assert decision.evidence[0].reason is SemanticConflictReason.DISJOINT_SEMANTIC_SURFACE
+    assert (
+        decision.evidence[0].reason is SemanticConflictReason.DISJOINT_SEMANTIC_SURFACE
+    )
 
 
 def test_contract_producer_change_orders_consumer_after_producer() -> None:
     graph = build_python_dependency_graph(
         {
             "app.py": dedent(
-                '''
+                """
                 def parse(value: str) -> str:
                     return value
 
                 def consume(value: str) -> str:
                     return parse(value)
-                '''
+                """
             ).lstrip()
         }
     )
@@ -99,9 +113,7 @@ def test_contract_producer_change_orders_consumer_after_producer() -> None:
 
 def test_order_direction_reverses_with_classification_sides() -> None:
     graph = build_python_dependency_graph(
-        {
-            "app.py": "def base():\n    return 1\n\ndef use():\n    return base()\n"
-        }
+        {"app.py": "def base():\n    return 1\n\ndef use():\n    return base()\n"}
     )
 
     decision = classify_semantic_conflict(
@@ -152,7 +164,7 @@ def test_mutual_semantic_dependency_is_conflicting() -> None:
     graph = build_python_dependency_graph(
         {
             "cycle.py": dedent(
-                '''
+                """
                 def left(value: int) -> int:
                     if value <= 0:
                         return 0
@@ -162,7 +174,7 @@ def test_mutual_semantic_dependency_is_conflicting() -> None:
                     if value <= 0:
                         return 0
                     return left(value - 1)
-                '''
+                """
             ).lstrip()
         }
     )
@@ -214,13 +226,13 @@ def test_shared_unresolved_dependency_prevents_independence() -> None:
     graph = build_python_dependency_graph(
         {
             "app.py": dedent(
-                '''
+                """
                 def first(value):
                     return missing(value)
 
                 def second(value):
                     return missing(value + 1)
-                '''
+                """
             ).lstrip()
         }
     )
@@ -244,7 +256,7 @@ def test_shared_external_dependency_does_not_create_false_conflict() -> None:
     graph = build_python_dependency_graph(
         {
             "app.py": dedent(
-                '''
+                """
                 import json
 
                 def first(value: str):
@@ -252,7 +264,7 @@ def test_shared_external_dependency_does_not_create_false_conflict() -> None:
 
                 def second(value: str):
                     return json.loads(value)
-                '''
+                """
             ).lstrip()
         }
     )
@@ -270,7 +282,7 @@ def test_opposite_order_constraints_across_multi_change_sets_conflict() -> None:
     graph = build_python_dependency_graph(
         {
             "app.py": dedent(
-                '''
+                """
                 def a():
                     return 1
 
@@ -282,7 +294,7 @@ def test_opposite_order_constraints_across_multi_change_sets_conflict() -> None:
 
                 def d():
                     return c()
-                '''
+                """
             ).lstrip()
         }
     )

@@ -56,8 +56,7 @@ def test_dependency_ablation_changes_cross_file_ordering(tmp_path: Path) -> None
         {
             "producer.py": "def value():\n    return 1\n",
             "consumer.py": (
-                "from producer import value\n\n"
-                "def use():\n    return value()\n"
+                "from producer import value\n\ndef use():\n    return value()\n"
             ),
         },
     )
@@ -107,7 +106,9 @@ def test_dependency_ablation_changes_cross_file_ordering(tmp_path: Path) -> None
     assert baseline["ablation_evidence"]["semantic_graph_fingerprint"] is None
 
 
-def test_contract_propagation_ablation_removes_inheritance_order(tmp_path: Path) -> None:
+def test_contract_propagation_ablation_removes_inheritance_order(
+    tmp_path: Path,
+) -> None:
     repo, base = _repo(
         tmp_path,
         {
@@ -153,8 +154,9 @@ def test_contract_propagation_ablation_removes_inheritance_order(tmp_path: Path)
 
     assert full["kind"] == "ordered"
     assert no_contracts["kind"] == "parallel"
-    assert full["ablation_evidence"]["semantic_graph_fingerprint"] != (
-        no_contracts["ablation_evidence"]["semantic_graph_fingerprint"]
+    assert (
+        full["ablation_evidence"]["semantic_graph_fingerprint"]
+        != (no_contracts["ablation_evidence"]["semantic_graph_fingerprint"])
     )
 
 

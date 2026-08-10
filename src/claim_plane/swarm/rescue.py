@@ -55,7 +55,9 @@ def _utc_now() -> str:
 
 
 def _canonical(payload: Mapping[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +81,9 @@ class IntegrationRescueDecision:
 
     def __post_init__(self) -> None:
         if self.protocol != INTEGRATION_RESCUE_PROTOCOL:
-            raise ValueError(f"unsupported integration rescue protocol {self.protocol!r}")
+            raise ValueError(
+                f"unsupported integration rescue protocol {self.protocol!r}"
+            )
         if not self.event_id or not self.session_id or not self.work_id:
             raise ValueError("integration rescue identity fields must not be empty")
         if self.attempt <= 0:
@@ -88,7 +92,9 @@ class IntegrationRescueDecision:
             raise ValueError("integration rescue max_attempts must be non-negative")
         object.__setattr__(self, "disposition", RescueDisposition(self.disposition))
         object.__setattr__(self, "reason", RescueReason(self.reason))
-        object.__setattr__(self, "conflict_paths", tuple(sorted(set(self.conflict_paths))))
+        object.__setattr__(
+            self, "conflict_paths", tuple(sorted(set(self.conflict_paths)))
+        )
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     def to_dict(self) -> dict[str, Any]:
@@ -139,7 +145,9 @@ class IntegrationRescueDecision:
             session_id=str(data.get("session_id") or ""),
             work_id=str(data.get("work_id") or ""),
             source_run_id=(
-                None if data.get("source_run_id") is None else str(data.get("source_run_id"))
+                None
+                if data.get("source_run_id") is None
+                else str(data.get("source_run_id"))
             ),
             queue_fingerprint=str(data.get("queue_fingerprint") or ""),
             integration_head=str(data.get("integration_head") or ""),
@@ -181,9 +189,15 @@ def superseded_rescue_run_ids(events: list[dict[str, Any]]) -> set[str]:
     return result
 
 
-def effective_runs_for_rescue(records: list[Any], events: list[dict[str, Any]]) -> list[Any]:
+def effective_runs_for_rescue(
+    records: list[Any], events: list[dict[str, Any]]
+) -> list[Any]:
     superseded = superseded_rescue_run_ids(events)
-    return [record for record in records if getattr(record, "run_id", None) not in superseded]
+    return [
+        record
+        for record in records
+        if getattr(record, "run_id", None) not in superseded
+    ]
 
 
 def _attempt_count(events: list[dict[str, Any]], work_id: str) -> int:
@@ -197,7 +211,11 @@ def _integration_reasons(entry: Any) -> set[str]:
 
 def _stale_ordered_only(entry: Any) -> bool:
     evidence = entry.integration_evidence or {}
-    checks = [item for item in (evidence.get("semantic_checks") or ()) if not item.get("allowed")]
+    checks = [
+        item
+        for item in (evidence.get("semantic_checks") or ())
+        if not item.get("allowed")
+    ]
     if not checks:
         return False
     return all(
@@ -260,7 +278,9 @@ def _classify(entry: Any) -> tuple[RescueDisposition, RescueReason, str]:
     )
 
 
-def _reset_managed_worker(root: Path, queue: DeterministicMergeQueue, work_id: str) -> None:
+def _reset_managed_worker(
+    root: Path, queue: DeterministicMergeQueue, work_id: str
+) -> None:
     with _store(root) as store:
         worktrees = store.list_worktrees(queue.session_id)
         active = [
@@ -289,7 +309,9 @@ def _reset_managed_worker(root: Path, queue: DeterministicMergeQueue, work_id: s
         check=False,
     )
     if reset.returncode != 0:
-        raise ValueError(reset.stderr.strip() or reset.stdout.strip() or "worker reset failed")
+        raise ValueError(
+            reset.stderr.strip() or reset.stdout.strip() or "worker reset failed"
+        )
     clean = subprocess.run(
         ["git", "clean", "-fd", "-e", ".claim-plane/", "-e", ".codex/hooks.json"],
         cwd=path,
@@ -298,7 +320,9 @@ def _reset_managed_worker(root: Path, queue: DeterministicMergeQueue, work_id: s
         check=False,
     )
     if clean.returncode != 0:
-        raise ValueError(clean.stderr.strip() or clean.stdout.strip() or "worker clean failed")
+        raise ValueError(
+            clean.stderr.strip() or clean.stdout.strip() or "worker clean failed"
+        )
 
 
 def _recovery_event(decision: IntegrationRescueDecision) -> dict[str, Any]:
@@ -328,7 +352,9 @@ def plan_integration_rescue(
     if queue_data is None:
         raise ValueError("swarm session has no deterministic merge queue")
     queue, _ = queue_data
-    conflicts = [entry for entry in queue.entries if entry.state is MergeEntryState.CONFLICT]
+    conflicts = [
+        entry for entry in queue.entries if entry.state is MergeEntryState.CONFLICT
+    ]
     if work_id is not None:
         conflicts = [entry for entry in conflicts if entry.work_id == work_id]
     if not conflicts:
@@ -372,7 +398,10 @@ def rescue_swarm_integration(
 ) -> dict[str, Any]:
     root = resolve_repository_root(repo)
     decision = plan_integration_rescue(root, session_id, work_id=work_id)
-    if decision.disposition in {RescueDisposition.MANUAL, RescueDisposition.REPLAN_REQUIRED}:
+    if decision.disposition in {
+        RescueDisposition.MANUAL,
+        RescueDisposition.REPLAN_REQUIRED,
+    }:
         with _store(root) as store:
             store.save_recovery_event(_recovery_event(decision))
         return {"prepared": False, "decision": decision.to_dict()}
@@ -415,7 +444,9 @@ def rescue_swarm_integration(
             session_id,
             decision.work_id,
             replacement_state=replacement_state,
-            preserve_source_commit=(decision.disposition is RescueDisposition.RETRY_SNAPSHOT),
+            preserve_source_commit=(
+                decision.disposition is RescueDisposition.RETRY_SNAPSHOT
+            ),
             event_payload=_recovery_event(prepared),
             expected_queue_fingerprint=decision.queue_fingerprint,
             detail=detail,

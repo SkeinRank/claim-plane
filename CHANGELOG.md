@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.28] — 2026-08-10
+
+### Fixed
+
+- Removed duplicate top-level conformance exports by preserving the existing adapter conformance names and exposing deterministic concurrency conformance enums under explicit names.
+- Removed stale imports left by the semantic amendment, impact, integration, and rescue work so the pinned Ruff quality gate is clean.
+
+
 ## [0.37.27] — 2026-08-10
 
 ### Added

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 from textwrap import dedent
@@ -177,12 +176,18 @@ def test_same_file_independent_actual_mutations_survive_semantic_recheck(
     )
     codex = _fake_codex(tmp_path)
 
-    assert run_codex_work_item(
-        repo, "swm-int-v2-parallel", "first", codex_binary=str(codex)
-    ).state.value == "succeeded"
-    assert run_codex_work_item(
-        repo, "swm-int-v2-parallel", "second", codex_binary=str(codex)
-    ).state.value == "succeeded"
+    assert (
+        run_codex_work_item(
+            repo, "swm-int-v2-parallel", "first", codex_binary=str(codex)
+        ).state.value
+        == "succeeded"
+    )
+    assert (
+        run_codex_work_item(
+            repo, "swm-int-v2-parallel", "second", codex_binary=str(codex)
+        ).state.value
+        == "succeeded"
+    )
 
     first = integrate_next_swarm_result(repo, "swm-int-v2-parallel")
     second = integrate_next_swarm_result(repo, "swm-int-v2-parallel")

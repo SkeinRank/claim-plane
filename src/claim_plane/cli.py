@@ -2240,9 +2240,7 @@ def cmd_swarm_merge_all(args: argparse.Namespace) -> int:
 
 
 def cmd_swarm_rescue(args: argparse.Namespace) -> int:
-    result = rescue_swarm_integration(
-        args.repo, args.session_id, work_id=args.work_id
-    )
+    result = rescue_swarm_integration(args.repo, args.session_id, work_id=args.work_id)
     if args.json or args.out:
         _write_json(result, args.out)
     else:

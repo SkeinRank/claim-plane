@@ -327,8 +327,8 @@ from claim_plane.swarm import (
     DETERMINISTIC_CONCURRENCY_CONFORMANCE_PROTOCOL,
     DETERMINISTIC_CONCURRENCY_CONFORMANCE_VERSION,
     ConformanceExpectation,
-    ConformanceScenario,
-    ConformanceStatus,
+    ConformanceScenario as DeterministicConcurrencyConformanceScenario,
+    ConformanceStatus as DeterministicConcurrencyConformanceStatus,
     DeterministicConcurrencyConformanceReport,
     DeterministicConcurrencyMetrics,
     DeterministicConcurrencyScenarioResult,
@@ -403,7 +403,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.27"
+__version__ = "0.37.28"
 
 __all__ = [
     "RUNTIME_FENCE_PROTOCOL",
@@ -626,8 +626,8 @@ __all__ = [
     "DETERMINISTIC_CONCURRENCY_CONFORMANCE_PROTOCOL",
     "DETERMINISTIC_CONCURRENCY_CONFORMANCE_VERSION",
     "ConformanceExpectation",
-    "ConformanceScenario",
-    "ConformanceStatus",
+    "DeterministicConcurrencyConformanceScenario",
+    "DeterministicConcurrencyConformanceStatus",
     "DeterministicConcurrencyConformanceReport",
     "DeterministicConcurrencyMetrics",
     "DeterministicConcurrencyScenarioResult",

@@ -23,7 +23,9 @@ from claim_plane.swarm import (
 )
 
 
-def _policy(*, same_file: str = "region_safe", unknown_overlap: str = "serialize") -> SwarmBudgetPolicy:
+def _policy(
+    *, same_file: str = "region_safe", unknown_overlap: str = "serialize"
+) -> SwarmBudgetPolicy:
     return SwarmBudgetPolicy.from_dict(
         {
             "workers": {
@@ -42,7 +44,9 @@ def _policy(*, same_file: str = "region_safe", unknown_overlap: str = "serialize
     )
 
 
-def _symbol_op(path: str, qualified: str, *, change_kind: str = "implementation") -> dict[str, object]:
+def _symbol_op(
+    path: str, qualified: str, *, change_kind: str = "implementation"
+) -> dict[str, object]:
     return {
         "access": "write",
         "resource": {
@@ -58,7 +62,9 @@ def _symbol_op(path: str, qualified: str, *, change_kind: str = "implementation"
     }
 
 
-def _item(work_id: str, path: str, qualified: str, *, change_kind: str = "implementation") -> dict[str, object]:
+def _item(
+    work_id: str, path: str, qualified: str, *, change_kind: str = "implementation"
+) -> dict[str, object]:
     return {
         "work_id": work_id,
         "title": work_id,
@@ -170,7 +176,10 @@ def test_missing_semantic_roots_preserve_conservative_fallback() -> None:
                     "title": "first",
                     "goal": "first",
                     "operations": [
-                        {"access": "write", "resource": {"kind": "file", "identifier": "app.py"}}
+                        {
+                            "access": "write",
+                            "resource": {"kind": "file", "identifier": "app.py"},
+                        }
                     ],
                 },
                 {
@@ -178,7 +187,10 @@ def test_missing_semantic_roots_preserve_conservative_fallback() -> None:
                     "title": "second",
                     "goal": "second",
                     "operations": [
-                        {"access": "write", "resource": {"kind": "file", "identifier": "app.py"}}
+                        {
+                            "access": "write",
+                            "resource": {"kind": "file", "identifier": "app.py"},
+                        }
                     ],
                 },
             ],
@@ -190,7 +202,9 @@ def test_missing_semantic_roots_preserve_conservative_fallback() -> None:
     assert [wave.work_ids for wave in plan.waves] == [("first",), ("second",)]
     assert plan.constraints[0].reasons[0].value == "unknown_overlap"
     assert plan.metadata["same_file_admissions"][0]["action"] == "fallback"
-    assert plan.metadata["same_file_admissions"][0]["reason"] == "missing_semantic_roots"
+    assert (
+        plan.metadata["same_file_admissions"][0]["reason"] == "missing_semantic_roots"
+    )
 
 
 def _git(repo: Path, *args: str) -> str:

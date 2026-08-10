@@ -70,8 +70,6 @@ def _git(root_or_child: str | Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-
-
 def _git_bytes(root_or_child: str | Path, *args: str) -> bytes:
     completed = subprocess.run(
         ["git", *args],
@@ -109,7 +107,7 @@ def _python_sources_at_revision(root: Path, revision: str) -> dict[str, str]:
             sources[path] = raw.decode(encoding)
         except (SyntaxError, UnicodeError) as exc:
             raise PythonStructuralExtractionError(
-                f"cannot decode pinned Python source {path}: {exc}"
+                f"cannot decode pinned Python source: {exc}", path=path
             ) from exc
     return sources
 
@@ -122,6 +120,7 @@ def _semantic_graph_for_revision(root: Path, revision: str):
         return build_python_dependency_graph(sources)
     except PythonStructuralExtractionError:
         return None
+
 
 def resolve_repository_root(root_or_child: str | Path = ".") -> Path:
     return Path(_git(root_or_child, "rev-parse", "--show-toplevel")).resolve()

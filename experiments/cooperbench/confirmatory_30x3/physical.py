@@ -178,15 +178,15 @@ def run_physical_pair(
         "repo_root": str(Path(repo_root).resolve()),
         "pair_started_ns": pair_started_ns,
         "pair_finished_ns": pair_finished_ns,
-        "pair_wall_time_seconds": (
-            pair_finished_ns - pair_started_ns
-        ) / 1_000_000_000,
+        "pair_wall_time_seconds": (pair_finished_ns - pair_started_ns) / 1_000_000_000,
         "arms": rows,
         "inner_physical_concurrency": {
             row["arm"]: {
                 "enabled": bool(row.get("physical_parallel_enabled")),
                 "observed": bool(row.get("physical_concurrency_observed")),
-                "overlap_seconds": float(row.get("physical_overlap_seconds", 0.0) or 0.0),
+                "overlap_seconds": float(
+                    row.get("physical_overlap_seconds", 0.0) or 0.0
+                ),
                 "overlap_fraction_of_shorter": float(
                     row.get("physical_overlap_fraction_of_shorter", 0.0) or 0.0
                 ),

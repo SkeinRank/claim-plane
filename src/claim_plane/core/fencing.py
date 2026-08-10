@@ -82,9 +82,7 @@ class RuntimeFence:
             self,
             "dependency_chain",
             tuple(
-                str(item).strip()
-                for item in self.dependency_chain
-                if str(item).strip()
+                str(item).strip() for item in self.dependency_chain if str(item).strip()
             ),
         )
         if self.fencing_token is not None and self.fencing_token <= 0:
@@ -110,6 +108,7 @@ class RuntimeFence:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeFence":
+        fencing_token = data.get("fencing_token")
         return cls(
             protocol=str(data.get("protocol") or RUNTIME_FENCE_PROTOCOL),
             fence_id=str(data.get("fence_id") or ""),
@@ -132,11 +131,7 @@ class RuntimeFence:
             root_path=(
                 None if data.get("root_path") is None else str(data.get("root_path"))
             ),
-            fencing_token=(
-                None
-                if data.get("fencing_token") is None
-                else int(data.get("fencing_token"))
-            ),
+            fencing_token=None if fencing_token is None else int(fencing_token),
             status=str(data.get("status") or ""),
             created_at=str(data.get("created_at") or ""),
             metadata=dict(data.get("metadata") or {}),

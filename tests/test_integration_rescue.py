@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -85,7 +84,11 @@ def _session(repo: Path, session_id: str, *, semantic: bool = False) -> None:
             },
             "budget_policy": {
                 "protocol": "claim-plane.swarm-budget-policy.v1",
-                "workers": {"max_active": 1, "max_work_items": 4, "max_total_launches": 4},
+                "workers": {
+                    "max_active": 1,
+                    "max_work_items": 4,
+                    "max_total_launches": 4,
+                },
                 "resources": {"max_wall_time_seconds": 60},
                 "retries": {"max_repairs_per_work_item": 2},
                 "concurrency": {
@@ -165,7 +168,9 @@ def test_textual_conflict_prepares_bounded_serial_rerun(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     _session(repo, "swm-rescue-serial")
     codex = _fake_codex(tmp_path)
-    first = run_codex_work_item(repo, "swm-rescue-serial", "worker", codex_binary=str(codex))
+    first = run_codex_work_item(
+        repo, "swm-rescue-serial", "worker", codex_binary=str(codex)
+    )
     assert first.state.value == "succeeded"
     old_run_id = _force_textual_conflict(repo, "swm-rescue-serial")
 
@@ -178,7 +183,9 @@ def test_textual_conflict_prepares_bounded_serial_rerun(tmp_path: Path) -> None:
     scheduler = get_swarm_scheduler(repo, "swm-rescue-serial")
     assert scheduler["summary"]["dispatchable_work_ids"] == ["worker"]
 
-    second = run_codex_work_item(repo, "swm-rescue-serial", "worker", codex_binary=str(codex))
+    second = run_codex_work_item(
+        repo, "swm-rescue-serial", "worker", codex_binary=str(codex)
+    )
     assert second.state.value == "succeeded"
     assert second.attempt == 2
     assert second.base_commit == rescue["decision"]["integration_head"]
@@ -214,9 +221,12 @@ output.write_text("done\\n", encoding="utf-8")
         encoding="utf-8",
     )
     codex.chmod(0o755)
-    assert run_codex_work_item(
-        repo, "swm-rescue-authority", "worker", codex_binary=str(codex)
-    ).state.value == "succeeded"
+    assert (
+        run_codex_work_item(
+            repo, "swm-rescue-authority", "worker", codex_binary=str(codex)
+        ).state.value
+        == "succeeded"
+    )
     merged = integrate_next_swarm_result(repo, "swm-rescue-authority")
     assert merged["integrated"] is False
 
@@ -225,4 +235,9 @@ output.write_text("done\\n", encoding="utf-8")
     assert rescue["prepared"] is False
     assert rescue["decision"]["disposition"] == "manual"
     assert rescue["decision"]["reason"] == "authority_violation"
-    assert get_swarm_scheduler(repo, "swm-rescue-authority")["summary"]["dispatchable_work_ids"] == []
+    assert (
+        get_swarm_scheduler(repo, "swm-rescue-authority")["summary"][
+            "dispatchable_work_ids"
+        ]
+        == []
+    )

@@ -232,9 +232,8 @@ def run_bounded_pair_processes(
         "max_parallel_pairs": max_parallel_pairs,
         "batch_started_ns": batch_started_ns,
         "batch_finished_ns": batch_finished_ns,
-        "batch_wall_time_seconds": (
-            batch_finished_ns - batch_started_ns
-        ) / 1_000_000_000,
+        "batch_wall_time_seconds": (batch_finished_ns - batch_started_ns)
+        / 1_000_000_000,
         "outer_concurrency": summary,
         "complete": not failed,
         "workers": [

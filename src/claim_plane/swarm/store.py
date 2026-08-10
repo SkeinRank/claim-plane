@@ -1055,10 +1055,13 @@ class SwarmSessionStore:
                 effective_dependencies=current.effective_dependencies,
                 source_branch=current.source_branch,
                 state=replacement_state,
-                run_id=current.run_id if replacement_state is MergeEntryState.READY else None,
+                run_id=current.run_id
+                if replacement_state is MergeEntryState.READY
+                else None,
                 source_commit=(
                     current.source_commit
-                    if preserve_source_commit and replacement_state is MergeEntryState.READY
+                    if preserve_source_commit
+                    and replacement_state is MergeEntryState.READY
                     else None
                 ),
                 integration_commit=None,
@@ -1436,6 +1439,7 @@ class SwarmSessionStore:
                 effective_runs_for_rescue,
                 superseded_rescue_run_ids,
             )
+
             effective_records = effective_runs_for_rescue(
                 existing_records, recovery_events
             )

@@ -21,7 +21,7 @@ from claim_plane import (
 def _before_sources() -> dict[str, str]:
     return {
         "src/demo/models.py": dedent(
-            '''
+            """
             class User:
                 @classmethod
                 def parse(cls, value: str) -> "User":
@@ -29,10 +29,10 @@ def _before_sources() -> dict[str, str]:
 
             class Admin(User):
                 pass
-            '''
+            """
         ).lstrip(),
         "src/demo/service.py": dedent(
-            '''
+            """
             from .models import User
 
             CACHE: dict[str, User] = {}
@@ -43,15 +43,15 @@ def _before_sources() -> dict[str, str]:
             def remember(user: User) -> User:
                 CACHE["user"] = user
                 return user
-            '''
+            """
         ).lstrip(),
         "tests/test_service.py": dedent(
-            '''
+            """
             from demo.service import parse_user
 
             def test_parse_user():
                 assert parse_user("x") is not None
-            '''
+            """
         ).lstrip(),
     }
 
@@ -163,7 +163,9 @@ def test_implementation_change_uses_narrower_propagation_surface() -> None:
     assert report.impacted_resource(user.identity) is not None
 
 
-def test_explicit_mutation_detects_implementation_change_when_graph_shape_is_same() -> None:
+def test_explicit_mutation_detects_implementation_change_when_graph_shape_is_same() -> (
+    None
+):
     before = build_python_dependency_graph(
         {"app.py": "def answer() -> int:\n    return 1\n"}
     )
@@ -173,9 +175,7 @@ def test_explicit_mutation_detects_implementation_change_when_graph_shape_is_sam
     identity = "symbol:app.py#answer"
 
     assert compare_semantic_graphs(before, after) == ()
-    changes = compare_semantic_graphs(
-        before, after, changed_identities=(identity,)
-    )
+    changes = compare_semantic_graphs(before, after, changed_identities=(identity,))
     assert len(changes) == 1
     assert changes[0].identity == identity
     assert changes[0].kind is SemanticChangeKind.IMPLEMENTATION
@@ -186,7 +186,7 @@ def test_state_change_propagates_to_readers_and_writers() -> None:
     graph = build_python_dependency_graph(
         {
             "app.py": dedent(
-                '''
+                """
                 CACHE = {}
 
                 def read_cache():
@@ -194,7 +194,7 @@ def test_state_change_propagates_to_readers_and_writers() -> None:
 
                 def write_cache(value):
                     CACHE["x"] = value
-                '''
+                """
             ).lstrip()
         }
     )
@@ -225,12 +225,12 @@ def test_external_and_unresolved_boundaries_remain_visible() -> None:
     graph = build_python_dependency_graph(
         {
             "app.py": dedent(
-                '''
+                """
                 import json
 
                 def run(value):
                     return json.loads(value) + missing(value)
-                '''
+                """
             ).lstrip()
         }
     )
@@ -277,9 +277,7 @@ def test_semantic_impact_roundtrip_and_fingerprint_are_deterministic() -> None:
     assert first.protocol == SEMANTIC_IMPACT_PROTOCOL
     assert first.fingerprint == second.fingerprint
     assert first.to_dict() == second.to_dict()
-    restored = SemanticImpactReport.from_dict(
-        json.loads(json.dumps(first.to_dict()))
-    )
+    restored = SemanticImpactReport.from_dict(json.loads(json.dumps(first.to_dict())))
     assert restored == first
     assert restored.fingerprint == first.fingerprint
     assert restored.test_impacts

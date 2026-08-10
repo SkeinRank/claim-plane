@@ -285,7 +285,6 @@ class SharedAdmissionPlan:
         )
 
 
-
 def _operation_path(operation: Any) -> str | None:
     resource = operation.resource
     if resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}:
@@ -343,6 +342,7 @@ def _semantic_conflict_projection(intent: ChangeIntent) -> ChangeIntent:
             "projected_file_paths": sorted(semantic_paths),
         },
     )
+
 
 def compute_shared_admission(
     session: SwarmSession, plan: ConcurrencyPlan

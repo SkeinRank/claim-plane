@@ -40,7 +40,6 @@ from claim_plane.core.models import (
     ChangeIntent,
     IntentOperation,
     ResourceKind,
-    ScopeCommitment,
 )
 from claim_plane.core.resource_ir import SemanticResource, normalize_resource_ref
 
@@ -149,13 +148,19 @@ def _is_monotonic(current: ChangeIntent, candidate: ChangeIntent) -> tuple[bool,
         if existing.committed and replacement.contingent:
             return False, "scope amendment cannot revoke committed authority"
         if existing.committed and existing.required != replacement.required:
-            return False, "scope amendment cannot change required status of committed operations"
+            return (
+                False,
+                "scope amendment cannot change required status of committed operations",
+            )
         if (
             existing.contingent
             and replacement.contingent
             and existing.required != replacement.required
         ):
-            return False, "scope amendment cannot rewrite unchanged contingent operations"
+            return (
+                False,
+                "scope amendment cannot rewrite unchanged contingent operations",
+            )
     return True, ""
 
 
@@ -186,9 +191,9 @@ def _new_authority(
 
 
 def _change_kind(operation: IntentOperation) -> SemanticChangeKind:
-    explicit = operation.metadata.get("semantic_change_kind") or operation.resource.metadata.get(
+    explicit = operation.metadata.get(
         "semantic_change_kind"
-    )
+    ) or operation.resource.metadata.get("semantic_change_kind")
     if explicit is not None:
         return SemanticChangeKind(str(explicit))
     if operation.access is AccessMode.DELETE:
@@ -199,9 +204,10 @@ def _change_kind(operation: IntentOperation) -> SemanticChangeKind:
         return SemanticChangeKind.CONTRACT
     if operation.resource.metadata.get("state") is True:
         return SemanticChangeKind.STATE
-    if operation.metadata.get("contract_change") is True or operation.resource.metadata.get(
-        "contract_change"
-    ) is True:
+    if (
+        operation.metadata.get("contract_change") is True
+        or operation.resource.metadata.get("contract_change") is True
+    ):
         return SemanticChangeKind.CONTRACT
     return SemanticChangeKind.IMPLEMENTATION
 
@@ -295,7 +301,8 @@ def _operation_roots(
         if (
             allow_new_files
             and declared_new_file
-            and operation.access in {AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST}
+            and operation.access
+            in {AccessMode.WRITE, AccessMode.DOCUMENT, AccessMode.TEST}
         ):
             synthetic = normalized
             return (
@@ -331,7 +338,9 @@ def _changes_for_operations(
         SemanticChangeKind.UNKNOWN: 7,
     }
     for operation in operations:
-        for change in _operation_roots(operation, graph, allow_new_files=allow_new_files):
+        for change in _operation_roots(
+            operation, graph, allow_new_files=allow_new_files
+        ):
             previous = by_identity.get(change.identity)
             if previous is None or rank[change.kind] > rank[previous.kind]:
                 by_identity[change.identity] = change
@@ -439,8 +448,12 @@ class SemanticAmendmentAssessment:
 
     def __post_init__(self) -> None:
         if self.protocol != SEMANTIC_AMENDMENT_PROTOCOL:
-            raise ValueError(f"unsupported semantic amendment protocol {self.protocol!r}")
-        object.__setattr__(self, "disposition", SemanticAmendmentDisposition(self.disposition))
+            raise ValueError(
+                f"unsupported semantic amendment protocol {self.protocol!r}"
+            )
+        object.__setattr__(
+            self, "disposition", SemanticAmendmentDisposition(self.disposition)
+        )
         object.__setattr__(self, "reason", SemanticAmendmentReason(self.reason))
         for name in ("current_fingerprint", "candidate_fingerprint"):
             value = str(getattr(self, name))
@@ -456,7 +469,7 @@ class SemanticAmendmentAssessment:
             tuple(
                 item
                 if isinstance(item, IntentOperation)
-                else IntentOperation.from_dict(item)  # type: ignore[arg-type]
+                else IntentOperation.from_dict(item)
                 for item in self.new_operations
             ),
         )
@@ -467,7 +480,7 @@ class SemanticAmendmentAssessment:
             tuple(
                 item
                 if isinstance(item, SemanticChange)
-                else SemanticChange.from_dict(item)  # type: ignore[arg-type]
+                else SemanticChange.from_dict(item)
                 for item in self.semantic_changes
             ),
         )
@@ -477,7 +490,7 @@ class SemanticAmendmentAssessment:
             tuple(
                 item
                 if isinstance(item, ActiveAmendmentRelation)
-                else ActiveAmendmentRelation.from_dict(item)  # type: ignore[arg-type]
+                else ActiveAmendmentRelation.from_dict(item)
                 for item in self.active_relations
             ),
         )
@@ -485,13 +498,15 @@ class SemanticAmendmentAssessment:
             object.__setattr__(
                 self,
                 "bounds",
-                SemanticAmendmentBounds.from_dict(self.bounds),  # type: ignore[arg-type]
+                SemanticAmendmentBounds.from_dict(self.bounds),
             )
-        if self.impact is not None and not isinstance(self.impact, SemanticImpactReport):
+        if self.impact is not None and not isinstance(
+            self.impact, SemanticImpactReport
+        ):
             object.__setattr__(
                 self,
                 "impact",
-                SemanticImpactReport.from_dict(self.impact),  # type: ignore[arg-type]
+                SemanticImpactReport.from_dict(self.impact),
             )
         object.__setattr__(self, "metadata", dict(self.metadata))
 
@@ -505,7 +520,9 @@ class SemanticAmendmentAssessment:
 
     @property
     def fingerprint(self) -> str:
-        return hashlib.sha256(_canonical_json(self.to_dict(include_fingerprint=False))).hexdigest()
+        return hashlib.sha256(
+            _canonical_json(self.to_dict(include_fingerprint=False))
+        ).hexdigest()
 
     def to_dict(self, *, include_fingerprint: bool = True) -> dict[str, Any]:
         payload = {
@@ -542,11 +559,13 @@ class SemanticAmendmentAssessment:
             disposition=SemanticAmendmentDisposition(data["disposition"]),
             reason=SemanticAmendmentReason(data["reason"]),
             new_operations=tuple(
-                IntentOperation.from_dict(item) for item in data.get("new_operations") or ()
+                IntentOperation.from_dict(item)
+                for item in data.get("new_operations") or ()
             ),
             new_paths=tuple(str(item) for item in data.get("new_paths") or ()),
             semantic_changes=tuple(
-                SemanticChange.from_dict(item) for item in data.get("semantic_changes") or ()
+                SemanticChange.from_dict(item)
+                for item in data.get("semantic_changes") or ()
             ),
             impact=(
                 SemanticImpactReport.from_dict(data["impact"])

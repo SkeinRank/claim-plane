@@ -425,7 +425,9 @@ def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, 
     source_commit = claimed.source_commit
     try:
         if source_commit is None:
-            source_commit = _snapshot_worker(root, claimed_queue, claimed, timestamp=now)
+            source_commit = _snapshot_worker(
+                root, claimed_queue, claimed, timestamp=now
+            )
         if source_commit is None:
             finished = MergeQueueEntry(
                 work_id=claimed.work_id,
@@ -497,7 +499,10 @@ def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, 
                     if not evidence.allowed:
                         _git_result(integration, "cherry-pick", "--abort")
                         _git_result(
-                            integration, "reset", "--hard", claimed_queue.integration_head
+                            integration,
+                            "reset",
+                            "--hard",
+                            claimed_queue.integration_head,
                         )
                         finished = MergeQueueEntry(
                             work_id=claimed.work_id,

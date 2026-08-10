@@ -115,7 +115,9 @@ class MergeQueueEntry:
             tuple(sorted(set(self.conflict_paths))),
         )
         if self.integration_evidence is not None:
-            object.__setattr__(self, "integration_evidence", dict(self.integration_evidence))
+            object.__setattr__(
+                self, "integration_evidence", dict(self.integration_evidence)
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -129,7 +131,9 @@ class MergeQueueEntry:
             "integration_commit": self.integration_commit,
             "conflict_paths": list(self.conflict_paths),
             "integration_evidence": (
-                None if self.integration_evidence is None else dict(self.integration_evidence)
+                None
+                if self.integration_evidence is None
+                else dict(self.integration_evidence)
             ),
             "detail": self.detail,
         }

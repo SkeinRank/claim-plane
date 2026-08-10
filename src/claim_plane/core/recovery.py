@@ -76,7 +76,11 @@ class RuntimeRecovery:
         object.__setattr__(
             self,
             "fence_ids",
-            tuple(sorted({str(item).strip() for item in self.fence_ids if str(item).strip()})),
+            tuple(
+                sorted(
+                    {str(item).strip() for item in self.fence_ids if str(item).strip()}
+                )
+            ),
         )
         object.__setattr__(
             self,
@@ -121,9 +125,13 @@ class RuntimeRecovery:
             protocol=str(data.get("protocol") or RUNTIME_RECOVERY_PROTOCOL),
             recovery_id=str(data.get("recovery_id") or ""),
             intent_id=str(data.get("intent_id") or ""),
-            state=RuntimeRecoveryState(data.get("state") or RuntimeRecoveryState.REFRESHED.value),
+            state=RuntimeRecoveryState(
+                data.get("state") or RuntimeRecoveryState.REFRESHED.value
+            ),
             from_base_commit=(
-                None if data.get("from_base_commit") is None else str(data.get("from_base_commit"))
+                None
+                if data.get("from_base_commit") is None
+                else str(data.get("from_base_commit"))
             ),
             to_base_commit=str(data.get("to_base_commit") or ""),
             old_content_version=int(data.get("old_content_version") or 0),
@@ -136,7 +144,9 @@ class RuntimeRecovery:
                 for key, value in dict(data.get("producer_versions") or {}).items()
             },
             created_at=str(data.get("created_at") or ""),
-            resumed_at=(None if data.get("resumed_at") is None else str(data.get("resumed_at"))),
+            resumed_at=(
+                None if data.get("resumed_at") is None else str(data.get("resumed_at"))
+            ),
             metadata=dict(data.get("metadata") or {}),
         )
 

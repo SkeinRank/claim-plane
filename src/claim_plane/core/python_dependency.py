@@ -125,8 +125,7 @@ def _module_candidates(path: str, package_dirs: set[str]) -> tuple[str, ...]:
     if parent_parts:
         package_start = len(parent_parts)
         while (
-            package_start > 0
-            and "/".join(parent_parts[:package_start]) in package_dirs
+            package_start > 0 and "/".join(parent_parts[:package_start]) in package_dirs
         ):
             package_start -= 1
         if package_start < len(parent_parts):
@@ -435,9 +434,7 @@ class _PythonDependencyCollector(ast.NodeVisitor):
             return _ResolvedTarget(
                 _external_symbol(f"builtins.{name}"), DependencyResolution.EXTERNAL
             )
-        return _ResolvedTarget(
-            _external_symbol(name), DependencyResolution.UNRESOLVED
-        )
+        return _ResolvedTarget(_external_symbol(name), DependencyResolution.UNRESOLVED)
 
     def _resolve_attribute(
         self, node: ast.Attribute, owner: SemanticResource
@@ -642,7 +639,6 @@ class _PythonDependencyCollector(ast.NodeVisitor):
                 line=node.lineno,
             )
         self.generic_visit(node)
-
 
     def visit_Subscript(self, node: ast.Subscript) -> None:  # noqa: N802
         if isinstance(node.ctx, (ast.Store, ast.Del)) and isinstance(

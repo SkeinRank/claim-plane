@@ -62,7 +62,7 @@ class DependencyNode:
             object.__setattr__(
                 self,
                 "resource",
-                SemanticResource.from_dict(self.resource),  # type: ignore[arg-type]
+                SemanticResource.from_dict(self.resource),
             )
         object.__setattr__(self, "metadata", dict(self.metadata))
 
@@ -164,11 +164,11 @@ class SemanticDependencyGraph:
             raise ValueError(f"unsupported semantic dependency graph {self.protocol!r}")
 
         node_by_identity: dict[str, DependencyNode] = {}
-        for raw in self.nodes:
+        for raw_node in self.nodes:
             node = (
-                raw
-                if isinstance(raw, DependencyNode)
-                else DependencyNode.from_dict(raw)  # type: ignore[arg-type]
+                raw_node
+                if isinstance(raw_node, DependencyNode)
+                else DependencyNode.from_dict(raw_node)
             )
             existing = node_by_identity.get(node.identity)
             if (
@@ -188,11 +188,11 @@ class SemanticDependencyGraph:
                 )
 
         edge_groups: dict[tuple[str, str, str, str], DependencyEdge] = {}
-        for raw in self.edges:
+        for raw_edge in self.edges:
             edge = (
-                raw
-                if isinstance(raw, DependencyEdge)
-                else DependencyEdge.from_dict(raw)  # type: ignore[arg-type]
+                raw_edge
+                if isinstance(raw_edge, DependencyEdge)
+                else DependencyEdge.from_dict(raw_edge)
             )
             if edge.source_identity not in node_by_identity:
                 raise ValueError(

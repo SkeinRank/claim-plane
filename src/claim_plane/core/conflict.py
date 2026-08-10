@@ -218,7 +218,9 @@ class SemanticConflictDecision:
 
     def __post_init__(self) -> None:
         if self.protocol != SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL:
-            raise ValueError(f"unsupported semantic conflict protocol {self.protocol!r}")
+            raise ValueError(
+                f"unsupported semantic conflict protocol {self.protocol!r}"
+            )
         for name in (
             "graph_fingerprint",
             "left_impact_fingerprint",
@@ -243,7 +245,9 @@ class SemanticConflictDecision:
         left_changes = tuple(sorted({str(item) for item in self.left_changes}))
         right_changes = tuple(sorted({str(item) for item in self.right_changes}))
         if not left_changes or not right_changes:
-            raise ValueError("semantic conflict decision requires changes on both sides")
+            raise ValueError(
+                "semantic conflict decision requires changes on both sides"
+            )
         object.__setattr__(self, "left_changes", left_changes)
         object.__setattr__(self, "right_changes", right_changes)
         evidence = tuple(
@@ -251,7 +255,7 @@ class SemanticConflictDecision:
                 (
                     item
                     if isinstance(item, SemanticConflictEvidence)
-                    else SemanticConflictEvidence.from_dict(item)  # type: ignore[arg-type]
+                    else SemanticConflictEvidence.from_dict(item)
                     for item in self.evidence
                 ),
                 key=lambda item: (
@@ -319,9 +323,7 @@ class SemanticConflictDecision:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "SemanticConflictDecision":
         decision = cls(
-            protocol=str(
-                data.get("protocol") or SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL
-            ),
+            protocol=str(data.get("protocol") or SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL),
             graph_fingerprint=str(data["graph_fingerprint"]),
             left_id=str(data["left_id"]),
             right_id=str(data["right_id"]),
@@ -356,14 +358,16 @@ class SemanticConflictDecision:
 
 def _normalize_changes(changes: Sequence[SemanticChange]) -> tuple[SemanticChange, ...]:
     normalized = tuple(
-        item if isinstance(item, SemanticChange) else SemanticChange.from_dict(item)  # type: ignore[arg-type]
+        item if isinstance(item, SemanticChange) else SemanticChange.from_dict(item)
         for item in changes
     )
     if not normalized:
         raise ValueError("semantic conflict classification requires non-empty changes")
     identities = [item.identity for item in normalized]
     if len(set(identities)) != len(identities):
-        raise ValueError("semantic conflict changes must have unique identities per side")
+        raise ValueError(
+            "semantic conflict changes must have unique identities per side"
+        )
     return tuple(sorted(normalized, key=lambda item: item.identity))
 
 
@@ -375,7 +379,7 @@ def _normalize_proofs(
         proof = (
             raw
             if isinstance(raw, CommutativityProof)
-            else CommutativityProof.from_dict(raw)  # type: ignore[arg-type]
+            else CommutativityProof.from_dict(raw)
         )
         previous = result.get(proof.pair_key)
         if previous is not None and previous.to_dict() != proof.to_dict():
@@ -622,15 +626,15 @@ def classify_semantic_conflict(
                     continue
 
                 if left_to_right is not None:
-                    order = SemanticConflictOrder.LEFT_BEFORE_RIGHT
+                    pair_order = SemanticConflictOrder.LEFT_BEFORE_RIGHT
                     pair_kinds.append(SemanticConflictKind.ORDERED)
-                    orders.add(order)
+                    orders.add(pair_order)
                     evidence.append(
                         _path_evidence(
                             reason=SemanticConflictReason.SEMANTIC_DEPENDENCY,
                             left_identity=left_change.identity,
                             right_identity=right_change.identity,
-                            order=order,
+                            order=pair_order,
                             path=left_to_right,
                             detail=(
                                 "the right mutation root depends on semantic state changed "
@@ -640,15 +644,15 @@ def classify_semantic_conflict(
                     )
                 else:
                     assert right_to_left is not None
-                    order = SemanticConflictOrder.RIGHT_BEFORE_LEFT
+                    pair_order = SemanticConflictOrder.RIGHT_BEFORE_LEFT
                     pair_kinds.append(SemanticConflictKind.ORDERED)
-                    orders.add(order)
+                    orders.add(pair_order)
                     evidence.append(
                         _path_evidence(
                             reason=SemanticConflictReason.SEMANTIC_DEPENDENCY,
                             left_identity=left_change.identity,
                             right_identity=right_change.identity,
-                            order=order,
+                            order=pair_order,
                             path=right_to_left,
                             detail=(
                                 "the left mutation root depends on semantic state changed "
@@ -704,12 +708,13 @@ def classify_semantic_conflict(
 
             pair_kinds.append(SemanticConflictKind.INDEPENDENT)
 
+    decision_order: SemanticConflictOrder | None
     if SemanticConflictKind.CONFLICTING in pair_kinds:
         kind = SemanticConflictKind.CONFLICTING
-        order = None
+        decision_order = None
     elif len(orders) > 1:
         kind = SemanticConflictKind.CONFLICTING
-        order = None
+        decision_order = None
         evidence.append(
             SemanticConflictEvidence(
                 reason=SemanticConflictReason.MUTUAL_DEPENDENCY,
@@ -721,16 +726,16 @@ def classify_semantic_conflict(
         )
     elif SemanticConflictKind.UNKNOWN in pair_kinds:
         kind = SemanticConflictKind.UNKNOWN
-        order = None
+        decision_order = None
     elif SemanticConflictKind.ORDERED in pair_kinds:
         kind = SemanticConflictKind.ORDERED
-        order = next(iter(orders))
+        decision_order = next(iter(orders))
     elif SemanticConflictKind.COMMUTATIVE in pair_kinds:
         kind = SemanticConflictKind.COMMUTATIVE
-        order = None
+        decision_order = None
     else:
         kind = SemanticConflictKind.INDEPENDENT
-        order = None
+        decision_order = None
         evidence.append(
             SemanticConflictEvidence(
                 reason=SemanticConflictReason.DISJOINT_SEMANTIC_SURFACE,
@@ -750,7 +755,7 @@ def classify_semantic_conflict(
         left_id=left_id,
         right_id=right_id,
         kind=kind,
-        order=order,
+        order=decision_order,
         left_changes=tuple(item.identity for item in left),
         right_changes=tuple(item.identity for item in right),
         left_impact_fingerprint=left_impact.fingerprint,
