@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.20.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.21.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -423,6 +423,7 @@ installation.
 - Same-file Admission v2 that can admit unknown-region same-file work when graph-backed symbol mutations are proven `independent` or explicitly `commutative`, while preserving explicit deny/serialize policy and deterministic ordering for semantic producer-consumer dependencies;
 - Semantic Amendment Protocol v2 that requires monotonic scope growth, caps new authority and propagated impact, checks additional semantic resources against active intents inside the amendment transaction, and leaves ordered overlap explicit until refresh/resume can establish the required order;
 - Runtime Premise Fencing that atomically revokes live broker mutation authority when a tracked premise becomes stale, fails prepared operations, releases the writer lease, and persists source-bound fence evidence;
+- deterministic runtime pause/refresh/resume that keeps stale workers fenced, requires stale-causing producers to complete, re-admits the unchanged authority surface on a new pinned base, and requires an explicit resume before a fresh broker receives a higher fencing token;
 - shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, and promotes serialization constraints into effective dependencies;
 - a dynamic dependency scheduler that releases only admitted, prerequisite-complete work within current worker capacity and distinguishes runnable, active, retryable, terminal, and dependency-blocked items;
 - a deterministic merge queue that snapshots successful worker worktrees, integrates results on a Claim Plane-owned branch in effective-dependency order, blocks downstream workers until prerequisites are integrated, captures real Git conflicts, and leaves the user target branch untouched;
@@ -983,9 +984,10 @@ transaction as amendment admission.
 `independent` and explicitly proven `commutative` relationships may proceed. `conflicting`,
 `unknown`, unresolved dependency boundaries, non-monotonic changes, and exceeded bounds fail closed.
 An `ordered` relationship is surfaced as `order` rather than silently admitted. Runtime premise
-fencing can now revoke an active governed writer when its premise becomes stale, but the worker still
-needs refresh/rebase/resume under fresh authority before ordered expansion can be retried. The
-preflight evidence is persisted with the amendment audit event.
+fencing revokes an active governed writer when its premise becomes stale. Runtime recovery then
+requires the stale-causing producer to complete, preserves the worker's declared authority surface,
+re-admits it on a new pinned base, and requires an explicit resume before a fresh broker can start.
+The preflight and recovery evidence remain separately inspectable.
 
 ```python
 from claim_plane import SemanticAmendmentBounds
@@ -1047,9 +1049,21 @@ claim-plane --db .claim-plane/plane.db runtime-fences rate-limit-metrics
 claim-plane --db .claim-plane/plane.db ack-notice 1
 ```
 
-The stale state is now coupled to an enforceable broker capability fence. The agent process may still
-exist and reason, but its governed mutation path fails closed until a later refresh/resume lifecycle
-establishes fresh authority. This is not a distributed source-code lock.
+The stale state is coupled to an enforceable broker capability fence. The agent process may still
+exist and reason, but its governed mutation path fails closed. After the stale-causing producer has
+completed and its result has been integrated into a new pinned base, refresh the unchanged worker
+authority and resume it explicitly:
+
+```bash
+claim-plane --db .claim-plane/plane.db runtime-refresh refreshed-intent.json
+claim-plane --db .claim-plane/plane.db runtime-resume rate-limit-metrics
+claim-plane --db .claim-plane/plane.db runtime-recoveries rate-limit-metrics
+```
+
+`runtime-refresh` cannot add files, symbols, contracts, acceptance obligations, preserve requirements,
+or dependencies. Authority growth still goes through amendment admission. A restarted broker is
+registered only after resume and receives a fresh monotonic fencing token; the old broker remains
+fenced for audit. This is not a distributed source-code lock.
 
 ## Brokered execution boundary
 

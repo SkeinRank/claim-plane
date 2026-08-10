@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/runtime-recovery.schema.json",
+  "title": "Claim Plane Runtime Recovery v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "recovery_id",
+    "intent_id",
+    "state",
+    "from_base_commit",
+    "to_base_commit",
+    "old_content_version",
+    "new_content_version",
+    "old_fingerprint",
+    "new_fingerprint",
+    "fence_ids",
+    "producer_versions",
+    "created_at",
+    "resumed_at",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.runtime-recovery.v1"},
+    "recovery_id": {"type": "string", "pattern": "^recovery-[0-9a-f]{24}$"},
+    "intent_id": {"type": "string", "minLength": 1},
+    "state": {"enum": ["refreshed", "resumed"]},
+    "from_base_commit": {"type": ["string", "null"]},
+    "to_base_commit": {"type": "string", "pattern": "^[0-9a-fA-F]{40,64}$"},
+    "old_content_version": {"type": "integer", "minimum": 1},
+    "new_content_version": {"type": "integer", "minimum": 2},
+    "old_fingerprint": {"type": "string", "minLength": 1},
+    "new_fingerprint": {"type": "string", "minLength": 1},
+    "fence_ids": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^fence-[0-9a-f]{24}$"},
+      "uniqueItems": true
+    },
+    "producer_versions": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 1}
+    },
+    "created_at": {"type": "string", "minLength": 1},
+    "resumed_at": {"type": ["string", "null"]},
+    "metadata": {"type": "object"}
+  }
+}

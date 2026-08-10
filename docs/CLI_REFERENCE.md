@@ -129,7 +129,7 @@ Verbose mode preserves raw Codex runtime diagnostics in addition to the human su
 `--verbose` and `--json` are mutually exclusive. Redirected output is plain text, and
 interactive colour can be disabled with the standard `NO_COLOR` environment variable.
 
-## Runtime premise fences
+## Runtime premise fences and recovery
 
 Advanced coordination workflows can inspect durable execution fences created when a tracked premise becomes stale:
 
@@ -138,4 +138,21 @@ claim-plane --db .claim-plane/plane.db runtime-fences
 claim-plane --db .claim-plane/plane.db runtime-fences <intent-id>
 ```
 
-A fence means governed mutation authority has been revoked. It does not mean the worker has been refreshed or resumed; a later lifecycle transition must establish fresh authority before execution continues.
+A fence means governed mutation authority has been revoked. Operators may also pause one admitted or active intent explicitly:
+
+```bash
+claim-plane --db .claim-plane/plane.db runtime-pause <intent-id> \
+  --reason ordered_dependency \
+  --resource-key project.contract
+```
+
+A stale worker is recovered in two explicit transitions. First provide a refreshed ChangeIntent with the same declared authority surface and a new pinned `base_commit`; the stale-causing producer must already be completed. Then resume the refreshed intent:
+
+```bash
+claim-plane --db .claim-plane/plane.db runtime-refresh refreshed-intent.json \
+  --expected-version 4
+claim-plane --db .claim-plane/plane.db runtime-resume <intent-id>
+claim-plane --db .claim-plane/plane.db runtime-recoveries <intent-id>
+```
+
+Refresh re-evaluates admission and dependencies but cannot expand operations, acceptance, preserves, or dependencies. Ordinary activation and broker registration remain blocked while a successful refresh is waiting for `runtime-resume`. Any broker started after resume receives a fresh fencing token.

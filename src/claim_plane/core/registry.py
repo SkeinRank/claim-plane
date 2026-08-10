@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Iterator, Mapping
 
 from claim_plane.core.fencing import RuntimeFence
+from claim_plane.core.recovery import RuntimeRecovery, RuntimeRecoveryState
 
 from claim_plane.core.models import (
     AccessMode,
@@ -197,6 +198,21 @@ class ClaimRegistry:
                 ON runtime_fences(intent_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_runtime_fences_broker
                 ON runtime_fences(broker_instance_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS runtime_recoveries (
+                recovery_id TEXT PRIMARY KEY,
+                intent_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                from_base_commit TEXT,
+                to_base_commit TEXT NOT NULL,
+                old_content_version INTEGER NOT NULL,
+                new_content_version INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                resumed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_runtime_recoveries_intent
+                ON runtime_recoveries(intent_id, created_at);
 
             CREATE TABLE IF NOT EXISTS verification_reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -990,6 +1006,11 @@ class ClaimRegistry:
                 return decision
             changed_keys = sorted(_changed_resource_keys(old_intent, intent))
             now = _iso(_utc_now())
+            next_state = (
+                IntentState.STALE
+                if current_state is IntentState.STALE
+                else IntentState.ADMITTED
+            )
             self._conn.execute(
                 """
                 UPDATE intents SET task_id=?,base_revision=?,state=?,fingerprint=?,payload_json=?,
@@ -1000,7 +1021,7 @@ class ClaimRegistry:
                 (
                     intent.task_id,
                     intent.base_revision,
-                    IntentState.ADMITTED.value,
+                    next_state.value,
                     intent.fingerprint(),
                     json.dumps(intent.to_dict(), ensure_ascii=False, sort_keys=True),
                     json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True),
@@ -1026,6 +1047,7 @@ class ClaimRegistry:
                     "changed_resources": changed_keys,
                     "stale_dependents": stale,
                     "amendment_preflight": preflight_payload,
+                    "state": next_state.value,
                 },
             )
             return decision
@@ -1329,6 +1351,439 @@ class ClaimRegistry:
             result.append({**fence.to_dict(), "fingerprint": fence.fingerprint()})
         return result
 
+    def pause_intent_runtime(
+        self,
+        intent_id: str,
+        *,
+        reason: str = "manual",
+        resource_keys: Iterable[str] = (),
+    ) -> list[dict]:
+        """Pause one admitted/active intent by fencing all live mutation authority.
+
+        Premise invalidation already performs this transition automatically.  The
+        explicit primitive exists for operators and ordered-concurrency orchestration.
+        It is idempotent for an already-stale intent.
+        """
+
+        reason = str(reason).strip()
+        if not reason:
+            raise ValueError("runtime pause reason must not be empty")
+        keys = tuple(sorted({str(item).strip() for item in resource_keys if str(item).strip()}))
+        with self._immediate():
+            row = self._conn.execute(
+                "SELECT owner,state FROM intents WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown intent: {intent_id}")
+            state = IntentState(row["state"])
+            if state is IntentState.STALE:
+                rows = self._conn.execute(
+                    "SELECT payload_json FROM runtime_fences WHERE intent_id=? ORDER BY created_at,fence_id",
+                    (intent_id,),
+                ).fetchall()
+                return [
+                    {
+                        **RuntimeFence.from_dict(json.loads(item["payload_json"])).to_dict(),
+                        "fingerprint": RuntimeFence.from_dict(
+                            json.loads(item["payload_json"])
+                        ).fingerprint(),
+                    }
+                    for item in rows
+                ]
+            if state not in {IntentState.ADMITTED, IntentState.ACTIVE}:
+                raise ValueError(
+                    f"cannot pause runtime for intent {intent_id} in state {state.value}"
+                )
+            now = _iso(_utc_now())
+            self._conn.execute(
+                "UPDATE intents SET state=?,updated_at=?,version=version+1 WHERE intent_id=?",
+                (IntentState.STALE.value, now, intent_id),
+            )
+            fences = self._fence_intent_runtime_locked(
+                intent_id,
+                producer_intent_id=None,
+                reason=reason,
+                resource_keys=keys,
+                dependency_chain=(intent_id,),
+            )
+            self._event_locked(
+                "intent_runtime_paused",
+                intent_id,
+                row["owner"],
+                {
+                    "reason": reason,
+                    "resource_keys": list(keys),
+                    "runtime_fence_ids": [item.fence_id for item in fences],
+                },
+            )
+            return [
+                {**item.to_dict(), "fingerprint": item.fingerprint()} for item in fences
+            ]
+
+    def runtime_recoveries(self, intent_id: str | None = None) -> list[dict]:
+        if intent_id is None:
+            rows = self._conn.execute(
+                "SELECT payload_json FROM runtime_recoveries ORDER BY created_at,recovery_id"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT payload_json FROM runtime_recoveries "
+                "WHERE intent_id=? ORDER BY created_at,recovery_id",
+                (intent_id,),
+            ).fetchall()
+        result: list[dict] = []
+        for row in rows:
+            recovery = RuntimeRecovery.from_dict(json.loads(row["payload_json"]))
+            result.append({**recovery.to_dict(), "fingerprint": recovery.fingerprint()})
+        return result
+
+    @staticmethod
+    def _refresh_authority_surface(intent: ChangeIntent) -> dict[str, object]:
+        """Return fields that a runtime refresh is forbidden to change."""
+
+        return {
+            "task_id": intent.task_id,
+            "owner": intent.owner,
+            "operations": [item.to_dict() for item in intent.operations],
+            "preserves": list(intent.preserves),
+            "acceptance": list(intent.acceptance),
+            "dependencies": list(intent.dependencies),
+        }
+
+    def refresh_stale_intent(
+        self,
+        intent: ChangeIntent,
+        evaluator: Callable[
+            [ChangeIntent, list[ChangeIntent], set[str]], AdmissionDecision
+        ],
+        *,
+        expected_version: int | None = None,
+    ) -> tuple[AdmissionDecision, RuntimeRecovery | None]:
+        """Refresh a fenced stale intent against a new pinned base and re-admit it.
+
+        Refresh is intentionally authority-preserving.  Scope or contract changes must
+        use amendment admission first; a refresh may only move the execution premise to
+        a new base revision/commit and update non-authority intent metadata.
+        """
+
+        with self._immediate():
+            self._expire_intents_locked()
+            row = self._conn.execute(
+                "SELECT * FROM intents WHERE intent_id=?", (intent.intent_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown intent: {intent.intent_id}")
+            current_state = IntentState(row["state"])
+            if current_state is not IntentState.STALE:
+                raise ValueError(
+                    f"runtime refresh requires stale intent; {intent.intent_id} is {current_state.value}"
+                )
+            if row["owner"] != intent.owner:
+                raise ValueError("intent owner cannot change during runtime refresh")
+            if expected_version is not None and int(row["version"]) != expected_version:
+                raise ValueError(
+                    f"stale intent version: expected {expected_version}, current {row['version']}"
+                )
+            old_intent = ChangeIntent.from_dict(json.loads(row["payload_json"]))
+            if self._refresh_authority_surface(old_intent) != self._refresh_authority_surface(intent):
+                raise ValueError(
+                    "runtime refresh cannot change declared authority, acceptance, preserves, or dependencies; use amendment admission first"
+                )
+            if intent.base_commit is None:
+                raise ValueError("runtime refresh requires a pinned base_commit")
+            if old_intent.base_commit == intent.base_commit:
+                raise ValueError("runtime refresh requires a new base_commit")
+
+            active_brokers = self._conn.execute(
+                "SELECT instance_id FROM broker_instances WHERE intent_id=? AND state='active' ORDER BY instance_id",
+                (intent.intent_id,),
+            ).fetchall()
+            if active_brokers:
+                raise ValueError(
+                    "runtime refresh requires all prior broker writers to be fenced"
+                )
+            fence_rows = self._conn.execute(
+                "SELECT payload_json FROM runtime_fences WHERE intent_id=? ORDER BY created_at,fence_id",
+                (intent.intent_id,),
+            ).fetchall()
+            if not fence_rows:
+                raise ValueError(
+                    "runtime refresh requires durable runtime-fence evidence"
+                )
+            fences = [RuntimeFence.from_dict(json.loads(item["payload_json"])) for item in fence_rows]
+
+            producer_versions: dict[str, int] = {}
+            fence_producers = sorted(
+                {
+                    item.producer_intent_id
+                    for item in fences
+                    if item.producer_intent_id is not None
+                }
+            )
+            incomplete_producers: list[str] = []
+            for producer_id in fence_producers:
+                producer = self._conn.execute(
+                    "SELECT state,content_version FROM intents WHERE intent_id=?",
+                    (producer_id,),
+                ).fetchone()
+                if producer is None or producer["state"] != IntentState.COMPLETED.value:
+                    incomplete_producers.append(producer_id)
+                    continue
+                producer_versions[producer_id] = int(producer["content_version"])
+            if incomplete_producers:
+                unique = ", ".join(incomplete_producers)
+                decision = AdmissionDecision(
+                    kind=AdmissionKind.REPLAN,
+                    intent=intent,
+                    allowed=False,
+                    guidance=(
+                        "runtime refresh requires stale-causing producers to complete before rebasing: "
+                        + unique
+                    ),
+                )
+                self._event_locked(
+                    "intent_runtime_refresh_rejected",
+                    intent.intent_id,
+                    intent.owner,
+                    {
+                        "decision": decision.to_dict(),
+                        "incomplete_producers": incomplete_producers,
+                    },
+                )
+                return decision, None
+
+            dependency_rows = self._conn.execute(
+                "SELECT depends_on_intent_id,status FROM intent_dependencies WHERE intent_id=? ORDER BY depends_on_intent_id,dependency_kind,resource_key",
+                (intent.intent_id,),
+            ).fetchall()
+            unresolved: list[str] = []
+            for dependency in dependency_rows:
+                producer_id = str(dependency["depends_on_intent_id"])
+                producer = self._conn.execute(
+                    "SELECT state,content_version FROM intents WHERE intent_id=?",
+                    (producer_id,),
+                ).fetchone()
+                if producer is None or producer["state"] not in {
+                    IntentState.ADMITTED.value,
+                    IntentState.ACTIVE.value,
+                    IntentState.COMPLETED.value,
+                }:
+                    unresolved.append(producer_id)
+                    continue
+                producer_versions[producer_id] = int(producer["content_version"])
+            if unresolved:
+                unique = ", ".join(sorted(set(unresolved)))
+                decision = AdmissionDecision(
+                    kind=AdmissionKind.REPLAN,
+                    intent=intent,
+                    allowed=False,
+                    guidance=(
+                        "runtime refresh is blocked until stale/missing producers are refreshed: "
+                        + unique
+                    ),
+                )
+                self._event_locked(
+                    "intent_runtime_refresh_rejected",
+                    intent.intent_id,
+                    intent.owner,
+                    {"decision": decision.to_dict(), "unresolved_producers": sorted(set(unresolved))},
+                )
+                return decision, None
+
+            active = self._active_intents_locked(exclude=intent.intent_id)
+            decision = evaluator(
+                intent, active, self._known_intent_ids_locked() | {intent.intent_id}
+            )
+            if decision.allowed:
+                cycle = self._dependency_cycle_locked(intent, decision)
+                if cycle:
+                    decision = _cycle_rejection(intent, decision, cycle)
+            if not decision.allowed:
+                self._event_locked(
+                    "intent_runtime_refresh_rejected",
+                    intent.intent_id,
+                    intent.owner,
+                    {"decision": decision.to_dict()},
+                )
+                return decision, None
+
+            old_content_version = int(row["content_version"])
+            new_content_version = old_content_version + 1
+            now = _iso(_utc_now())
+            self._conn.execute(
+                """
+                UPDATE intents SET task_id=?,base_revision=?,state=?,fingerprint=?,payload_json=?,
+                    admission_json=?,updated_at=?,lease_expires_at=?,version=version+1,
+                    content_version=content_version+1
+                WHERE intent_id=?
+                """,
+                (
+                    intent.task_id,
+                    intent.base_revision,
+                    IntentState.ADMITTED.value,
+                    intent.fingerprint(),
+                    json.dumps(intent.to_dict(), ensure_ascii=False, sort_keys=True),
+                    json.dumps(decision.to_dict(), ensure_ascii=False, sort_keys=True),
+                    now,
+                    _future(intent.lease_seconds),
+                    intent.intent_id,
+                ),
+            )
+            self._replace_dependency_edges_locked(intent, decision)
+            bad_dependencies = self._conn.execute(
+                "SELECT depends_on_intent_id,status FROM intent_dependencies WHERE intent_id=? AND status<>'active' ORDER BY depends_on_intent_id",
+                (intent.intent_id,),
+            ).fetchall()
+            if bad_dependencies:
+                raise ValueError(
+                    "runtime refresh produced unresolved dependency state; retry after producers are healthy"
+                )
+
+            seed = json.dumps(
+                {
+                    "intent_id": intent.intent_id,
+                    "old_content_version": old_content_version,
+                    "new_content_version": new_content_version,
+                    "to_base_commit": intent.base_commit,
+                    "created_at": now,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            recovery_id = "recovery-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+            recovery = RuntimeRecovery(
+                recovery_id=recovery_id,
+                intent_id=intent.intent_id,
+                state=RuntimeRecoveryState.REFRESHED,
+                from_base_commit=old_intent.base_commit,
+                to_base_commit=intent.base_commit,
+                old_content_version=old_content_version,
+                new_content_version=new_content_version,
+                old_fingerprint=str(row["fingerprint"]),
+                new_fingerprint=intent.fingerprint(),
+                fence_ids=tuple(item.fence_id for item in fences),
+                producer_versions=producer_versions,
+                created_at=now,
+                metadata={
+                    "authority_preserved": True,
+                    "requires_fresh_broker": True,
+                    "prior_broker_instance_ids": sorted(
+                        {
+                            item.broker_instance_id
+                            for item in fences
+                            if item.broker_instance_id is not None
+                        }
+                    ),
+                },
+            )
+            self._conn.execute(
+                """
+                INSERT INTO runtime_recoveries
+                  (recovery_id,intent_id,state,from_base_commit,to_base_commit,
+                   old_content_version,new_content_version,payload_json,created_at,resumed_at)
+                VALUES (?,?,?,?,?,?,?,?,?,NULL)
+                """,
+                (
+                    recovery.recovery_id,
+                    recovery.intent_id,
+                    recovery.state.value,
+                    recovery.from_base_commit,
+                    recovery.to_base_commit,
+                    recovery.old_content_version,
+                    recovery.new_content_version,
+                    json.dumps(recovery.to_dict(), ensure_ascii=False, sort_keys=True),
+                    recovery.created_at,
+                ),
+            )
+            self._event_locked(
+                "intent_runtime_refreshed",
+                intent.intent_id,
+                intent.owner,
+                {
+                    "recovery": recovery.to_dict(),
+                    "decision": decision.to_dict(),
+                },
+            )
+            return decision, recovery
+
+    def resume_refreshed_intent(
+        self, intent_id: str, *, expected_version: int | None = None
+    ) -> RuntimeRecovery:
+        """Resume a successfully refreshed intent after dependency checks pass."""
+
+        with self._immediate():
+            row = self._conn.execute(
+                "SELECT * FROM intents WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown intent: {intent_id}")
+            if IntentState(row["state"]) is not IntentState.ADMITTED:
+                raise ValueError(
+                    f"runtime resume requires refreshed admitted intent; {intent_id} is {row['state']}"
+                )
+            if expected_version is not None and int(row["version"]) != expected_version:
+                raise ValueError(
+                    f"stale intent version: expected {expected_version}, current {row['version']}"
+                )
+            recovery_row = self._conn.execute(
+                "SELECT * FROM runtime_recoveries WHERE intent_id=? "
+                "ORDER BY created_at DESC,recovery_id DESC LIMIT 1",
+                (intent_id,),
+            ).fetchone()
+            if (
+                recovery_row is None
+                or recovery_row["state"] != RuntimeRecoveryState.REFRESHED.value
+            ):
+                raise ValueError("runtime resume requires a successful runtime refresh")
+            recovery = RuntimeRecovery.from_dict(json.loads(recovery_row["payload_json"]))
+            if int(row["content_version"]) != recovery.new_content_version:
+                raise ValueError("refreshed intent content changed before runtime resume")
+            if str(row["fingerprint"]) != recovery.new_fingerprint:
+                raise ValueError("refreshed intent fingerprint changed before runtime resume")
+            bad_dependencies = self._conn.execute(
+                "SELECT depends_on_intent_id,status FROM intent_dependencies WHERE intent_id=? AND status<>'active' ORDER BY depends_on_intent_id",
+                (intent_id,),
+            ).fetchall()
+            if bad_dependencies:
+                raise ValueError(
+                    "runtime resume blocked by unresolved dependency state"
+                )
+            active_broker = self._conn.execute(
+                "SELECT instance_id FROM broker_instances WHERE intent_id=? AND state='active' LIMIT 1",
+                (intent_id,),
+            ).fetchone()
+            if active_broker is not None:
+                raise ValueError(
+                    "runtime resume requires a fresh broker to be registered after resume"
+                )
+            now = _iso(_utc_now())
+            resumed = replace(
+                recovery,
+                state=RuntimeRecoveryState.RESUMED,
+                resumed_at=now,
+            )
+            self._conn.execute(
+                "UPDATE intents SET state=?,updated_at=?,version=version+1 WHERE intent_id=?",
+                (IntentState.ACTIVE.value, now, intent_id),
+            )
+            self._conn.execute(
+                "UPDATE runtime_recoveries SET state=?,payload_json=?,resumed_at=? WHERE recovery_id=?",
+                (
+                    resumed.state.value,
+                    json.dumps(resumed.to_dict(), ensure_ascii=False, sort_keys=True),
+                    now,
+                    resumed.recovery_id,
+                ),
+            )
+            self._event_locked(
+                "intent_runtime_resumed",
+                intent_id,
+                row["owner"],
+                {"recovery": resumed.to_dict(), "fresh_broker_required": True},
+            )
+            return resumed
+
     def invalidate_dependents(
         self, producer_intent_id: str, resource_keys: list[str], *, reason: str
     ) -> list[str]:
@@ -1595,6 +2050,19 @@ class ClaimRegistry:
                 raise ValueError(
                     f"cannot move intent {intent_id} from {current.value} to {state.value}"
                 )
+            if state is IntentState.ACTIVE:
+                latest_recovery = self._conn.execute(
+                    "SELECT state FROM runtime_recoveries "
+                    "WHERE intent_id=? ORDER BY created_at DESC,recovery_id DESC LIMIT 1",
+                    (intent_id,),
+                ).fetchone()
+                if (
+                    latest_recovery is not None
+                    and latest_recovery["state"] == RuntimeRecoveryState.REFRESHED.value
+                ):
+                    raise ValueError(
+                        "runtime-refreshed intent must resume through the runtime recovery lifecycle"
+                    )
             self._conn.execute(
                 "UPDATE intents SET state=?,updated_at=?,version=version+1 WHERE intent_id=?",
                 (state.value, _iso(_utc_now()), intent_id),
@@ -2144,6 +2612,18 @@ class ClaimRegistry:
             }:
                 raise ValueError(
                     f"broker requires admitted or active intent; {intent_id} is {intent_row['state']}"
+                )
+            latest_recovery = self._conn.execute(
+                "SELECT state FROM runtime_recoveries "
+                "WHERE intent_id=? ORDER BY created_at DESC,recovery_id DESC LIMIT 1",
+                (intent_id,),
+            ).fetchone()
+            if (
+                latest_recovery is not None
+                and latest_recovery["state"] == RuntimeRecoveryState.REFRESHED.value
+            ):
+                raise ValueError(
+                    "runtime-refreshed intent must resume before a fresh broker is registered"
                 )
             intent = ChangeIntent.from_dict(json.loads(intent_row["payload_json"]))
             if intent.base_commit != base_commit:
@@ -2993,6 +3473,7 @@ class ClaimRegistry:
                 )
             ],
             "runtime_fences": self.runtime_fences(),
+            "runtime_recoveries": self.runtime_recoveries(),
             "observation_sessions": [
                 self.observation_session(row["session_id"])
                 for row in self._conn.execute(

@@ -20,6 +20,7 @@ from claim_plane.core.models import (
     ObservedAccess,
     Verdict,
 )
+from claim_plane.core.recovery import RuntimeRecovery
 from claim_plane.core.registry import ClaimRegistry
 
 AdmissionEvaluator = Callable[
@@ -105,6 +106,30 @@ class IntentStore(Protocol):
     def coordination_events(self) -> list[dict[str, Any]]: ...
 
     def runtime_fences(self, intent_id: str | None = None) -> list[dict[str, Any]]: ...
+
+    def pause_intent_runtime(
+        self,
+        intent_id: str,
+        *,
+        reason: str = "manual",
+        resource_keys: Iterable[str] = (),
+    ) -> list[dict[str, Any]]: ...
+
+    def refresh_stale_intent(
+        self,
+        intent: ChangeIntent,
+        evaluator: AdmissionEvaluator,
+        *,
+        expected_version: int | None = None,
+    ) -> tuple[AdmissionDecision, RuntimeRecovery | None]: ...
+
+    def resume_refreshed_intent(
+        self, intent_id: str, *, expected_version: int | None = None
+    ) -> RuntimeRecovery: ...
+
+    def runtime_recoveries(
+        self, intent_id: str | None = None
+    ) -> list[dict[str, Any]]: ...
 
 
 class ObservationStore(Protocol):
@@ -260,6 +285,10 @@ PLANE_STORE_METHODS = (
     "complete_intent",
     "coordination_events",
     "runtime_fences",
+    "runtime_recoveries",
+    "pause_intent_runtime",
+    "refresh_stale_intent",
+    "resume_refreshed_intent",
     "decision_log",
     "dependency_graph",
     "export_audit",

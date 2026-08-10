@@ -81,6 +81,10 @@ recorded but not granted until a runtime layer can establish the required execut
 
 Existing runtime intent ordering, stale-state propagation, Git hunk verification, and brokered
 mutation enforcement remain the authoritative execution controls. When a tracked premise is
-invalidated, Claim Plane now fences any active governed broker in the same registry transaction,
-fails its prepared operations, releases its writer lease, and records durable runtime-fence evidence.
-Fencing does not imply automatic refresh or resume.
+invalidated, Claim Plane fences any active governed broker in the same registry transaction, fails
+its prepared operations, releases its writer lease, and records durable runtime-fence evidence.
+Recovery is a distinct deterministic transition: stale-causing producers must be completed, the
+refreshed intent must preserve its authority surface and pin a new base commit, admission and
+dependencies are re-evaluated, and explicit resume is required before a replacement broker may
+start with a fresh fencing token. The control plane records this lifecycle; it does not claim that the
+new Git base contains a semantically correct implementation of the producer result.

@@ -205,21 +205,24 @@ Allowed decisions enter the admitted lifecycle. Rejected decisions are retained 
 ## Intent states
 
 ```text
-blocked ── retry/re-evaluate ──→ admitted
-admitted → active → completed
-    │         │
-    ├─────────┴→ released
-    │
-    └→ stale → amended/re-admitted
+blocked ── retry/re-evaluate ──→ admitted → active → completed
+                                    │         │
+                                    ├─────────┴→ released
+                                    │
+                                    └→ stale ── refresh(new pinned base) ──→ admitted
+                                               └─ amendment may update declaration
+                                                  but does not revive execution
+
+refreshed admitted ── explicit runtime resume ──→ active
 ```
 
-Expired leases are excluded from active arbitration. A stale intent represents work whose premise changed after admission. `completed` is the successful terminal state and no longer participates in active arbitration. `released` represents abandoned or explicitly relinquished work. Calling release after completion is a safe no-op so generic cleanup code does not erase successful lifecycle history.
+Expired leases are excluded from active arbitration. A stale intent represents work whose premise changed after admission. Runtime fencing removes live mutation authority before recovery begins. An amendment may repair the stale declaration but leaves the intent stale. Runtime refresh preserves the declared authority surface, requires a new pinned base, re-evaluates admission and dependencies, and records `claim-plane.runtime-recovery.v1` evidence. Ordinary activation and broker registration remain blocked until explicit runtime resume. `completed` is the successful terminal state and no longer participates in active arbitration. `released` represents abandoned or explicitly relinquished work. Calling release after completion is a safe no-op so generic cleanup code does not erase successful lifecycle history.
 
 ## Amendments
 
 An amendment uses the same `intent_id` and an optional `expected_version`. The registry evaluates the amended intent against the current active set in one transaction. A successful amendment creates a new version. A failed amendment leaves the previous version unchanged.
 
-Producer contract changes may invalidate dependents. Claim Plane rejects cycles before commit, keeps the first invalidation hop resource-scoped, and propagates stale state transitively after an affected consumer becomes an untrusted producer.
+Producer contract changes may invalidate dependents. Claim Plane rejects cycles before commit, keeps the first invalidation hop resource-scoped, and propagates stale state transitively after an affected consumer becomes an untrusted producer. Recovery requires each stale-causing producer recorded by the runtime fence to reach `completed` before the dependent can be refreshed. The recovery record binds prior fence IDs, producer content versions, old/new intent content versions, and the new pinned base commit. A replacement broker is created only after resume and therefore receives a newer fencing token than any fenced predecessor.
 
 ## Coordination notices
 

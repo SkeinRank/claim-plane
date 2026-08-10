@@ -2972,6 +2972,58 @@ def cmd_runtime_fences(args: argparse.Namespace) -> int:
         plane.close()
 
 
+def cmd_runtime_pause(args: argparse.Namespace) -> int:
+    plane = _plane(args)
+    try:
+        payload = plane.pause_runtime(
+            args.intent_id,
+            reason=args.reason,
+            resource_keys=tuple(args.resource_key or ()),
+        )
+        _write_json(payload, args.out)
+        return 0
+    finally:
+        plane.close()
+
+
+def cmd_runtime_refresh(args: argparse.Namespace) -> int:
+    intent = ChangeIntent.from_dict(_read_json(args.intent))
+    plane = _plane(args)
+    try:
+        decision, recovery = plane.refresh_runtime(
+            intent, expected_version=args.expected_version
+        )
+        payload = {
+            "decision": decision.to_dict(),
+            "recovery": None if recovery is None else recovery.to_dict(),
+        }
+        _write_json(payload, args.out)
+        return 0 if decision.allowed and recovery is not None else 2
+    finally:
+        plane.close()
+
+
+def cmd_runtime_resume(args: argparse.Namespace) -> int:
+    plane = _plane(args)
+    try:
+        recovery = plane.resume_runtime(
+            args.intent_id, expected_version=args.expected_version
+        )
+        _write_json(recovery.to_dict(), args.out)
+        return 0
+    finally:
+        plane.close()
+
+
+def cmd_runtime_recoveries(args: argparse.Namespace) -> int:
+    plane = _plane(args)
+    try:
+        _write_json(plane.runtime_recoveries(args.intent_id), args.out)
+        return 0
+    finally:
+        plane.close()
+
+
 def cmd_ack_notice(args: argparse.Namespace) -> int:
     plane = _plane(args)
     try:
@@ -4479,6 +4531,42 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_fences.add_argument("intent_id", nargs="?")
     runtime_fences.add_argument("--out")
     runtime_fences.set_defaults(func=cmd_runtime_fences)
+
+    runtime_pause = sub.add_parser(
+        "runtime-pause",
+        help="Pause one intent and revoke its live mutation authority.",
+    )
+    runtime_pause.add_argument("intent_id")
+    runtime_pause.add_argument("--reason", default="manual")
+    runtime_pause.add_argument("--resource-key", action="append")
+    runtime_pause.add_argument("--out")
+    runtime_pause.set_defaults(func=cmd_runtime_pause)
+
+    runtime_refresh = sub.add_parser(
+        "runtime-refresh",
+        help="Refresh a stale intent on a new pinned base without expanding authority.",
+    )
+    runtime_refresh.add_argument("intent", help="Path to refreshed ChangeIntent JSON.")
+    runtime_refresh.add_argument("--expected-version", type=int)
+    runtime_refresh.add_argument("--out")
+    runtime_refresh.set_defaults(func=cmd_runtime_refresh)
+
+    runtime_resume = sub.add_parser(
+        "runtime-resume",
+        help="Resume a refreshed intent before starting a fresh broker.",
+    )
+    runtime_resume.add_argument("intent_id")
+    runtime_resume.add_argument("--expected-version", type=int)
+    runtime_resume.add_argument("--out")
+    runtime_resume.set_defaults(func=cmd_runtime_resume)
+
+    runtime_recoveries = sub.add_parser(
+        "runtime-recoveries",
+        help="Show durable runtime refresh/resume evidence.",
+    )
+    runtime_recoveries.add_argument("intent_id", nargs="?")
+    runtime_recoveries.add_argument("--out")
+    runtime_recoveries.set_defaults(func=cmd_runtime_recoveries)
 
     ack_notice = sub.add_parser(
         "ack-notice", help="Acknowledge one coordination notice."

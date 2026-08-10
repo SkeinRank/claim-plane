@@ -58,9 +58,10 @@ mutation authority, projects that authority onto the semantic graph, propagates 
 and enforces hard breadth limits. The same transaction compares the new surface with active intents.
 Independent or explicitly commutative relationships may proceed; conflicts and unknown relationships
 fail closed. Ordered overlap is returned as an ordering requirement rather than approved. Runtime
-premise fencing now provides the execution primitive that can revoke an already active writer, while
-refresh/rebase/resume orchestration remains a separate lifecycle step before ordered expansion can be
-committed automatically.
+premise fencing revokes an already active writer when its premise becomes stale. Runtime recovery
+then requires stale-causing producers to complete, re-admits the unchanged authority surface on a
+new pinned base, and requires an explicit resume before a new broker can acquire a fresh fencing
+token.
 
 ### Dependency graph
 
@@ -74,7 +75,7 @@ Invalidation is deliberately asymmetric:
 4. Once stale, all outputs from that consumer are untrusted.
 5. Staleness therefore propagates transitively to downstream consumers, which receive their own durable fence evidence.
 
-Every notice records the root producer, direct producer, depth, dependency chain, changed resource keys, and runtime-fence identifiers. A stale dependency is unavailable in worker context even when its previous intent payload remains inspectable. Fencing revokes mutation authority; it does not itself refresh or resume the worker.
+Every notice records the root producer, direct producer, depth, dependency chain, changed resource keys, and runtime-fence identifiers. A stale dependency is unavailable in worker context even when its previous intent payload remains inspectable. Fencing revokes mutation authority. A recovery record separately binds the prior fences, old and new content versions, stale-causing producer versions, and the refreshed base commit. The recovered intent cannot be activated through the ordinary path until the explicit resume transition is recorded.
 
 ### Execution boundary
 

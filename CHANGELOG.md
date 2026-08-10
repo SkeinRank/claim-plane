@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.21] — 2026-08-10
+
+### Added
+
+- add deterministic runtime pause, refresh, and resume for stale intents, keeping live mutation authority fenced until the worker is re-admitted on a new pinned base;
+- require stale-causing producers to complete before refresh, preserve the declared authority surface, re-evaluate active conflicts and dependencies, and persist versioned recovery evidence with producer content versions and prior fence identifiers;
+- require the dedicated resume transition before activation or broker registration, then issue any restarted broker a fresh monotonic fencing token while retaining the old fenced instance for audit.
+
 ## [0.37.20] — 2026-08-10
 
 ### Added

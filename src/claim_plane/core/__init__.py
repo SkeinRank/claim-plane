@@ -26,6 +26,11 @@ from claim_plane.core.fencing import (
     RuntimeFence,
     RuntimeFenceReason,
 )
+from claim_plane.core.recovery import (
+    RUNTIME_RECOVERY_PROTOCOL,
+    RuntimeRecovery,
+    RuntimeRecoveryState,
+)
 from claim_plane.core.governance import GovernancePolicy
 from claim_plane.core.dependency_graph import (
     SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL,
@@ -167,6 +172,9 @@ __all__ = [
     "RUNTIME_FENCE_PROTOCOL",
     "RuntimeFence",
     "RuntimeFenceReason",
+    "RUNTIME_RECOVERY_PROTOCOL",
+    "RuntimeRecovery",
+    "RuntimeRecoveryState",
     "GovernancePolicy",
     "IntegrationFinding",
     "IntegrationReport",

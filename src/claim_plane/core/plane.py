@@ -16,6 +16,7 @@ from claim_plane.core.amendment import (
     assess_semantic_amendment,
 )
 from claim_plane.core.dependency_graph import SemanticDependencyGraph
+from claim_plane.core.recovery import RuntimeRecovery
 from claim_plane.core.models import (
     AdmissionDecision,
     ChangeIntent,
@@ -199,9 +200,9 @@ class Plane:
         """Atomically gate an amendment through semantic bounds and active work.
 
         The semantic preflight runs inside the same registry transaction as ordinary
-        amendment admission.  Ordered overlap is deliberately not auto-approved yet:
-        the next runtime-fencing layer must establish the required execution order
-        before the blocked mutation is retried.
+        amendment admission. Ordered overlap is deliberately not auto-approved by
+        scope expansion alone: runtime pause/refresh/resume must establish a fresh
+        execution premise before the blocked mutation is retried.
         """
 
         enriched = self._semantic.enrich_intent(self._govern_intent(intent))
@@ -323,6 +324,48 @@ class Plane:
         """Return durable runtime-authority fences, optionally for one intent."""
 
         return self._registry.runtime_fences(intent_id)
+
+    def pause_runtime(
+        self,
+        intent_id: str,
+        *,
+        reason: str = "manual",
+        resource_keys: Iterable[str] = (),
+    ) -> list[dict]:
+        """Pause an admitted/active intent and revoke live mutation authority."""
+
+        return self._registry.pause_intent_runtime(
+            intent_id, reason=reason, resource_keys=tuple(resource_keys)
+        )
+
+    def refresh_runtime(
+        self,
+        intent: ChangeIntent,
+        *,
+        expected_version: int | None = None,
+    ) -> tuple[AdmissionDecision, RuntimeRecovery | None]:
+        """Re-admit a stale intent on a new pinned base without expanding authority."""
+
+        enriched = self._semantic.enrich_intent(self._govern_intent(intent))
+        return self._registry.refresh_stale_intent(
+            enriched,
+            self._admission.evaluate,
+            expected_version=expected_version,
+        )
+
+    def resume_runtime(
+        self, intent_id: str, *, expected_version: int | None = None
+    ) -> RuntimeRecovery:
+        """Resume a refreshed intent; a newly registered broker then gets a fresh token."""
+
+        return self._registry.resume_refreshed_intent(
+            intent_id, expected_version=expected_version
+        )
+
+    def runtime_recoveries(self, intent_id: str | None = None) -> list[dict]:
+        """Return durable refresh/resume evidence, optionally for one intent."""
+
+        return self._registry.runtime_recoveries(intent_id)
 
     # ------------------------------------------------ trusted observation sessions
 

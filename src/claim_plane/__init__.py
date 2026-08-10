@@ -105,6 +105,9 @@ from claim_plane.core import (
     RUNTIME_FENCE_PROTOCOL,
     RuntimeFence,
     RuntimeFenceReason,
+    RUNTIME_RECOVERY_PROTOCOL,
+    RuntimeRecovery,
+    RuntimeRecoveryState,
     SEMANTIC_AMENDMENT_PROTOCOL,
     ActiveAmendmentRelation,
     SemanticAmendmentAssessment,
@@ -377,12 +380,15 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.20"
+__version__ = "0.37.21"
 
 __all__ = [
     "RUNTIME_FENCE_PROTOCOL",
     "RuntimeFence",
     "RuntimeFenceReason",
+    "RUNTIME_RECOVERY_PROTOCOL",
+    "RuntimeRecovery",
+    "RuntimeRecoveryState",
     "SEMANTIC_AMENDMENT_PROTOCOL",
     "ActiveAmendmentRelation",
     "SemanticAmendmentAssessment",
