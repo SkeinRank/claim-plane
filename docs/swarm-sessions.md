@@ -320,6 +320,17 @@ The snapshot is then replayed with `git cherry-pick --no-commit`. Claim Plane re
 
 If Git itself reports a conflict, or either deterministic integration check rejects the result, the replay is aborted, the integration worktree is reset to the previous durable head, evidence is stored on the queue entry, and the queue enters `conflict`. This makes the real repository result authoritative over the planner's concurrency estimate.
 
+The bounded integration rescue protocol can then classify that durable conflict. `retry_snapshot` is reserved for transient integration failures and reuses the already captured immutable source commit. `serial_rerun` is available for textual conflicts and stale ordered dependencies: Claim Plane resets only the managed worker worktree to the current integration head, records the previous successful run as superseded for scheduling, and makes the work item runnable again. The old run is never deleted or rewritten and still counts toward launch, token, wall-time, and audit totals. `replan_required` leaves semantic ambiguity closed for an explicit graph/admission update, while `manual` is used for authority violations, staged semantic drift, or exhausted repair budgets. The operator may continue automatically only after a prepared bounded action; otherwise it stops for attention.
+
+The operator commands are:
+
+```bash
+claim-plane swarm rescue <session-id>
+claim-plane swarm rescues <session-id>
+```
+
+`retries.max_repairs_per_work_item` bounds all prepared integration repair attempts. No rescue action mutates the configured target branch.
+
 When a work item has effective dependencies, its clean managed worktree is advanced to the current integration head before Codex starts. The recorded execution base therefore contains integrated prerequisite changes. Dirty dependent worktrees and non-ancestor integration heads fail closed rather than losing local work.
 
 Queue entry states are `pending`, `blocked`, `ready`, `integrating`, `integrated`, and `conflict`. Queue status is `waiting`, `ready`, `integrating`, `conflict`, or `completed`. `integrated` means only that Git composition succeeded on the managed branch; swarm verification and final target publication remain later stages.

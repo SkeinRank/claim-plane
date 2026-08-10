@@ -1022,6 +1022,88 @@ class SwarmSessionStore:
             self._connection.rollback()
             raise
 
+    def apply_merge_rescue(
+        self,
+        session_id: str,
+        work_id: str,
+        *,
+        replacement_state: MergeEntryState,
+        preserve_source_commit: bool,
+        event_payload: dict[str, Any],
+        expected_queue_fingerprint: str,
+        detail: str,
+        updated_at: str,
+    ) -> tuple[DeterministicMergeQueue, int]:
+        """Atomically reopen one conflict and persist its rescue evidence."""
+
+        if replacement_state not in {MergeEntryState.PENDING, MergeEntryState.READY}:
+            raise ValueError("integration rescue may reopen only as pending or ready")
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            stored = self.get_merge_queue(session_id)
+            if stored is None:
+                raise ValueError("swarm session has no deterministic merge queue")
+            queue, version = stored
+            if queue.fingerprint() != expected_queue_fingerprint:
+                raise ValueError("merge queue changed before integration rescue")
+            current = queue.entry_map.get(work_id)
+            if current is None or current.state is not MergeEntryState.CONFLICT:
+                raise ValueError("integration rescue requires a conflicted merge entry")
+            reopened = MergeQueueEntry(
+                work_id=current.work_id,
+                order=current.order,
+                effective_dependencies=current.effective_dependencies,
+                source_branch=current.source_branch,
+                state=replacement_state,
+                run_id=current.run_id if replacement_state is MergeEntryState.READY else None,
+                source_commit=(
+                    current.source_commit
+                    if preserve_source_commit and replacement_state is MergeEntryState.READY
+                    else None
+                ),
+                integration_commit=None,
+                conflict_paths=(),
+                integration_evidence=None,
+                detail=detail,
+            )
+            updated = queue.with_entry(
+                reopened, integration_head=queue.integration_head, updated_at=updated_at
+            )
+            raw = json.dumps(
+                event_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            self._connection.execute(
+                "INSERT INTO swarm_recovery_events "
+                "(event_id, session_id, action, run_id, work_id, payload_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event_payload["event_id"],
+                    event_payload["session_id"],
+                    event_payload["action"],
+                    event_payload.get("run_id"),
+                    event_payload.get("work_id"),
+                    raw,
+                    event_payload["created_at"],
+                ),
+            )
+            self._connection.execute(
+                "UPDATE swarm_merge_queues SET queue_version = ?, queue_fingerprint = ?, "
+                "status = ?, payload_json = ?, updated_at = ? WHERE session_id = ?",
+                (
+                    version + 1,
+                    updated.fingerprint(),
+                    updated.status.value,
+                    self._merge_queue_payload(updated),
+                    updated_at,
+                    session_id,
+                ),
+            )
+            self._connection.commit()
+            return updated, version + 1
+        except Exception:
+            self._connection.rollback()
+            raise
+
     def finish_merge_entry(
         self,
         session_id: str,
@@ -1349,6 +1431,15 @@ class SwarmSessionStore:
             if admission.status is not SharedAdmissionStatus.READY:
                 raise ValueError("shared admission requires replanning")
             existing_records = self.list_codex_runs(record.session_id)
+            recovery_events = self.list_recovery_events(record.session_id)
+            from claim_plane.swarm.rescue import (
+                effective_runs_for_rescue,
+                superseded_rescue_run_ids,
+            )
+            effective_records = effective_runs_for_rescue(
+                existing_records, recovery_events
+            )
+            superseded_run_ids = superseded_rescue_run_ids(recovery_events)
             merge_queue = self.get_merge_queue(record.session_id)
             integrated = (
                 None
@@ -1362,7 +1453,7 @@ class SwarmSessionStore:
             snapshot = compute_scheduler_snapshot(
                 session,
                 admission,
-                existing_records,
+                effective_records,
                 integrated_work_ids=integrated,
             )
             if record.work_id not in snapshot.dispatchable_work_ids:
@@ -1391,7 +1482,12 @@ class SwarmSessionStore:
                     (record.session_id, record.work_id),
                 ).fetchone()[0]
             )
-            if work_attempts >= max_attempts_per_work_item:
+            rescue_allowance = sum(
+                1
+                for item in existing_records
+                if item.work_id == record.work_id and item.run_id in superseded_run_ids
+            )
+            if work_attempts >= max_attempts_per_work_item + rescue_allowance:
                 raise ValueError(
                     f"restart budget is exhausted for work item {record.work_id!r}"
                 )

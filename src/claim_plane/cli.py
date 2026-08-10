@@ -144,6 +144,8 @@ from claim_plane.swarm import (
     provision_swarm_worktrees,
     recover_swarm_session,
     replace_codex_worker,
+    rescue_swarm_integration,
+    list_integration_rescues,
     replace_swarm_budget_policy,
     replace_swarm_work_graph,
     resume_swarm_session,
@@ -2206,6 +2208,38 @@ def cmd_swarm_merge_all(args: argparse.Namespace) -> int:
     return 0 if result["summary"]["status"] != "conflict" else 2
 
 
+def cmd_swarm_rescue(args: argparse.Namespace) -> int:
+    result = rescue_swarm_integration(
+        args.repo, args.session_id, work_id=args.work_id
+    )
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        decision = result["decision"]
+        print(
+            f"Integration rescue for {decision['work_id']}: "
+            f"{decision['disposition']} ({decision['reason']})."
+        )
+        print(f"Prepared: {str(result['prepared']).lower()}")
+        if decision["detail"]:
+            print(decision["detail"])
+    return 0 if result["prepared"] else 2
+
+
+def cmd_swarm_rescues(args: argparse.Namespace) -> int:
+    result = list_integration_rescues(args.repo, args.session_id)
+    if args.json or args.out:
+        _write_json(result, args.out)
+    else:
+        print(f"Integration rescues for {args.session_id}: {len(result)}")
+        for item in result:
+            print(
+                f"  {item['work_id']}: {item['disposition']} "
+                f"prepared={str(item['prepared']).lower()} attempt={item['attempt']}"
+            )
+    return 0
+
+
 def cmd_swarm_verify(args: argparse.Namespace) -> int:
     result = verify_swarm_session(
         args.repo,
@@ -4053,6 +4087,27 @@ def build_parser() -> argparse.ArgumentParser:
     swarm_merge_all.add_argument("--json", action="store_true")
     swarm_merge_all.add_argument("--out")
     swarm_merge_all.set_defaults(func=cmd_swarm_merge_all)
+
+    swarm_rescue = swarm_sub.add_parser(
+        "rescue",
+        help="Prepare one bounded fail-closed integration recovery action.",
+    )
+    swarm_rescue.add_argument("session_id")
+    swarm_rescue.add_argument("--work-id")
+    swarm_rescue.add_argument("--repo", default=".")
+    swarm_rescue.add_argument("--json", action="store_true")
+    swarm_rescue.add_argument("--out")
+    swarm_rescue.set_defaults(func=cmd_swarm_rescue)
+
+    swarm_rescues = swarm_sub.add_parser(
+        "rescues",
+        help="Inspect durable deterministic integration recovery evidence.",
+    )
+    swarm_rescues.add_argument("session_id")
+    swarm_rescues.add_argument("--repo", default=".")
+    swarm_rescues.add_argument("--json", action="store_true")
+    swarm_rescues.add_argument("--out")
+    swarm_rescues.set_defaults(func=cmd_swarm_rescues)
 
     swarm_verify = swarm_sub.add_parser(
         "verify",

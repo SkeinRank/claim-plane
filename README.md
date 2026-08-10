@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.22.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.23.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -427,6 +427,7 @@ installation.
 - shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, projects redundant broad file writes onto committed semantic authority for conflict analysis, and promotes serialization constraints into effective dependencies;
 - a dynamic dependency scheduler that releases only admitted, prerequisite-complete work within current worker capacity and distinguishes runnable, active, retryable, terminal, and dependency-blocked items;
 - Deterministic Integration v2 on the managed merge queue: successful worker snapshots are reduced to actual path/region/semantic mutation surfaces, checked against admitted authority before replay, re-mapped to structural owners after replay, re-checked against already integrated semantic changes, and only then committed on the Claim Plane-owned integration branch;
+- bounded fail-closed integration rescue: transient integration failures can retry the same immutable snapshot, while textual conflicts or stale ordered dependencies can invalidate only the affected successful run and re-execute that work serially from the current integration head; authority violations, semantic ambiguity, post-apply drift, and exhausted repair budgets remain blocked for explicit replanning or review;
 - two-level swarm verification that checks each integrated work item against its admitted scope, reruns work-item and root acceptance on the managed integration head, detects acceptance-induced mutations, and persists a final `SWARM VERIFIED` evidence report;
 - crash-safe swarm recovery with worker heartbeat leases, orphan detection, durable pause/resume/cancel controls, and fresh-identity replacement that rechecks authority and never silently inherits predecessor edits;
 - one-command swarm operation with bounded parallel dispatch, compact status, normalized logs, deterministic integration, final verification, and an offline three-worker demo;

@@ -133,6 +133,10 @@ Swarm admission is a prediction over declared authority; integration is the poin
 
 Git replay is intentionally split from commit creation. The snapshot is applied with no commit, the staged result is re-indexed after any line movement, and the semantic dependency graph is rebuilt over the composed worktree. Actual mutation roots are compared with already integrated work using the conflict taxonomy. Only an allowed staged result becomes a durable integration commit; rejection restores the prior integration head and leaves the target branch untouched.
 
+### Bounded integration rescue
+
+A merge conflict does not grant permission to improvise a resolution. Integration rescue classifies the durable conflict and chooses from four deterministic outcomes. A transient integration error may retry the same immutable source snapshot. A textual conflict, or an ordered dependency whose worker ran on an older integration head, may prepare serial re-execution by resetting only the Claim Plane-owned worker worktree to the current integration head and superseding that specific successful run for scheduling purposes. Authority violations and post-apply semantic drift require explicit review; unresolved semantic conflict requires replanning. Every automatic repair consumes `retries.max_repairs_per_work_item`, and exhaustion stops fail-closed. Historical runs remain in evidence and continue to count toward total launch, token, and wall-time budgets.
+
 ### Verified integration pipeline
 
 `IntegrationRunner` is model-agnostic and closes the check/use gap. For each attempt it:

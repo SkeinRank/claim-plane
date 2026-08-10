@@ -344,13 +344,17 @@ def _reserve_run(
         plan_data = store.get_concurrency_plan(session_id)
         shared_data = store.get_shared_admission(session_id)
         worktrees = store.list_worktrees(session_id)
-        existing_runs = store.list_codex_runs(session_id)
+        all_runs = store.list_codex_runs(session_id)
+        recovery_events = store.list_recovery_events(session_id)
         merge_queue_data = store.get_merge_queue(session_id)
         replacement_source = (
             None
             if replacement_of_run_id is None
             else store.require_codex_run(replacement_of_run_id)
         )
+    from claim_plane.swarm.rescue import effective_runs_for_rescue
+
+    existing_runs = effective_runs_for_rescue(all_runs, recovery_events)
     if session.repository_identity != identity:
         raise ValueError("swarm session is bound to a different repository identity")
     if replacement_source is not None:
@@ -469,7 +473,7 @@ def _reserve_run(
         raise ValueError(
             f"workers.max_active_per_work_item is exhausted for {work_id!r}"
         )
-    attempts_for_work = sum(1 for record in existing_runs if record.work_id == work_id)
+    attempts_for_work = sum(1 for record in all_runs if record.work_id == work_id)
     if (
         current is not None
         and current.state.terminal
@@ -494,11 +498,11 @@ def _reserve_run(
         )
     policy = session.budget_policy
     completed_tokens = sum(
-        record.usage.total_tokens for record in existing_runs if record.state.terminal
+        record.usage.total_tokens for record in all_runs if record.state.terminal
     )
     active_reserved = sum(
         record.budget.token_limit or 0
-        for record in existing_runs
+        for record in all_runs
         if record.state in _ACTIVE_STATES
     )
     max_tokens = policy.resources.max_total_tokens
@@ -514,7 +518,7 @@ def _reserve_run(
     run_token_limit = _fair_share(remaining_tokens, unfinished, token_limit)
 
     remaining_seconds = _remaining_wall_time(
-        policy.resources.max_wall_time_seconds, existing_runs
+        policy.resources.max_wall_time_seconds, all_runs
     )
     if remaining_seconds <= 0:
         raise ValueError("swarm wall-time budget is exhausted")
@@ -543,7 +547,7 @@ def _reserve_run(
     if reasoning_effort:
         command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
     command.append(prompt)
-    attempt = 1 + sum(1 for record in existing_runs if record.work_id == work_id)
+    attempt = 1 + sum(1 for record in all_runs if record.work_id == work_id)
     budget = CodexRunBudget(
         token_limit=run_token_limit,
         wall_time_limit_seconds=run_timeout,

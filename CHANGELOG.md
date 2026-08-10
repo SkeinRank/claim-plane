@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.23] — 2026-08-10
+
+### Added
+
+- Added bounded deterministic integration rescue evidence with explicit `retry_snapshot`, `serial_rerun`, `replan_required`, and `manual` dispositions.
+- Added serial re-execution from the current managed integration head for textual conflicts and stale ordered dependencies, while preserving the original successful run as immutable evidence.
+- Added atomic conflict reopening plus durable rescue events and `claim-plane swarm rescue` / `claim-plane swarm rescues` operator commands.
+
+### Changed
+
+- Scheduler and merge-queue readiness now ignore only successful runs explicitly superseded by a prepared serial rescue; launch, token, wall-time, and historical attempt accounting still include them.
+- The high-level swarm operator can continue automatically after a bounded deterministic rescue, but authority violations, post-apply semantic drift, unresolved semantic conflict, and exhausted repair budgets stop fail-closed.
+
 ## [0.37.22] — 2026-08-10
 
 ### Added

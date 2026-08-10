@@ -330,6 +330,13 @@ from claim_plane.swarm import (
     DeterministicIntegrationEvidence,
     IntegrationDisposition,
     IntegrationReason,
+    INTEGRATION_RESCUE_PROTOCOL,
+    IntegrationRescueDecision,
+    RescueDisposition,
+    RescueReason,
+    list_integration_rescues,
+    plan_integration_rescue,
+    rescue_swarm_integration,
     IntegrationTarget,
     OperatorEvent,
     DeterministicMergeQueue,
@@ -385,7 +392,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.22"
+__version__ = "0.37.23"
 
 __all__ = [
     "RUNTIME_FENCE_PROTOCOL",
@@ -611,6 +618,13 @@ __all__ = [
     "DeterministicIntegrationEvidence",
     "IntegrationDisposition",
     "IntegrationReason",
+    "INTEGRATION_RESCUE_PROTOCOL",
+    "IntegrationRescueDecision",
+    "RescueDisposition",
+    "RescueReason",
+    "plan_integration_rescue",
+    "rescue_swarm_integration",
+    "list_integration_rescues",
     "IntegrationTarget",
     "OperatorEvent",
     "DeterministicMergeQueue",

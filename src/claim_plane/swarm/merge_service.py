@@ -76,6 +76,7 @@ def plan_swarm_merge_queue(repo: str | Path, session_id: str) -> dict[str, Any]:
         session = store.require(session_id)
         shared = store.get_shared_admission(session_id)
         runs = store.list_codex_runs(session_id)
+        recovery_events = store.list_recovery_events(session_id)
         worktrees = store.list_worktrees(session_id)
         previous_data = store.get_merge_queue(session_id)
     if session.repository_identity != _repository_identity(root):
@@ -92,10 +93,12 @@ def plan_swarm_merge_queue(repo: str | Path, session_id: str) -> dict[str, Any]:
         previous = None
     head = _integration_head(root, previous, session.base_commit)
     now = _utc_now()
+    from claim_plane.swarm.rescue import effective_runs_for_rescue
+
     queue = compute_merge_queue(
         session,
         admission,
-        runs,
+        effective_runs_for_rescue(runs, recovery_events),
         worktrees,
         root=root,
         integration_head=head,
@@ -419,8 +422,10 @@ def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, 
     )
     integration = _ensure_integration_worktree(root, claimed_queue)
     evidence = None
+    source_commit = claimed.source_commit
     try:
-        source_commit = _snapshot_worker(root, claimed_queue, claimed, timestamp=now)
+        if source_commit is None:
+            source_commit = _snapshot_worker(root, claimed_queue, claimed, timestamp=now)
         if source_commit is None:
             finished = MergeQueueEntry(
                 work_id=claimed.work_id,
@@ -542,6 +547,7 @@ def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, 
             source_branch=claimed.source_branch,
             state=MergeEntryState.CONFLICT,
             run_id=claimed.run_id,
+            source_commit=source_commit,
             integration_evidence=None if evidence is None else evidence.to_dict(),
             detail="integration failed before a durable result was produced",
             conflict_paths=("<integration-error>",),

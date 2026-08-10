@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/integration-rescue.schema.json",
+  "title": "Claim Plane Integration Rescue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol", "event_id", "session_id", "work_id", "queue_fingerprint",
+    "integration_head", "disposition", "reason", "attempt", "max_attempts",
+    "prepared", "conflict_paths", "detail", "metadata", "created_at", "fingerprint"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.integration-rescue.v1"},
+    "event_id": {"type": "string", "minLength": 1},
+    "session_id": {"type": "string", "minLength": 1},
+    "work_id": {"type": "string", "minLength": 1},
+    "source_run_id": {"type": ["string", "null"]},
+    "queue_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "integration_head": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "disposition": {
+      "enum": ["retry_snapshot", "serial_rerun", "replan_required", "manual"]
+    },
+    "reason": {
+      "enum": [
+        "transient_integration_error", "textual_integration_conflict",
+        "stale_ordered_dependency", "authority_violation", "semantic_ambiguity",
+        "post_apply_mismatch", "repair_budget_exhausted"
+      ]
+    },
+    "attempt": {"type": "integer", "minimum": 1},
+    "max_attempts": {"type": "integer", "minimum": 0},
+    "prepared": {"type": "boolean"},
+    "conflict_paths": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "detail": {"type": "string"},
+    "metadata": {"type": "object"},
+    "created_at": {"type": "string", "minLength": 1},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

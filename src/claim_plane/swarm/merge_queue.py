@@ -428,6 +428,14 @@ def compute_merge_queue(
         else:
             state = MergeEntryState.READY
             detail = "successful execution and integrated dependencies"
+        preserved_source_commit = (
+            old.source_commit
+            if old is not None
+            and record is not None
+            and old.run_id == record.run_id
+            and state is MergeEntryState.READY
+            else None
+        )
         entry = MergeQueueEntry(
             work_id=work_id,
             order=order,
@@ -439,6 +447,7 @@ def compute_merge_queue(
             ),
             state=state,
             run_id=None if record is None else record.run_id,
+            source_commit=preserved_source_commit,
             detail=detail,
         )
         entries.append(entry)

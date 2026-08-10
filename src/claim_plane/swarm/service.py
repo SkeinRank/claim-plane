@@ -517,6 +517,7 @@ def get_swarm_scheduler(repo: str | Path, session_id: str) -> dict[str, Any]:
         session = store.require(session_id)
         stored = store.get_shared_admission(session_id)
         records = store.list_codex_runs(session_id)
+        recovery_events = store.list_recovery_events(session_id)
         merge_queue = store.get_merge_queue(session_id)
     if session.repository_identity != _repository_identity(root):
         raise ValueError("swarm session is bound to a different repository identity")
@@ -535,8 +536,13 @@ def get_swarm_scheduler(repo: str | Path, session_id: str) -> dict[str, Any]:
             if entry.state is MergeEntryState.INTEGRATED
         }
     )
+    from claim_plane.swarm.rescue import effective_runs_for_rescue
+
     snapshot = compute_scheduler_snapshot(
-        session, admission, records, integrated_work_ids=integrated
+        session,
+        admission,
+        effective_runs_for_rescue(records, recovery_events),
+        integrated_work_ids=integrated,
     )
     return {
         "session_id": session_id,

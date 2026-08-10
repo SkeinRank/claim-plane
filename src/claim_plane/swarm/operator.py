@@ -24,6 +24,7 @@ from claim_plane.swarm.recovery import (
     inspect_swarm_recovery,
     replace_codex_worker,
 )
+from claim_plane.swarm.rescue import rescue_swarm_integration
 from claim_plane.swarm.runs import CodexRunRecord, CodexRunState
 from claim_plane.swarm.service import (
     admit_swarm_session,
@@ -636,6 +637,17 @@ def start_swarm_session(
             if on_event is not None:
                 on_event(merge_event)
             if merged["summary"]["status"] == MergeQueueStatus.CONFLICT.value:
+                rescue = rescue_swarm_integration(root, session_id)
+                rescue_event = {
+                    "stage": "integration_rescue",
+                    "decision": rescue["decision"],
+                    "prepared": rescue["prepared"],
+                }
+                events.append(rescue_event)
+                if on_event is not None:
+                    on_event(rescue_event)
+                if rescue["prepared"]:
+                    continue
                 break
             if batch_errors:
                 # Exceptions here are control-plane or worktree failures rather than
@@ -646,6 +658,17 @@ def start_swarm_session(
 
         merged = drain_swarm_merge_queue(root, session_id)
         if merged["summary"]["status"] == MergeQueueStatus.CONFLICT.value:
+            rescue = rescue_swarm_integration(root, session_id)
+            rescue_event = {
+                "stage": "integration_rescue",
+                "decision": rescue["decision"],
+                "prepared": rescue["prepared"],
+            }
+            events.append(rescue_event)
+            if on_event is not None:
+                on_event(rescue_event)
+            if rescue["prepared"]:
+                continue
             break
         if merged["summary"]["status"] == MergeQueueStatus.COMPLETED.value:
             verification = verify_swarm_session(
