@@ -268,3 +268,57 @@ def test_same_file_admission_schema_is_packaged() -> None:
     schema = Path("schemas/same-file-admission.schema.json")
     payload = json.loads(schema.read_text(encoding="utf-8"))
     assert payload["properties"]["protocol"]["const"] == SAME_FILE_ADMISSION_PROTOCOL
+
+
+def test_overlapping_regions_can_be_refined_by_semantic_roots() -> None:
+    semantic = build_python_dependency_graph(
+        {"app.py": "def first():\n    return 1\n\ndef second():\n    return 2\n"}
+    )
+    graph = WorkGraph.from_dict(
+        {
+            "protocol": "claim-plane.swarm-work-graph.v1",
+            "work_items": [
+                {
+                    "work_id": "first",
+                    "title": "first",
+                    "goal": "Update first",
+                    "operations": [
+                        {
+                            "access": "write",
+                            "resource": {
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "region": "lines:1-5",
+                            },
+                        },
+                        _symbol_op("app.py", "first"),
+                    ],
+                },
+                {
+                    "work_id": "second",
+                    "title": "second",
+                    "goal": "Update second",
+                    "operations": [
+                        {
+                            "access": "write",
+                            "resource": {
+                                "kind": "file",
+                                "identifier": "app.py",
+                                "region": "lines:1-5",
+                            },
+                        },
+                        _symbol_op("app.py", "second"),
+                    ],
+                },
+            ],
+        }
+    )
+
+    plan = compute_concurrency_plan(graph, _policy(), semantic_graph=semantic)
+
+    assert [wave.work_ids for wave in plan.waves] == [("first", "second")]
+    assert plan.constraints == ()
+    evidence = plan.metadata["same_file_admissions"]
+    assert len(evidence) == 1
+    assert evidence[0]["action"] == "parallel"
+    assert evidence[0]["reason"] == "semantic_independent"

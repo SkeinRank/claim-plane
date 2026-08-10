@@ -423,10 +423,12 @@ def evaluate_same_file_admission(
     commutativity_proofs: Iterable[CommutativityProof] = (),
     max_depth: int | None = None,
 ) -> SameFileAdmissionDecision:
-    """Evaluate whether unknown-region same-file work can execute concurrently.
+    """Evaluate whether coarse same-file work can execute concurrently.
 
-    Only ``region_safe`` policy may be upgraded to semantic parallelism.  Explicit
-    ``deny`` and ``serialize`` settings remain hard policy choices.
+    Unknown or overlapping planner regions may be refined by source-bound semantic
+    mutation roots. Only ``region_safe`` policy may be upgraded to semantic
+    parallelism. Explicit ``deny`` and ``serialize`` settings remain hard policy
+    choices.
     """
 
     if policy.concurrency.same_file is SameFilePolicy.DENY:

@@ -29,6 +29,7 @@ from claim_plane.core import (
     DependencyRelation,
     PythonStructuralExtractionError,
     ResourceKind,
+    ScopeCommitment,
     SemanticDependencyGraph,
     build_python_dependency_graph,
     extract_python_structure,
@@ -243,6 +244,12 @@ def _access_for_action(action: object) -> str:
     }.get(str(action or "modify").lower(), "write")
 
 
+def _commitment_for_item(item: Mapping[str, Any]) -> ScopeCommitment:
+    return ScopeCommitment(
+        str(item.get("commitment", ScopeCommitment.COMMITTED.value)).strip().lower()
+    )
+
+
 def _file_operation(item: Mapping[str, Any]) -> dict[str, Any]:
     path = str(item["path"])
     resource: dict[str, Any] = {"kind": "file", "identifier": path}
@@ -250,10 +257,14 @@ def _file_operation(item: Mapping[str, Any]) -> dict[str, Any]:
     end = int(item.get("line_end", 0) or 0)
     if start > 0 and end > 0:
         resource["region"] = f"lines:{min(start, end)}-{max(start, end)}"
-    return {
+    operation: dict[str, Any] = {
         "access": _access_for_action(item.get("action")),
         "resource": resource,
     }
+    commitment = _commitment_for_item(item)
+    if commitment is ScopeCommitment.CONTINGENT:
+        operation["commitment"] = commitment.value
+    return operation
 
 
 def _symbol_operations(
@@ -270,6 +281,7 @@ def _symbol_operations(
     except PythonStructuralExtractionError:
         return ()
     low, high = min(start, end), max(start, end)
+    commitment = _commitment_for_item(item)
     owners = index.owners_for_region(low, high)
     definitions = {item.resource.identity: item for item in index.definitions}
     operations: list[dict[str, Any]] = []
@@ -294,18 +306,19 @@ def _symbol_operations(
         }
         if owner.signature:
             metadata["signature"] = owner.signature
-        operations.append(
-            {
-                "access": _access_for_action(item.get("action")),
-                "resource": {
-                    "kind": "symbol",
-                    "identifier": owner.identifier,
-                    "signature": owner.signature,
-                    "metadata": metadata,
-                },
-                "metadata": {"semantic_change_kind": change_kind},
-            }
-        )
+        operation: dict[str, Any] = {
+            "access": _access_for_action(item.get("action")),
+            "resource": {
+                "kind": "symbol",
+                "identifier": owner.qualified_name or owner.identifier,
+                "signature": owner.signature,
+                "metadata": metadata,
+            },
+            "metadata": {"semantic_change_kind": change_kind},
+        }
+        if commitment is ScopeCommitment.CONTINGENT:
+            operation["commitment"] = commitment.value
+        operations.append(operation)
     return tuple(operations)
 
 

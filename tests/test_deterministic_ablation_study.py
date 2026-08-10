@@ -190,3 +190,110 @@ def test_symbols_without_dependencies_keeps_graph_nodes_but_removes_edges(
     assert evidence["semantic_graph_mode"] == "nodes_only"
     assert evidence["semantic_graph_fingerprint"]
     assert evidence["concurrency_plan"]["metadata"]["semantic_graph_fingerprint"]
+
+
+def test_full_v2_keeps_contingent_scope_out_of_initial_authority(
+    tmp_path: Path,
+) -> None:
+    repo, base = _repo(
+        tmp_path,
+        {
+            "app.py": (
+                "def first():\n"
+                "    return 1\n"
+                "\n"
+                "def second():\n"
+                "    return 2\n"
+            )
+        },
+    )
+    plan_a = {
+        "files": [
+            {
+                "path": "app.py",
+                "action": "modify",
+                "commitment": "committed",
+                "line_start": 1,
+                "line_end": 2,
+            },
+            {
+                "path": "app.py",
+                "action": "modify",
+                "commitment": "contingent",
+                "line_start": 4,
+                "line_end": 5,
+            },
+        ]
+    }
+    plan_b = {
+        "files": [
+            {
+                "path": "app.py",
+                "action": "modify",
+                "commitment": "committed",
+                "line_start": 4,
+                "line_end": 5,
+            }
+        ]
+    }
+
+    verdict = deterministic_ablation_verdict(
+        repo,
+        base_commit=base,
+        plan_a=plan_a,
+        plan_b=plan_b,
+        profile="full_v2",
+    )
+
+    assert verdict["serialized"] is False
+    assert verdict["kind"] == "parallel"
+
+
+def test_full_v2_uses_qualified_symbol_identity_for_same_named_methods(
+    tmp_path: Path,
+) -> None:
+    repo, base = _repo(
+        tmp_path,
+        {
+            "app.py": (
+                "class First:\n"
+                "    def run(self):\n"
+                "        return 1\n"
+                "\n"
+                "class Second:\n"
+                "    def run(self):\n"
+                "        return 2\n"
+            )
+        },
+    )
+    plan_a = {
+        "files": [
+            {
+                "path": "app.py",
+                "action": "modify",
+                "line_start": 2,
+                "line_end": 3,
+            }
+        ]
+    }
+    plan_b = {
+        "files": [
+            {
+                "path": "app.py",
+                "action": "modify",
+                "line_start": 6,
+                "line_end": 7,
+            }
+        ]
+    }
+
+    verdict = deterministic_ablation_verdict(
+        repo,
+        base_commit=base,
+        plan_a=plan_a,
+        plan_b=plan_b,
+        profile="full_v2",
+    )
+
+    assert verdict["serialized"] is False
+    assert verdict["kind"] == "parallel"

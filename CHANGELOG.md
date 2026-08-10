@@ -8,6 +8,15 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.29] — 2026-08-10
+
+### Fixed
+
+- Preserved Planner v1 committed/contingent scope when projecting frozen declarations into deterministic benchmark work items, so contingent fallback surfaces no longer reserve initial mutation authority.
+- Projected Python symbols with qualified identifiers, preventing unrelated same-named methods from collapsing onto the same coarse semantic key.
+- Allowed `region_safe` same-file admission to refine overlapping declared line regions with source-bound semantic roots before falling back to serialization; explicit deny/serialize policy remains authoritative and missing semantic evidence still fails closed.
+- Added regressions for contingent-scope exclusion, same-named qualified methods, and semantic refinement of coarse overlapping regions.
+
 ## [0.37.28] — 2026-08-10
 
 ### Fixed
