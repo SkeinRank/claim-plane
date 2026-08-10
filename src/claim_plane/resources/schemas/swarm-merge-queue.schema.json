@@ -25,24 +25,66 @@
     "metadata"
   ],
   "properties": {
-    "protocol": {"const": "claim-plane.swarm-merge-queue.v1"},
-    "session_id": {"type": "string", "minLength": 1},
-    "repository_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
-    "graph_version": {"type": "integer", "minimum": 1},
-    "graph_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "budget_version": {"type": "integer", "minimum": 1},
-    "budget_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "admission_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "integration_target_branch": {"type": "string", "minLength": 1},
+    "protocol": {
+      "const": "claim-plane.swarm-merge-queue.v1"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "base_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "graph_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "graph_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "budget_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "budget_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "admission_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "integration_target_branch": {
+      "type": "string",
+      "minLength": 1
+    },
     "integration_branch": {
       "type": "string",
       "pattern": "^claim-plane/swarm/.+/integration$"
     },
-    "integration_worktree_path": {"type": "string", "minLength": 1},
-    "integration_head": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "integration_worktree_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "integration_head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
     "status": {
-      "enum": ["waiting", "ready", "integrating", "conflict", "completed", "stale"]
+      "enum": [
+        "waiting",
+        "ready",
+        "integrating",
+        "conflict",
+        "completed",
+        "stale"
+      ]
     },
     "entries": {
       "type": "array",
@@ -60,44 +102,109 @@
           "source_commit",
           "integration_commit",
           "conflict_paths",
+          "integration_evidence",
           "detail"
         ],
         "properties": {
-          "work_id": {"type": "string", "minLength": 1},
-          "order": {"type": "integer", "minimum": 0},
+          "work_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
           "effective_dependencies": {
             "type": "array",
             "uniqueItems": true,
-            "items": {"type": "string", "minLength": 1}
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           },
-          "source_branch": {"type": "string", "minLength": 1},
+          "source_branch": {
+            "type": "string",
+            "minLength": 1
+          },
           "state": {
-            "enum": ["pending", "blocked", "ready", "integrating", "integrated", "conflict"]
+            "enum": [
+              "pending",
+              "blocked",
+              "ready",
+              "integrating",
+              "integrated",
+              "conflict"
+            ]
           },
-          "run_id": {"type": ["string", "null"]},
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "source_commit": {
             "anyOf": [
-              {"type": "null"},
-              {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40,64}$"
+              }
             ]
           },
           "integration_commit": {
             "anyOf": [
-              {"type": "null"},
-              {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40,64}$"
+              }
             ]
           },
           "conflict_paths": {
             "type": "array",
             "uniqueItems": true,
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           },
-          "detail": {"type": "string"}
+          "detail": {
+            "type": "string"
+          },
+          "integration_evidence": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "const": "claim-plane.deterministic-integration.v2"
+                  }
+                },
+                "required": [
+                  "protocol"
+                ]
+              }
+            ]
+          }
         }
       }
     },
-    "created_at": {"type": "string", "minLength": 1},
-    "updated_at": {"type": "string", "minLength": 1},
-    "metadata": {"type": "object"}
+    "created_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metadata": {
+      "type": "object"
+    }
   }
 }

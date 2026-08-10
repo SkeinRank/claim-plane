@@ -998,6 +998,7 @@ class SwarmSessionStore:
                 source_commit=entry.source_commit,
                 integration_commit=entry.integration_commit,
                 conflict_paths=entry.conflict_paths,
+                integration_evidence=entry.integration_evidence,
                 detail="merge integration reserved",
             )
             updated = queue.with_entry(

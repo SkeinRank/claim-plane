@@ -88,3 +88,7 @@ refreshed intent must preserve its authority surface and pin a new base commit, 
 dependencies are re-evaluated, and explicit resume is required before a replacement broker may
 start with a fresh fencing token. The control plane records this lifecycle; it does not claim that the
 new Git base contains a semantically correct implementation of the producer result.
+
+## Deterministic integration authority
+
+Swarm execution success never authorizes the resulting diff by itself. Before a worker snapshot can become an integration commit, Claim Plane checks its actual changed paths and regions against the admitted work item. When semantic authority is declared for a Python path, changed hunks must map to those admitted structural owners. The staged replay is checked again after composition, and actual semantic overlap with earlier integrated work must be independent, explicitly commutative, or correctly ordered on a refreshed dependency base. Missing structural evidence, semantic drift, unknown overlap, and conflicting actual roots fail closed and restore the prior integration head.

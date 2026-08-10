@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.22] — 2026-08-10
+
+### Added
+
+- add Deterministic Integration v2 so worker snapshots are checked against the admitted path, region, and semantic-resource authority before Git composition and re-checked after replay on the managed integration branch;
+- persist actual mutation surfaces, staged semantic owners, dependency-graph conflict decisions, and integration evidence on each merge-queue entry, rejecting undeclared semantic drift before it can become an integration commit;
+- let shared swarm conflict analysis project redundant broad file writes onto their committed symbol/contract/schema authority while preserving the original runtime mutation authority, so Same-file Admission v2 can reach execution without a second coarse file-level serialization.
+
 ## [0.37.21] — 2026-08-10
 
 ### Added

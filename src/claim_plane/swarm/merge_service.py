@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from claim_plane.swarm.admission import SharedAdmissionStatus
+from claim_plane.swarm.integration_v2 import (
+    build_integration_preflight,
+    verify_staged_integration,
+)
 from claim_plane.swarm.merge_queue import (
     DeterministicMergeQueue,
     MergeEntryState,
@@ -329,16 +333,11 @@ def _snapshot_worker(
     return _resolve_commit(source, "HEAD")
 
 
-def _integrate_snapshot(
+def _apply_snapshot(
     integration: Path,
     queue: DeterministicMergeQueue,
-    entry: MergeQueueEntry,
-    source_commit: str | None,
-    *,
-    timestamp: str,
-) -> tuple[str, tuple[str, ...]]:
-    if source_commit is None:
-        return queue.integration_head, ()
+    source_commit: str,
+) -> tuple[str, ...]:
     cherry = subprocess.run(
         ["git", "cherry-pick", "--no-commit", source_commit],
         cwd=integration,
@@ -346,12 +345,22 @@ def _integrate_snapshot(
         capture_output=True,
         check=False,
     )
-    if cherry.returncode != 0:
-        conflicts = _git_result(integration, "diff", "--name-only", "--diff-filter=U")
-        paths = tuple(sorted(line for line in conflicts.stdout.splitlines() if line))
-        _git_result(integration, "cherry-pick", "--abort")
-        _git_result(integration, "reset", "--hard", queue.integration_head)
-        return queue.integration_head, paths or ("<unknown>",)
+    if cherry.returncode == 0:
+        return ()
+    conflicts = _git_result(integration, "diff", "--name-only", "--diff-filter=U")
+    paths = tuple(sorted(line for line in conflicts.stdout.splitlines() if line))
+    _git_result(integration, "cherry-pick", "--abort")
+    _git_result(integration, "reset", "--hard", queue.integration_head)
+    return paths or ("<unknown>",)
+
+
+def _commit_applied_snapshot(
+    integration: Path,
+    queue: DeterministicMergeQueue,
+    entry: MergeQueueEntry,
+    *,
+    timestamp: str,
+) -> str:
     commit = subprocess.run(
         [
             "git",
@@ -375,7 +384,7 @@ def _integrate_snapshot(
             or commit.stdout.strip()
             or "failed to commit integration result"
         )
-    return _resolve_commit(integration, "HEAD"), ()
+    return _resolve_commit(integration, "HEAD")
 
 
 def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, Any]:
@@ -398,31 +407,21 @@ def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, 
             expected_queue_fingerprint=queue.fingerprint(),
             updated_at=now,
         )
+        session = store.require(session_id)
+        shared = store.get_shared_admission(session_id)
+    if shared is None:
+        raise ValueError("swarm session has no shared admission")
+    admission, _ = shared
+    integrated_entries = tuple(
+        entry
+        for entry in claimed_queue.entries
+        if entry.state is MergeEntryState.INTEGRATED
+    )
     integration = _ensure_integration_worktree(root, claimed_queue)
+    evidence = None
     try:
         source_commit = _snapshot_worker(root, claimed_queue, claimed, timestamp=now)
-        integration_head, conflicts = _integrate_snapshot(
-            integration,
-            claimed_queue,
-            claimed,
-            source_commit,
-            timestamp=now,
-        )
-        if conflicts:
-            finished = MergeQueueEntry(
-                work_id=claimed.work_id,
-                order=claimed.order,
-                effective_dependencies=claimed.effective_dependencies,
-                source_branch=claimed.source_branch,
-                state=MergeEntryState.CONFLICT,
-                run_id=claimed.run_id,
-                source_commit=source_commit,
-                conflict_paths=conflicts,
-                detail=(
-                    "integration conflict; integration worktree restored to prior head"
-                ),
-            )
-        else:
+        if source_commit is None:
             finished = MergeQueueEntry(
                 work_id=claimed.work_id,
                 order=claimed.order,
@@ -430,14 +429,109 @@ def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, 
                 source_branch=claimed.source_branch,
                 state=MergeEntryState.INTEGRATED,
                 run_id=claimed.run_id,
-                source_commit=source_commit,
-                integration_commit=integration_head,
-                detail=(
-                    "worker snapshot integrated"
-                    if source_commit is not None
-                    else "successful no-op execution recorded without a merge commit"
-                ),
+                source_commit=None,
+                integration_commit=claimed_queue.integration_head,
+                detail="successful no-op execution recorded without a merge commit",
             )
+        else:
+            evidence = build_integration_preflight(
+                integration,
+                session=session,
+                admission=admission,
+                work_id=claimed.work_id,
+                source_commit=source_commit,
+                integration_head=claimed_queue.integration_head,
+                integrated_entries=integrated_entries,
+            )
+            if not evidence.allowed:
+                finished = MergeQueueEntry(
+                    work_id=claimed.work_id,
+                    order=claimed.order,
+                    effective_dependencies=claimed.effective_dependencies,
+                    source_branch=claimed.source_branch,
+                    state=MergeEntryState.CONFLICT,
+                    run_id=claimed.run_id,
+                    source_commit=source_commit,
+                    conflict_paths=tuple(
+                        sorted(
+                            {
+                                str(item.get("path") or "<semantic-authority>")
+                                for item in evidence.authority_violations
+                            }
+                        )
+                    )
+                    or ("<semantic-authority>",),
+                    integration_evidence=evidence.to_dict(),
+                    detail="actual worker diff failed deterministic integration preflight",
+                )
+            else:
+                conflicts = _apply_snapshot(integration, claimed_queue, source_commit)
+                if conflicts:
+                    finished = MergeQueueEntry(
+                        work_id=claimed.work_id,
+                        order=claimed.order,
+                        effective_dependencies=claimed.effective_dependencies,
+                        source_branch=claimed.source_branch,
+                        state=MergeEntryState.CONFLICT,
+                        run_id=claimed.run_id,
+                        source_commit=source_commit,
+                        conflict_paths=conflicts,
+                        integration_evidence=evidence.to_dict(),
+                        detail=(
+                            "integration conflict; integration worktree restored to prior head"
+                        ),
+                    )
+                else:
+                    evidence = verify_staged_integration(
+                        integration,
+                        item=session.work_graph.item_map[claimed.work_id],
+                        admission=admission,
+                        integrated_entries=integrated_entries,
+                        evidence=evidence,
+                    )
+                    if not evidence.allowed:
+                        _git_result(integration, "cherry-pick", "--abort")
+                        _git_result(
+                            integration, "reset", "--hard", claimed_queue.integration_head
+                        )
+                        finished = MergeQueueEntry(
+                            work_id=claimed.work_id,
+                            order=claimed.order,
+                            effective_dependencies=claimed.effective_dependencies,
+                            source_branch=claimed.source_branch,
+                            state=MergeEntryState.CONFLICT,
+                            run_id=claimed.run_id,
+                            source_commit=source_commit,
+                            conflict_paths=tuple(
+                                sorted(
+                                    {
+                                        str(item.get("path") or "<semantic-recheck>")
+                                        for item in evidence.authority_violations
+                                    }
+                                )
+                            )
+                            or ("<semantic-recheck>",),
+                            integration_evidence=evidence.to_dict(),
+                            detail=(
+                                "post-apply semantic recheck rejected the integration result"
+                            ),
+                        )
+                    else:
+                        integration_head = _commit_applied_snapshot(
+                            integration, claimed_queue, claimed, timestamp=now
+                        )
+                        finished = MergeQueueEntry(
+                            work_id=claimed.work_id,
+                            order=claimed.order,
+                            effective_dependencies=claimed.effective_dependencies,
+                            source_branch=claimed.source_branch,
+                            state=MergeEntryState.INTEGRATED,
+                            run_id=claimed.run_id,
+                            source_commit=source_commit,
+                            integration_commit=integration_head,
+                            integration_evidence=evidence.to_dict(),
+                            detail="worker snapshot integrated after deterministic semantic recheck",
+                        )
     except Exception:
         _git_result(integration, "cherry-pick", "--abort")
         _git_result(integration, "reset", "--hard", claimed_queue.integration_head)
@@ -448,6 +542,7 @@ def integrate_next_swarm_result(repo: str | Path, session_id: str) -> dict[str, 
             source_branch=claimed.source_branch,
             state=MergeEntryState.CONFLICT,
             run_id=claimed.run_id,
+            integration_evidence=None if evidence is None else evidence.to_dict(),
             detail="integration failed before a durable result was produced",
             conflict_paths=("<integration-error>",),
         )

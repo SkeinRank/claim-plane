@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping
 
 from claim_plane.coordination.admission import AdmissionEngine
-from claim_plane.core import AdmissionKind, ChangeIntent
+from claim_plane.core import AdmissionKind, ChangeIntent, ResourceKind
 from claim_plane.swarm.concurrency import (
     ConcurrencyConstraintAction,
     ConcurrencyPlan,
@@ -285,6 +285,65 @@ class SharedAdmissionPlan:
         )
 
 
+
+def _operation_path(operation: Any) -> str | None:
+    resource = operation.resource
+    if resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}:
+        return resource.identifier.replace("\\", "/").removeprefix("./")
+    value = (
+        resource.metadata.get("path")
+        or resource.metadata.get("file")
+        or resource.metadata.get("source_path")
+        or resource.metadata.get("repository_path")
+    )
+    if value is None:
+        return None
+    return str(value).replace("\\", "/").removeprefix("./")
+
+
+def _semantic_conflict_projection(intent: ChangeIntent) -> ChangeIntent:
+    """Drop redundant broad path writes from pairwise conflict analysis.
+
+    Swarm workers still retain the original file mutation authority in their admitted
+    intent.  The projection is used only by shared conflict analysis when the same
+    path also has committed symbol/contract/schema authority.  Isolated worktrees
+    prevent cross-worker filesystem races, while Deterministic Integration v2 checks
+    the actual diff against the semantic authority before composition.
+    """
+
+    semantic_kinds = {ResourceKind.SYMBOL, ResourceKind.CONTRACT, ResourceKind.SCHEMA}
+    semantic_paths = {
+        path
+        for operation in intent.operations
+        if operation.committed
+        and operation.mutating
+        and operation.resource.kind in semantic_kinds
+        and (path := _operation_path(operation)) is not None
+    }
+    if not semantic_paths:
+        return intent
+    projected = tuple(
+        operation
+        for operation in intent.operations
+        if not (
+            operation.committed
+            and operation.mutating
+            and operation.resource.kind in {ResourceKind.FILE, ResourceKind.DOCUMENT}
+            and _operation_path(operation) in semantic_paths
+        )
+    )
+    if projected == intent.operations:
+        return intent
+    return replace(
+        intent,
+        operations=projected,
+        metadata={
+            **dict(intent.metadata),
+            "shared_conflict_projection": "semantic-authority-v2",
+            "projected_file_paths": sorted(semantic_paths),
+        },
+    )
+
 def compute_shared_admission(
     session: SwarmSession, plan: ConcurrencyPlan
 ) -> SharedAdmissionPlan:
@@ -322,18 +381,18 @@ def compute_shared_admission(
     records: list[WorkAdmission] = []
     for work_id in order:
         potentially_concurrent = [
-            admitted_by_work[other]
+            _semantic_conflict_projection(admitted_by_work[other])
             for other in order
             if other in admitted_by_work and other not in ancestors[work_id]
         ]
         decision = engine.evaluate(
-            intents[work_id],
+            _semantic_conflict_projection(intents[work_id]),
             potentially_concurrent,
             known_intent_ids=known_intent_ids,
         )
         record = WorkAdmission(
             work_id=work_id,
-            intent=decision.intent,
+            intent=intents[work_id],
             allowed=decision.allowed,
             kind=decision.kind,
             effective_dependencies=dependencies[work_id],

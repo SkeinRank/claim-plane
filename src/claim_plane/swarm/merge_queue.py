@@ -84,6 +84,7 @@ class MergeQueueEntry:
     source_commit: str | None = None
     integration_commit: str | None = None
     conflict_paths: tuple[str, ...] = ()
+    integration_evidence: Mapping[str, Any] | None = None
     detail: str = ""
 
     def __post_init__(self) -> None:
@@ -113,6 +114,8 @@ class MergeQueueEntry:
             "conflict_paths",
             tuple(sorted(set(self.conflict_paths))),
         )
+        if self.integration_evidence is not None:
+            object.__setattr__(self, "integration_evidence", dict(self.integration_evidence))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,6 +128,9 @@ class MergeQueueEntry:
             "source_commit": self.source_commit,
             "integration_commit": self.integration_commit,
             "conflict_paths": list(self.conflict_paths),
+            "integration_evidence": (
+                None if self.integration_evidence is None else dict(self.integration_evidence)
+            ),
             "detail": self.detail,
         }
 
@@ -148,6 +154,11 @@ class MergeQueueEntry:
                 else str(data.get("integration_commit"))
             ),
             conflict_paths=tuple(data.get("conflict_paths") or ()),
+            integration_evidence=(
+                None
+                if data.get("integration_evidence") is None
+                else dict(data.get("integration_evidence") or {})
+            ),
             detail=str(data.get("detail") or ""),
         )
 

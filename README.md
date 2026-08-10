@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.21.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.22.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -424,9 +424,9 @@ installation.
 - Semantic Amendment Protocol v2 that requires monotonic scope growth, caps new authority and propagated impact, checks additional semantic resources against active intents inside the amendment transaction, and leaves ordered overlap explicit until refresh/resume can establish the required order;
 - Runtime Premise Fencing that atomically revokes live broker mutation authority when a tracked premise becomes stale, fails prepared operations, releases the writer lease, and persists source-bound fence evidence;
 - deterministic runtime pause/refresh/resume that keeps stale workers fenced, requires stale-causing producers to complete, re-admits the unchanged authority surface on a new pinned base, and requires an explicit resume before a fresh broker receives a higher fencing token;
-- shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, and promotes serialization constraints into effective dependencies;
+- shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, projects redundant broad file writes onto committed semantic authority for conflict analysis, and promotes serialization constraints into effective dependencies;
 - a dynamic dependency scheduler that releases only admitted, prerequisite-complete work within current worker capacity and distinguishes runnable, active, retryable, terminal, and dependency-blocked items;
-- a deterministic merge queue that snapshots successful worker worktrees, integrates results on a Claim Plane-owned branch in effective-dependency order, blocks downstream workers until prerequisites are integrated, captures real Git conflicts, and leaves the user target branch untouched;
+- Deterministic Integration v2 on the managed merge queue: successful worker snapshots are reduced to actual path/region/semantic mutation surfaces, checked against admitted authority before replay, re-mapped to structural owners after replay, re-checked against already integrated semantic changes, and only then committed on the Claim Plane-owned integration branch;
 - two-level swarm verification that checks each integrated work item against its admitted scope, reruns work-item and root acceptance on the managed integration head, detects acceptance-induced mutations, and persists a final `SWARM VERIFIED` evidence report;
 - crash-safe swarm recovery with worker heartbeat leases, orphan detection, durable pause/resume/cancel controls, and fresh-identity replacement that rechecks authority and never silently inherits predecessor edits;
 - one-command swarm operation with bounded parallel dispatch, compact status, normalized logs, deterministic integration, final verification, and an offline three-worker demo;
@@ -1487,7 +1487,7 @@ Claim Plane remains an alpha coordination kernel.
 
 - It consumes structured intents; it does not yet generate the task graph.
 - Built-in source extraction is Python-first; other languages currently remain at file/declared-resource granularity unless an external adapter supplies structured semantic resources.
-- Python semantic analysis now provides stable symbol coordinates, dependency edges, downstream impact propagation, conflict classification, same-file admission evidence, and bounded semantic amendment preflight. Runtime pause/refresh/resume and deterministic integration ordering remain separate execution stages.
+- Python semantic analysis now provides stable symbol coordinates, dependency edges, downstream impact propagation, conflict classification, same-file admission evidence, bounded semantic amendment preflight, runtime pause/refresh/resume, and deterministic integration-time authority rechecks over the actual diff.
 - Documentation semantic checking is surface-oriented, not a full code-to-doc factual verifier.
 - `SQLitePlaneStore` is a single-host backend. The OS lock is derived from Git's canonical common directory, so separate local databases cannot choose independent lock namespaces. Multi-host deployments still require one network-authoritative registry such as PostgreSQL plus distributed leases and fencing.
 - The verified pipeline includes non-ignored untracked files, but ignored build/cache artifacts are intentionally excluded.

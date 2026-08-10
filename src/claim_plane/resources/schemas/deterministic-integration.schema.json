@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/deterministic-integration.schema.json",
+  "title": "Claim Plane Deterministic Integration v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "work_id",
+    "source",
+    "integration_head_before",
+    "disposition",
+    "reasons",
+    "authority_violations",
+    "semantic_checks",
+    "graph_fingerprint",
+    "staged_paths",
+    "staged_semantic_roots",
+    "metadata",
+    "fingerprint"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.deterministic-integration.v2"},
+    "work_id": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_commit", "commit", "changed_paths", "changed_regions", "semantic_roots"],
+      "properties": {
+        "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+        "changed_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "changed_regions": {"type": "array", "items": {"type": "object"}},
+        "semantic_roots": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "integration_head_before": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "disposition": {"enum": ["apply", "reject"]},
+    "reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "authority_verified",
+          "undeclared_path",
+          "region_violation",
+          "semantic_scope_violation",
+          "structural_extraction_failed",
+          "actual_semantic_conflict",
+          "actual_semantic_unknown",
+          "staged_path_mismatch",
+          "staged_semantic_mismatch"
+        ]
+      }
+    },
+    "authority_violations": {"type": "array", "items": {"type": "object"}},
+    "semantic_checks": {"type": "array", "items": {"type": "object"}},
+    "graph_fingerprint": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      ]
+    },
+    "staged_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "staged_semantic_roots": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "metadata": {"type": "object"},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

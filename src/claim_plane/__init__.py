@@ -325,6 +325,11 @@ from claim_plane.swarm import (
     ConcurrencyPlanStatus,
     ConflictPolicy,
     ExecutionWave,
+    DETERMINISTIC_INTEGRATION_PROTOCOL,
+    ActualMutationSurface,
+    DeterministicIntegrationEvidence,
+    IntegrationDisposition,
+    IntegrationReason,
     IntegrationTarget,
     OperatorEvent,
     DeterministicMergeQueue,
@@ -380,7 +385,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.21"
+__version__ = "0.37.22"
 
 __all__ = [
     "RUNTIME_FENCE_PROTOCOL",
@@ -601,6 +606,11 @@ __all__ = [
     "ConcurrencyPlanStatus",
     "ConflictPolicy",
     "ExecutionWave",
+    "DETERMINISTIC_INTEGRATION_PROTOCOL",
+    "ActualMutationSurface",
+    "DeterministicIntegrationEvidence",
+    "IntegrationDisposition",
+    "IntegrationReason",
     "IntegrationTarget",
     "OperatorEvent",
     "DeterministicMergeQueue",

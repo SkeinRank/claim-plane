@@ -126,6 +126,13 @@ The verifier compares declared intent with observed work:
 
 Preserved contracts are fail-closed. The Git collector builds a repository-wide inventory for the contracts named by a preserve policy, so a deletion cannot be mistaken for an artifact omitted from the changed hunk.
 
+
+### Deterministic Integration v2
+
+Swarm admission is a prediction over declared authority; integration is the point where Claim Plane can inspect the exact worker result. Each source snapshot is therefore reduced to an actual mutation surface before composition. Path and line-region authority are checked first. Python hunks are additionally mapped to Semantic Resource IR owners so a broad file capability cannot hide an edit to an undeclared sibling symbol.
+
+Git replay is intentionally split from commit creation. The snapshot is applied with no commit, the staged result is re-indexed after any line movement, and the semantic dependency graph is rebuilt over the composed worktree. Actual mutation roots are compared with already integrated work using the conflict taxonomy. Only an allowed staged result becomes a durable integration commit; rejection restores the prior integration head and leaves the target branch untouched.
+
 ### Verified integration pipeline
 
 `IntegrationRunner` is model-agnostic and closes the check/use gap. For each attempt it:
