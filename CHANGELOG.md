@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.15] — 2026-08-09
+
+### Added
+
+- introduce Semantic Dependency Graph v2 as a language-neutral, immutable repository graph over Semantic Resource IR v2 nodes with deterministic fingerprints and typed `defines`, `imports`, `calls`, `reads`, `writes`, `inherits`, `types`, `tests`, and `public_api` edges;
+- add a Python dependency frontend that resolves repository-local modules and symbols without importing or executing project code, records shared module/class/instance state access, and keeps external or ambiguous targets explicit instead of treating them as independent;
+- add dependency/dependent graph queries, source-location evidence, test-to-production relationships, repository-root-confined extraction, and a packaged machine-readable graph schema for later impact and conflict analysis.
+
 ## [0.37.14] — 2026-08-09
 
 ### Added

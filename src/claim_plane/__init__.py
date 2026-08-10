@@ -108,6 +108,10 @@ from claim_plane.core import (
     AdmissionDecision,
     AdmissionKind,
     Artifact,
+    DependencyEdge,
+    DependencyNode,
+    DependencyRelation,
+    DependencyResolution,
     ChangeIntent,
     ChangeManifest,
     ChangedRegion,
@@ -133,6 +137,8 @@ from claim_plane.core import (
     RepairAction,
     RepairActionKind,
     RepairPlan,
+    SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL,
+    SemanticDependencyGraph,
     PYTHON_STRUCTURAL_INDEX_PROTOCOL,
     PythonStructuralExtractionError,
     PythonStructuralIndex,
@@ -141,6 +147,8 @@ from claim_plane.core import (
     extract_python_file,
     extract_python_files,
     extract_python_structure,
+    build_python_dependency_graph,
+    build_python_repository_dependency_graph,
     ResourceKind,
     ScopeCommitment,
     ResourceRef,
@@ -333,7 +341,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.14"
+__version__ = "0.37.15"
 
 __all__ = [
     "VALIDATION_ACCEPTANCE_TIMEOUTS",
@@ -494,6 +502,10 @@ __all__ = [
     "AdmissionDecision",
     "AdmissionKind",
     "Artifact",
+    "DependencyEdge",
+    "DependencyNode",
+    "DependencyRelation",
+    "DependencyResolution",
     "ChangeIntent",
     "ChangeManifest",
     "ChangedRegion",
@@ -554,6 +566,8 @@ __all__ = [
     "RepairAction",
     "RepairActionKind",
     "RepairPlan",
+    "SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL",
+    "SemanticDependencyGraph",
     "PYTHON_STRUCTURAL_INDEX_PROTOCOL",
     "PythonStructuralExtractionError",
     "PythonStructuralIndex",
@@ -562,6 +576,8 @@ __all__ = [
     "extract_python_file",
     "extract_python_files",
     "extract_python_structure",
+    "build_python_dependency_graph",
+    "build_python_repository_dependency_graph",
     "ResourceKind",
     "ScopeCommitment",
     "ResourceRef",

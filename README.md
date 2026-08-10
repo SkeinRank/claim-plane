@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.14.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.15.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -372,12 +372,13 @@ installation.
 - adaptive committed/contingent scope with just-in-time atomic re-admission before first mutation;
 - exact files, globs, bounded line regions, symbols, concepts, contracts, routes, schemas, configs, and documents;
 - versioned Semantic Resource IR v2 with canonical `file → region → symbol → contract` coordinates and stable symbol/contract identities for downstream dependency analysis;
+- Semantic Dependency Graph v2 with deterministic `defines`, `imports`, `calls`, `reads`, `writes`, `inherits`, `types`, `tests`, and `public_api` relationships over repository resources;
 - strict optional Agent Lexicon resolution: requested semantic mode fails closed when unavailable;
 - concept-bound contracts through `subject_concept_id`;
 - deterministic outcomes for independent work, compatible overlap, contract dependencies, constrained parallelism, serialization, replanning, and rejection;
 - safe broad-scope admission: known glob/file overlap is serialized rather than optimistically admitted;
 - versioned intent amendments with optimistic version checks;
-- an atomically enforced acyclic dependency graph with producer-first topological order;
+- an atomically enforced runtime intent-dependency graph with producer-first topological order;
 - resource-scoped direct invalidation followed by transitive stale propagation, structured notices, and acknowledgement;
 - bounded worker context packs instead of replaying planner conversations;
 - Git hunk collection with declared-region verification;
@@ -876,8 +877,29 @@ resource for module-level code. Decorator lines belong to the decorated definiti
 logical definitions such as `typing.overload` declarations share one stable semantic identity
 while retaining distinct source occurrences in the structural index. Syntax errors fail closed
 with file/line coordinates, and file-based extraction is confined to an explicit repository
-root. The extractor intentionally does not infer call/import/type dependency edges yet; those
-are built by the dependency-graph stage on top of this structural index.
+root.
+
+Dependency Graph v2 builds on that structural index and a second non-executing AST pass to
+resolve repository-local imports, calls, inheritance, type references, shared state reads/writes,
+test relationships, and public API surfaces. Resolved repository targets are marked `internal`;
+known package/module targets remain `external`; ambiguous lexical targets remain `unresolved`
+instead of being silently treated as safe.
+
+```python
+from claim_plane import build_python_dependency_graph
+
+graph = build_python_dependency_graph({
+    "src/parser.py": parser_source,
+    "tests/test_parser.py": test_source,
+})
+
+for dependent in graph.dependents("symbol:src/parser.py#ParseResult", transitive=True):
+    print(dependent.identity)
+```
+
+Graph fingerprint is deterministic for identical source inputs, and every edge retains its typed
+relation, resolution class, and source locations. Repository extraction remains static analysis:
+Claim Plane does not import or execute target modules while building the graph.
 
 ## Admission semantics
 
@@ -1144,15 +1166,21 @@ claim-plane verify-evidence evidence.json evidence.sig.json \
   --key-env CLAIM_PLANE_SIGNING_KEY
 ```
 
-## Dependency graph
+## Dependency graphs
 
-Every explicit or inferred premise is stored as a directed dependency. Claim Plane rejects a proposed admission or amendment when it would create a cycle. The graph can be inspected in producer-first order:
+Claim Plane keeps two deliberately separate dependency views. **Semantic Dependency Graph v2**
+describes repository structure before execution: files, symbols, shared state, calls, imports,
+types, inheritance, tests, and public API relationships. It is the evidence surface used by
+later semantic impact and conflict analysis. **Runtime intent dependencies** describe admitted
+work ordering and stale-premise propagation.
+
+Every explicit or inferred runtime premise is stored as a directed intent dependency. Claim Plane rejects a proposed admission or amendment when it would create a cycle. The runtime graph can be inspected in producer-first order:
 
 ```bash
 claim-plane --db .claim-plane/plane.db graph
 ```
 
-The graph response includes nodes, typed edges, producer states, cycle evidence, and a topological order. A producer amendment invalidates only directly affected resource premises on the first hop; once a consumer becomes stale, its outputs are treated as untrusted and invalidation propagates transitively.
+The runtime graph response includes intent nodes, typed premise edges, producer states, cycle evidence, and a topological order. A producer amendment invalidates only directly affected resource premises on the first hop; once a consumer becomes stale, its outputs are treated as untrusted and invalidation propagates transitively. The semantic repository graph is an immutable analysis artifact and does not replace those runtime ordering guarantees.
 
 ## Verified integration pipeline
 

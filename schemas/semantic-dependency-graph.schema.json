@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/semantic-dependency-graph.schema.json",
+  "title": "Claim Plane Semantic Dependency Graph v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "fingerprint", "source_digests", "nodes", "edges", "metadata"],
+  "properties": {
+    "protocol": {"const": "claim-plane.semantic-dependency-graph.v2"},
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_digests": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "nodes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/node"}
+    },
+    "edges": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/edge"}
+    },
+    "metadata": {"type": "object"}
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "required": ["protocol", "layer", "kind", "stable_id", "identity", "identifier", "metadata"],
+      "properties": {
+        "protocol": {"const": "claim-plane.semantic-resource-ir.v2"},
+        "layer": {"enum": ["file", "region", "symbol", "contract", "resource"]},
+        "kind": {"type": "string"},
+        "stable_id": {"type": "string"},
+        "identity": {"type": "string"},
+        "identifier": {"type": "string"},
+        "path": {"type": ["string", "null"]},
+        "region": {"type": ["string", "null"]},
+        "language": {"type": ["string", "null"]},
+        "qualified_name": {"type": ["string", "null"]},
+        "signature": {"type": ["string", "null"]},
+        "concept_id": {"type": ["string", "null"]},
+        "subject_concept_id": {"type": ["string", "null"]},
+        "parent_identity": {"type": ["string", "null"]},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "public", "test", "external", "metadata"],
+      "properties": {
+        "resource": {"$ref": "#/$defs/resource"},
+        "public": {"type": "boolean"},
+        "test": {"type": "boolean"},
+        "external": {"type": "boolean"},
+        "metadata": {"type": "object"}
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_identity", "target_identity", "relation", "resolution", "locations", "metadata"],
+      "properties": {
+        "source_identity": {"type": "string", "minLength": 1},
+        "target_identity": {"type": "string", "minLength": 1},
+        "relation": {"enum": ["defines", "imports", "calls", "reads", "writes", "inherits", "types", "tests", "public_api"]},
+        "resolution": {"enum": ["internal", "external", "unresolved"]},
+        "locations": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 1},
+          "uniqueItems": true
+        },
+        "metadata": {"type": "object"}
+      }
+    }
+  }
+}

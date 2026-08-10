@@ -4,7 +4,7 @@ message: >-
   research papers are listed in the references below.
 title: Claim Plane
 type: software
-version: 0.37.14
+version: 0.37.15
 date-released: 2026-08-09
 authors:
   - family-names: Nikolaev

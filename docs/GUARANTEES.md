@@ -41,3 +41,15 @@ project hooks as operating-system enforcement.
 Normalized lifecycle evidence excludes raw prompts, source content, credentials, tool
 payloads, hook output, and final model messages. Digests and structured metadata are
 used where the raw value is not required for verification.
+
+## Semantic dependency analysis boundary
+
+Semantic Dependency Graph v2 is static repository evidence, not an execution sandbox and not
+an automatic permission grant. The Python frontend parses source without importing or
+executing repository modules and classifies targets as `internal`, `external`, or `unresolved`.
+Unresolved relationships remain explicit so later admission stages can fail closed instead of
+assuming independence.
+
+The graph currently exposes repository structure and dependency queries for downstream impact
+and conflict analysis. Existing runtime intent ordering, stale-state propagation, Git hunk
+verification, and brokered mutation enforcement remain the authoritative execution controls.

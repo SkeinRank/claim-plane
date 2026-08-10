@@ -2,6 +2,14 @@
 
 from claim_plane.core.extract import Artifact, artifacts_to_claims, extract_artifacts
 from claim_plane.core.governance import GovernancePolicy
+from claim_plane.core.dependency_graph import (
+    SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL,
+    DependencyEdge,
+    DependencyNode,
+    DependencyRelation,
+    DependencyResolution,
+    SemanticDependencyGraph,
+)
 from claim_plane.core.models import (
     AccessMode,
     AdmissionConflict,
@@ -32,6 +40,10 @@ from claim_plane.core.models import (
     Verdict,
     VerdictKind,
     WorkerTier,
+)
+from claim_plane.core.python_dependency import (
+    build_python_dependency_graph,
+    build_python_repository_dependency_graph,
 )
 from claim_plane.core.python_structure import (
     PYTHON_STRUCTURAL_INDEX_PROTOCOL,
@@ -74,6 +86,10 @@ __all__ = [
     "AdmissionDecision",
     "AdmissionKind",
     "Artifact",
+    "DependencyEdge",
+    "DependencyNode",
+    "DependencyRelation",
+    "DependencyResolution",
     "ChangeIntent",
     "ChangeManifest",
     "ChangedRegion",
@@ -101,6 +117,8 @@ __all__ = [
     "RepairAction",
     "RepairActionKind",
     "RepairPlan",
+    "SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL",
+    "SemanticDependencyGraph",
     "PYTHON_STRUCTURAL_INDEX_PROTOCOL",
     "PythonStructuralExtractionError",
     "PythonStructuralIndex",
@@ -109,6 +127,8 @@ __all__ = [
     "extract_python_file",
     "extract_python_files",
     "extract_python_structure",
+    "build_python_dependency_graph",
+    "build_python_repository_dependency_graph",
     "ResourceKind",
     "ScopeCommitment",
     "ResourceRef",
