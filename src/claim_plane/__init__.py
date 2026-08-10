@@ -403,7 +403,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.25"
+__version__ = "0.37.26"
 
 __all__ = [
     "RUNTIME_FENCE_PROTOCOL",

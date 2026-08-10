@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.26] — 2026-08-10
+
+### Added
+
+- Added a deterministic ablation study over the frozen confirmatory workload with four named admission configurations: full v2, file/region baseline, symbols without dependency edges, and semantic dependencies without broad contract propagation.
+- Added `confirmatory ablation-run` and `confirmatory ablation-pair` execution paths that reuse frozen Planner v1 declarations, physical inner-worker timing, and the bounded outer pair pool.
+- Added source-bound ablation evidence containing semantic graph fingerprints, execution waves, concurrency constraints, per-profile pair outcomes, physical overlap, and wall-clock deltas against the full deterministic configuration.
+
+### Changed
+
+- The static experimental arm can accept a source-bound deterministic admission decision for research runs, including dependency-derived `A->B` or `B->A` serial order. The published confirmatory artifacts remain immutable.
+- Planner-declared Python line regions are projected onto structural symbol owners before semantic admission; a declaration touching a definition line is conservatively treated as contract-sensitive evidence.
+
 ## [0.37.25] — 2026-08-10
 
 ### Added

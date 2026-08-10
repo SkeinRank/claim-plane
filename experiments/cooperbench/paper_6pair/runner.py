@@ -575,6 +575,8 @@ def run_pair(
     coder_seed=None,
     frozen_plans=None,
     physical_parallel=False,
+    admission_override=None,
+    ablation_profile=None,
 ):
     assert arm in ARMS
 
@@ -779,6 +781,8 @@ def run_pair(
         "physical_pair_started_ns": pair_started_ns,
         "physical_pair_finished_ns": None,
         "physical_pair_wall_time_seconds": None,
+        "deterministic_ablation_profile": ablation_profile,
+        "deterministic_ablation_evidence": None,
     }
 
     worktrees = []
@@ -995,6 +999,19 @@ def run_pair(
                     force_all_committed=(force_all_committed),
                 )
 
+            if admission_override is not None:
+                if arm != "claim-plane-static":
+                    raise ValueError(
+                        "deterministic admission override is only supported by the static Claim Plane arm"
+                    )
+                verdict = dict(admission_override)
+                record["deterministic_ablation_profile"] = ablation_profile or verdict.get(
+                    "ablation_profile"
+                )
+                record["deterministic_ablation_evidence"] = verdict.get(
+                    "ablation_evidence"
+                )
+
             record["initial_serialized"] = verdict["serialized"]
 
             record["serialized"] = verdict["serialized"]
@@ -1154,6 +1171,15 @@ def run_pair(
             force_all_committed = True
 
             if record["initial_serialized"]:
+                serial_order = str(
+                    (admission_override or {}).get("serial_order") or "A->B"
+                )
+                if serial_order not in {"A->B", "B->A"}:
+                    raise ValueError(
+                        f"unsupported deterministic serial order: {serial_order}"
+                    )
+                record["dynamic_serialization_order"] = serial_order
+
                 controller_a = _single_scope_controller(
                     plan_a,
                     intent_id="A",
@@ -1163,23 +1189,6 @@ def run_pair(
                     scope_events=record["scope_events"],
                     base_commit=base,
                 )
-
-                tree_a, result_a = _run_agent(
-                    repo,
-                    worktrees,
-                    path=_new_agent_path(
-                        safe_name,
-                        "A",
-                    ),
-                    base_commit=base,
-                    task_dir=task_dir,
-                    feature_dir=feature_a,
-                    seed=seed_a,
-                    message="feature A",
-                    trace_id=(f"{run_id}|agent=A"),
-                    mutation_guard=None,
-                )
-
                 controller_b = _single_scope_controller(
                     plan_b,
                     intent_id="B",
@@ -1190,23 +1199,59 @@ def run_pair(
                     base_commit=base,
                 )
 
-                tree_b, result_b = _run_agent(
-                    repo,
-                    worktrees,
-                    path=_new_agent_path(
-                        safe_name,
-                        "B",
-                    ),
-                    base_commit=result_a["head"],
-                    task_dir=task_dir,
-                    feature_dir=feature_b,
-                    seed=seed_b,
-                    message="feature B",
-                    trace_id=(f"{run_id}|agent=B"),
-                    mutation_guard=None,
-                )
+                if serial_order == "A->B":
+                    tree_a, result_a = _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "A"),
+                        base_commit=base,
+                        task_dir=task_dir,
+                        feature_dir=feature_a,
+                        seed=seed_a,
+                        message="feature A",
+                        trace_id=(f"{run_id}|agent=A"),
+                        mutation_guard=None,
+                    )
+                    tree_b, result_b = _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "B"),
+                        base_commit=result_a["head"],
+                        task_dir=task_dir,
+                        feature_dir=feature_b,
+                        seed=seed_b,
+                        message="feature B",
+                        trace_id=(f"{run_id}|agent=B"),
+                        mutation_guard=None,
+                    )
+                    final_tree = tree_b
+                else:
+                    tree_b, result_b = _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "B"),
+                        base_commit=base,
+                        task_dir=task_dir,
+                        feature_dir=feature_b,
+                        seed=seed_b,
+                        message="feature B",
+                        trace_id=(f"{run_id}|agent=B"),
+                        mutation_guard=None,
+                    )
+                    tree_a, result_a = _run_agent(
+                        repo,
+                        worktrees,
+                        path=_new_agent_path(safe_name, "A"),
+                        base_commit=result_b["head"],
+                        task_dir=task_dir,
+                        feature_dir=feature_a,
+                        seed=seed_a,
+                        message="feature A",
+                        trace_id=(f"{run_id}|agent=A"),
+                        mutation_guard=None,
+                    )
+                    final_tree = tree_a
 
-                final_tree = tree_b
                 record["integration_success"] = True
                 record["clean_merge"] = True
                 record["coder_latency_critical"] = (

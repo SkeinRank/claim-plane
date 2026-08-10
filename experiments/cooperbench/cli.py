@@ -413,6 +413,39 @@ def cmd_confirmatory_physical_run(args: argparse.Namespace) -> int:
     return 0 if result.get("complete") else 1
 
 
+
+
+def cmd_confirmatory_ablation_pair(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.ablation import parse_ablation_profiles, run_ablation_pair
+
+    result = run_ablation_pair(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        pair_index=args.pair,
+        profiles=parse_ablation_profiles(args.profiles),
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0
+
+
+def cmd_confirmatory_ablation_run(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.ablation import parse_ablation_profiles, run_ablation_batch
+    from .physical_parallel import parse_pair_indexes
+
+    result = run_ablation_batch(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        pair_indexes=parse_pair_indexes(args.pairs, pair_count=30),
+        profiles=parse_ablation_profiles(args.profiles),
+        max_parallel_pairs=args.max_parallel_pairs,
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0 if result.get("complete") else 1
+
 def cmd_confirmatory_status(args: argparse.Namespace) -> int:
     from .confirmatory_30x3.runner import study_status
 
@@ -529,6 +562,57 @@ def _add_confirmatory_commands(sub: Any) -> None:
     physical_pair.add_argument("--repo", default=".")
     physical_pair.add_argument("--no-resume", action="store_true")
     physical_pair.set_defaults(func=cmd_confirmatory_physical_pair)
+
+
+    ablation = confirmatory_sub.add_parser(
+        "ablation-run",
+        help=(
+            "Run deterministic admission ablations over frozen pairs through the "
+            "bounded physical worker pool."
+        ),
+    )
+    _add_confirmatory_paths(ablation)
+    ablation.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    ablation.add_argument(
+        "--pairs",
+        default="1-6",
+        help="One-based pair indexes or ranges, for example 1-6,9,12.",
+    )
+    ablation.add_argument(
+        "--profiles",
+        default=(
+            "full_v2,file_region_baseline,symbols_without_dependencies,"
+            "no_contract_propagation"
+        ),
+        help="Comma-separated deterministic ablation profiles.",
+    )
+    ablation.add_argument(
+        "--max-parallel-pairs",
+        type=int,
+        default=6,
+        help="Maximum number of independent pair processes active at once.",
+    )
+    ablation.add_argument("--repo", default=".")
+    ablation.add_argument("--no-resume", action="store_true")
+    ablation.set_defaults(func=cmd_confirmatory_ablation_run)
+
+    ablation_pair = confirmatory_sub.add_parser(
+        "ablation-pair",
+        help="Execute one frozen pair once per deterministic admission profile.",
+    )
+    _add_confirmatory_paths(ablation_pair)
+    ablation_pair.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    ablation_pair.add_argument("--pair", required=True, type=int, choices=range(1, 31))
+    ablation_pair.add_argument(
+        "--profiles",
+        default=(
+            "full_v2,file_region_baseline,symbols_without_dependencies,"
+            "no_contract_propagation"
+        ),
+    )
+    ablation_pair.add_argument("--repo", default=".")
+    ablation_pair.add_argument("--no-resume", action="store_true")
+    ablation_pair.set_defaults(func=cmd_confirmatory_ablation_pair)
 
     status = confirmatory_sub.add_parser(
         "status", help="Report planner-freeze and nine-shard completion state."

@@ -242,6 +242,38 @@ The physical execution artifacts are written under
 `claim-plane.physical-parallel-benchmark.v2` protocol. The historical published results are
 left untouched; fresh measurements are required before any wall-clock speedup claim.
 
+## Deterministic ablation study
+
+The frozen confirmatory workload can be replayed under named deterministic admission
+configurations without changing the selected pairs, coder seeds, Planner v1 outputs, or
+physical timing instrumentation. The default study compares:
+
+- `full_v2`: structural symbols plus the complete semantic dependency graph;
+- `file_region_baseline`: file and declared line-region evidence only;
+- `symbols_without_dependencies`: structural symbol identities with dependency edges removed;
+- `no_contract_propagation`: implementation-level dependencies remain while broad
+  import/write/inheritance/type/public-API propagation is removed.
+
+Run six independent pairs concurrently while each pair evaluates all four configurations:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory ablation-run \
+  --cooperbench /path/to/CooperBench \
+  --seed 101 \
+  --pairs 1-6 \
+  --max-parallel-pairs 6
+```
+
+Artifacts are written under `.claim-plane/experiments/deterministic-ablation-v1/`. Each
+profile records the source-bound semantic graph fingerprint, deterministic execution waves,
+serialization/order decision, pair outcome, measured inner overlap, and wall-clock delta
+against `full_v2`. Outer pair concurrency remains a harness optimization and is never counted
+as Claim Plane speedup.
+
+This study isolates initial deterministic admission. Runtime amendment and stale-worker
+recovery are evaluated by the deterministic conformance/stress workload rather than being
+silently attributed to frozen pairs that do not exercise those events.
+
 ## Pinned Linux environment
 
 A Docker image is provided for runs that should not depend on the host Python toolchain.

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/deterministic-ablation-study.schema.json",
+  "title": "Claim Plane deterministic ablation study",
+  "type": "object",
+  "required": [
+    "protocol",
+    "study_id",
+    "study_fingerprint",
+    "claim_plane_runtime_version",
+    "pair_index",
+    "pair_key",
+    "coder_seed",
+    "profiles",
+    "rows",
+    "complete"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.deterministic-ablation-study.v1"
+    },
+    "study_id": {"type": "string", "minLength": 1},
+    "study_fingerprint": {"type": "string", "minLength": 16},
+    "claim_plane_runtime_version": {"type": "string", "minLength": 1},
+    "pair_index": {"type": "integer", "minimum": 1},
+    "pair_key": {"type": "string", "minLength": 1},
+    "coder_seed": {"type": "integer"},
+    "coder_seed_index": {"type": "integer", "minimum": 0},
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "full_v2",
+          "file_region_baseline",
+          "symbols_without_dependencies",
+          "no_contract_propagation"
+        ]
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "ablation_profile",
+          "ablation_gate",
+          "serialized",
+          "physical_parallel_enabled"
+        ],
+        "properties": {
+          "ablation_profile": {"type": "string"},
+          "ablation_gate": {"type": "object"},
+          "serialized": {"type": "boolean"},
+          "pair_pass": {"type": ["boolean", "null"]},
+          "physical_parallel_enabled": {"type": "boolean"},
+          "physical_concurrency_observed": {"type": "boolean"},
+          "physical_overlap_seconds": {"type": "number", "minimum": 0},
+          "ablation_wall_time_seconds": {"type": "number", "minimum": 0}
+        },
+        "additionalProperties": true
+      }
+    },
+    "comparisons_vs_full_v2": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "complete": {"const": true}
+  },
+  "additionalProperties": true
+}

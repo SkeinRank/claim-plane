@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.25.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.26.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -1507,6 +1507,24 @@ The outer worker pool is an experiment-throughput optimization and is reported s
 from inner pair overlap. It therefore cannot be counted as Claim Plane speedup. Each outer
 pair receives an isolated repository cache and worktree root so concurrent runs do not
 share mutable Git state.
+
+A deterministic ablation runner reuses those same frozen inputs and physical timing hooks
+while varying only the admission evidence. The default profiles compare full semantic
+concurrency against file/region-only admission, symbol identities without dependency edges,
+and semantic dependencies with broad contract propagation removed:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory ablation-run \
+  --cooperbench /path/to/CooperBench \
+  --seed 101 \
+  --pairs 1-6 \
+  --max-parallel-pairs 6
+```
+
+The ablation output keeps source-bound graph fingerprints, deterministic execution waves,
+pair outcomes, measured inner overlap, and wall-clock deltas against `full_v2`. Published
+confirmatory artifacts are not rewritten. Runtime amendment and stale-worker recovery remain
+separate conformance/stress mechanisms unless a workload actually exercises them.
 
 Aggregation is intentionally strict: it requires all nine completed shards and the full
 360-row pair/seed/arm matrix before writing final analysis artifacts. The output includes
