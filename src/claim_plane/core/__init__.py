@@ -21,6 +21,11 @@ from claim_plane.core.conflict import (
     SemanticConflictReason,
     classify_semantic_conflict,
 )
+from claim_plane.core.fencing import (
+    RUNTIME_FENCE_PROTOCOL,
+    RuntimeFence,
+    RuntimeFenceReason,
+)
 from claim_plane.core.governance import GovernancePolicy
 from claim_plane.core.dependency_graph import (
     SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL,
@@ -159,6 +164,9 @@ __all__ = [
     "ClaimType",
     "FindingCode",
     "FindingSeverity",
+    "RUNTIME_FENCE_PROTOCOL",
+    "RuntimeFence",
+    "RuntimeFenceReason",
     "GovernancePolicy",
     "IntegrationFinding",
     "IntegrationReport",

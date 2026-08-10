@@ -2963,6 +2963,15 @@ def cmd_notices(args: argparse.Namespace) -> int:
         plane.close()
 
 
+def cmd_runtime_fences(args: argparse.Namespace) -> int:
+    plane = _plane(args)
+    try:
+        _write_json(plane.runtime_fences(args.intent_id), args.out)
+        return 0
+    finally:
+        plane.close()
+
+
 def cmd_ack_notice(args: argparse.Namespace) -> int:
     plane = _plane(args)
     try:
@@ -4462,6 +4471,14 @@ def build_parser() -> argparse.ArgumentParser:
     notices.add_argument("intent_id")
     notices.add_argument("--all", action="store_true")
     notices.set_defaults(func=cmd_notices)
+
+    runtime_fences = sub.add_parser(
+        "runtime-fences",
+        help="Show durable runtime-authority fences caused by stale premises.",
+    )
+    runtime_fences.add_argument("intent_id", nargs="?")
+    runtime_fences.add_argument("--out")
+    runtime_fences.set_defaults(func=cmd_runtime_fences)
 
     ack_notice = sub.add_parser(
         "ack-notice", help="Acknowledge one coordination notice."

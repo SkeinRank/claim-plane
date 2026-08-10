@@ -128,3 +128,14 @@ already exist or when written with a trailing slash. An explicit request to add 
 Verbose mode preserves raw Codex runtime diagnostics in addition to the human summary.
 `--verbose` and `--json` are mutually exclusive. Redirected output is plain text, and
 interactive colour can be disabled with the standard `NO_COLOR` environment variable.
+
+## Runtime premise fences
+
+Advanced coordination workflows can inspect durable execution fences created when a tracked premise becomes stale:
+
+```bash
+claim-plane --db .claim-plane/plane.db runtime-fences
+claim-plane --db .claim-plane/plane.db runtime-fences <intent-id>
+```
+
+A fence means governed mutation authority has been revoked. It does not mean the worker has been refreshed or resumed; a later lifecycle transition must establish fresh authority before execution continues.

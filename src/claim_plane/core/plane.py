@@ -319,6 +319,11 @@ class Plane:
     def dependency_graph(self) -> dict[str, object]:
         return self._registry.dependency_graph()
 
+    def runtime_fences(self, intent_id: str | None = None) -> list[dict]:
+        """Return durable runtime-authority fences, optionally for one intent."""
+
+        return self._registry.runtime_fences(intent_id)
+
     # ------------------------------------------------ trusted observation sessions
 
     def start_observation_session(

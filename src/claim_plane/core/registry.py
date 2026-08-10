@@ -14,6 +14,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Mapping
 
+from claim_plane.core.fencing import RuntimeFence
+
 from claim_plane.core.models import (
     AccessMode,
     AdmissionDecision,
@@ -178,6 +180,23 @@ class ClaimRegistry:
                 owner TEXT,
                 payload_json TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS runtime_fences (
+                fence_id TEXT PRIMARY KEY,
+                intent_id TEXT NOT NULL,
+                producer_intent_id TEXT,
+                broker_instance_id TEXT,
+                root_path TEXT,
+                fencing_token INTEGER,
+                reason TEXT NOT NULL,
+                status TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_runtime_fences_intent
+                ON runtime_fences(intent_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_runtime_fences_broker
+                ON runtime_fences(broker_instance_id, created_at);
 
             CREATE TABLE IF NOT EXISTS verification_reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1122,6 +1141,194 @@ class ClaimRegistry:
             (dependent, producer, kind, key, status, now, now),
         )
 
+    def _record_runtime_fence_locked(
+        self,
+        *,
+        intent_id: str,
+        producer_intent_id: str | None,
+        reason: str,
+        resource_keys: Iterable[str],
+        dependency_chain: Iterable[str],
+        broker_instance: Mapping[str, object] | None,
+        now: str,
+    ) -> RuntimeFence:
+        keys = tuple(sorted({str(item) for item in resource_keys if str(item)}))
+        chain = tuple(str(item) for item in dependency_chain if str(item))
+        instance_id = (
+            None if broker_instance is None else str(broker_instance["instance_id"])
+        )
+        root_path = (
+            None if broker_instance is None else str(broker_instance["root_path"])
+        )
+        fencing_token = (
+            None
+            if broker_instance is None
+            else int(str(broker_instance["fencing_token"]))
+        )
+        seed = json.dumps(
+            {
+                "intent_id": intent_id,
+                "producer_intent_id": producer_intent_id,
+                "reason": reason,
+                "resource_keys": list(keys),
+                "dependency_chain": list(chain),
+                "broker_instance_id": instance_id,
+                "created_at": now,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        fence_id = "fence-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+        fence = RuntimeFence(
+            fence_id=fence_id,
+            intent_id=intent_id,
+            producer_intent_id=producer_intent_id,
+            reason=reason,
+            resource_keys=keys,
+            dependency_chain=chain,
+            broker_instance_id=instance_id,
+            root_path=root_path,
+            fencing_token=fencing_token,
+            status="fenced",
+            created_at=now,
+            metadata={
+                "live_writer_revoked": broker_instance is not None,
+                "resume_requires_fresh_authority": True,
+            },
+        )
+        self._conn.execute(
+            """
+            INSERT INTO runtime_fences
+              (fence_id,intent_id,producer_intent_id,broker_instance_id,root_path,
+               fencing_token,reason,status,payload_json,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                fence.fence_id,
+                fence.intent_id,
+                fence.producer_intent_id,
+                fence.broker_instance_id,
+                fence.root_path,
+                fence.fencing_token,
+                fence.reason,
+                fence.status,
+                json.dumps(fence.to_dict(), ensure_ascii=False, sort_keys=True),
+                fence.created_at,
+            ),
+        )
+        return fence
+
+    def _fence_intent_runtime_locked(
+        self,
+        intent_id: str,
+        *,
+        producer_intent_id: str | None,
+        reason: str,
+        resource_keys: Iterable[str],
+        dependency_chain: Iterable[str],
+    ) -> list[RuntimeFence]:
+        """Revoke live broker capabilities for one stale intent atomically.
+
+        Existing prepared operations are failed before they can commit and the writer
+        lease is removed.  The broker instance keeps its signed token for audit, but
+        its state becomes ``fenced``; a later broker registration necessarily receives
+        a fresh monotonic token from the existing counter.
+        """
+
+        now = _iso(_utc_now())
+        instances = self._conn.execute(
+            "SELECT * FROM broker_instances "
+            "WHERE intent_id=? AND state='active' ORDER BY instance_id",
+            (intent_id,),
+        ).fetchall()
+        fences: list[RuntimeFence] = []
+        if not instances:
+            fences.append(
+                self._record_runtime_fence_locked(
+                    intent_id=intent_id,
+                    producer_intent_id=producer_intent_id,
+                    reason=reason,
+                    resource_keys=resource_keys,
+                    dependency_chain=dependency_chain,
+                    broker_instance=None,
+                    now=now,
+                )
+            )
+            return fences
+
+        for instance in instances:
+            error = (
+                "runtime authority fenced because an execution premise became stale"
+            )
+            if producer_intent_id:
+                error += f" after producer {producer_intent_id}"
+            self._conn.execute(
+                """
+                UPDATE broker_operations
+                SET state='failed', error=?
+                WHERE instance_id=? AND state='pending'
+                """,
+                (error, instance["instance_id"]),
+            )
+            self._conn.execute(
+                "DELETE FROM broker_writer_leases WHERE instance_id=?",
+                (instance["instance_id"],),
+            )
+            self._conn.execute(
+                """
+                UPDATE broker_instances
+                SET state='fenced', stopped_at=COALESCE(stopped_at,?), last_seen_at=?
+                WHERE instance_id=? AND state='active'
+                """,
+                (now, now, instance["instance_id"]),
+            )
+            fence = self._record_runtime_fence_locked(
+                intent_id=intent_id,
+                producer_intent_id=producer_intent_id,
+                reason=reason,
+                resource_keys=resource_keys,
+                dependency_chain=dependency_chain,
+                broker_instance=instance,
+                now=now,
+            )
+            fences.append(fence)
+            owner_row = self._conn.execute(
+                "SELECT owner FROM intents WHERE intent_id=?", (intent_id,)
+            ).fetchone()
+            self._event_locked(
+                "runtime_authority_fenced",
+                intent_id,
+                owner_row["owner"] if owner_row else None,
+                {
+                    "fence": fence.to_dict(),
+                    "failed_pending_operations": self._conn.execute(
+                        "SELECT COUNT(*) AS n FROM broker_operations "
+                        "WHERE instance_id=? AND state='failed' AND error=?",
+                        (instance["instance_id"], error),
+                    ).fetchone()["n"],
+                },
+            )
+        return fences
+
+    def runtime_fences(self, intent_id: str | None = None) -> list[dict]:
+        if intent_id is None:
+            rows = self._conn.execute(
+                "SELECT payload_json FROM runtime_fences ORDER BY created_at,fence_id"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT payload_json FROM runtime_fences "
+                "WHERE intent_id=? ORDER BY created_at,fence_id",
+                (intent_id,),
+            ).fetchall()
+        result: list[dict] = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            fence = RuntimeFence.from_dict(payload)
+            result.append({**fence.to_dict(), "fingerprint": fence.fingerprint()})
+        return result
+
     def invalidate_dependents(
         self, producer_intent_id: str, resource_keys: list[str], *, reason: str
     ) -> list[str]:
@@ -1174,13 +1381,25 @@ class ClaimRegistry:
                     "UPDATE intent_dependencies SET status='stale',updated_at=? WHERE intent_id=? AND depends_on_intent_id=?",
                     (now, dependent, current_producer),
                 )
+                dependency_chain = (*chain, dependent)
+                runtime_fences = self._fence_intent_runtime_locked(
+                    dependent,
+                    producer_intent_id=current_producer,
+                    reason=reason,
+                    resource_keys=keys,
+                    dependency_chain=dependency_chain,
+                )
                 payload = {
                     "reason": reason,
                     "resource_keys": list(keys),
                     "root_producer": producer,
                     "direct_producer": current_producer,
                     "depth": depth + 1,
-                    "dependency_chain": [*chain, dependent],
+                    "dependency_chain": list(dependency_chain),
+                    "runtime_fence_ids": [item.fence_id for item in runtime_fences],
+                    "runtime_writer_fenced": any(
+                        item.broker_instance_id is not None for item in runtime_fences
+                    ),
                 }
                 self._insert_notice_locked(
                     recipient=dependent,
@@ -2773,6 +2992,7 @@ class ClaimRegistry:
                     "SELECT * FROM coordination_notices ORDER BY id"
                 )
             ],
+            "runtime_fences": self.runtime_fences(),
             "observation_sessions": [
                 self.observation_session(row["session_id"])
                 for row in self._conn.execute(

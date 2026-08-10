@@ -102,6 +102,9 @@ from claim_plane.oss_pilot import (
     run_oss_pilot_acceptance,
 )
 from claim_plane.core import (
+    RUNTIME_FENCE_PROTOCOL,
+    RuntimeFence,
+    RuntimeFenceReason,
     SEMANTIC_AMENDMENT_PROTOCOL,
     ActiveAmendmentRelation,
     SemanticAmendmentAssessment,
@@ -374,9 +377,12 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.19"
+__version__ = "0.37.20"
 
 __all__ = [
+    "RUNTIME_FENCE_PROTOCOL",
+    "RuntimeFence",
+    "RuntimeFenceReason",
     "SEMANTIC_AMENDMENT_PROTOCOL",
     "ActiveAmendmentRelation",
     "SemanticAmendmentAssessment",

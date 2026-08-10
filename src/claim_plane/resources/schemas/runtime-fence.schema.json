@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/runtime-fence.schema.json",
+  "title": "Claim Plane Runtime Fence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "fence_id",
+    "intent_id",
+    "producer_intent_id",
+    "reason",
+    "resource_keys",
+    "dependency_chain",
+    "broker_instance_id",
+    "root_path",
+    "fencing_token",
+    "status",
+    "created_at",
+    "metadata"
+  ],
+  "properties": {
+    "protocol": {"const": "claim-plane.runtime-fence.v1"},
+    "fence_id": {"type": "string", "pattern": "^fence-[0-9a-f]{24}$"},
+    "intent_id": {"type": "string", "minLength": 1},
+    "producer_intent_id": {"type": ["string", "null"]},
+    "reason": {"type": "string", "minLength": 1},
+    "resource_keys": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "dependency_chain": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "broker_instance_id": {"type": ["string", "null"]},
+    "root_path": {"type": ["string", "null"]},
+    "fencing_token": {"type": ["integer", "null"], "minimum": 1},
+    "status": {"const": "fenced"},
+    "created_at": {"type": "string", "minLength": 1},
+    "metadata": {"type": "object"}
+  }
+}

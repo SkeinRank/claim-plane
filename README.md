@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.19.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.20.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -421,7 +421,8 @@ installation.
 - versioned swarm budget policies with hard worker, graph-size, launch, token, cost, wall-time, retry, and concurrency ceilings that the planner cannot widen silently;
 - adaptive concurrency plans that combine the dependency DAG with region, overlap, contract, schema, and worker-budget constraints to produce deterministic execution waves or a fail-closed `replan_required` result;
 - Same-file Admission v2 that can admit unknown-region same-file work when graph-backed symbol mutations are proven `independent` or explicitly `commutative`, while preserving explicit deny/serialize policy and deterministic ordering for semantic producer-consumer dependencies;
-- Semantic Amendment Protocol v2 that requires monotonic scope growth, caps new authority and propagated impact, checks additional semantic resources against active intents inside the amendment transaction, and leaves ordered overlap blocked for runtime fencing;
+- Semantic Amendment Protocol v2 that requires monotonic scope growth, caps new authority and propagated impact, checks additional semantic resources against active intents inside the amendment transaction, and leaves ordered overlap explicit until refresh/resume can establish the required order;
+- Runtime Premise Fencing that atomically revokes live broker mutation authority when a tracked premise becomes stale, fails prepared operations, releases the writer lease, and persists source-bound fence evidence;
 - shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, and promotes serialization constraints into effective dependencies;
 - a dynamic dependency scheduler that releases only admitted, prerequisite-complete work within current worker capacity and distinguishes runnable, active, retryable, terminal, and dependency-blocked items;
 - a deterministic merge queue that snapshots successful worker worktrees, integrates results on a Claim Plane-owned branch in effective-dependency order, blocks downstream workers until prerequisites are integrated, captures real Git conflicts, and leaves the user target branch untouched;
@@ -981,9 +982,10 @@ transaction as amendment admission.
 
 `independent` and explicitly proven `commutative` relationships may proceed. `conflicting`,
 `unknown`, unresolved dependency boundaries, non-monotonic changes, and exceeded bounds fail closed.
-An `ordered` relationship is surfaced as `order` rather than silently admitted: the current runtime
-does not yet pause and refresh an already active worker, so runtime fencing must establish that order
-before the mutation is retried. The preflight evidence is persisted with the amendment audit event.
+An `ordered` relationship is surfaced as `order` rather than silently admitted. Runtime premise
+fencing can now revoke an active governed writer when its premise becomes stale, but the worker still
+needs refresh/rebase/resume under fresh authority before ordered expansion can be retried. The
+preflight evidence is persisted with the amendment audit event.
 
 ```python
 from claim_plane import SemanticAmendmentBounds
@@ -1028,21 +1030,26 @@ A producer can amend an admitted intent with an optimistic version check:
 claim-plane --db .claim-plane/plane.db amend updated-core-intent.json --expected-version 1
 ```
 
-When an admitted producer changes a contract, Claim Plane:
+When an admitted producer changes a tracked premise, Claim Plane:
 
-1. records a new intent version;
+1. records the producer change;
 2. marks affected dependent intents as `stale`;
-3. creates structured coordination notices;
-4. exposes those notices in the worker context pack;
-5. propagates staleness transitively to downstream consumers whose producer outputs are no longer trustworthy;
-6. requires amendment and re-admission before any stale worker continues.
+3. atomically fences any active governed broker for each stale dependent;
+4. fails prepared-but-uncommitted broker operations and releases the writer lease;
+5. creates structured coordination notices and durable runtime-fence evidence;
+6. exposes those notices in the worker context pack;
+7. propagates staleness transitively to downstream consumers whose producer outputs are no longer trustworthy;
+8. requires fresh authority before any stale worker can mutate again.
 
 ```bash
 claim-plane --db .claim-plane/plane.db notices rate-limit-metrics
+claim-plane --db .claim-plane/plane.db runtime-fences rate-limit-metrics
 claim-plane --db .claim-plane/plane.db ack-notice 1
 ```
 
-This is advisory coordination with an enforceable stale state, not a distributed source-code lock.
+The stale state is now coupled to an enforceable broker capability fence. The agent process may still
+exist and reason, but its governed mutation path fails closed until a later refresh/resume lifecycle
+establishes fresh authority. This is not a distributed source-code lock.
 
 ## Brokered execution boundary
 

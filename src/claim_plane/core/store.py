@@ -104,6 +104,8 @@ class IntentStore(Protocol):
 
     def coordination_events(self) -> list[dict[str, Any]]: ...
 
+    def runtime_fences(self, intent_id: str | None = None) -> list[dict[str, Any]]: ...
+
 
 class ObservationStore(Protocol):
     def start_observation_session(
@@ -257,6 +259,7 @@ PLANE_STORE_METHODS = (
     "commit_broker_operation",
     "complete_intent",
     "coordination_events",
+    "runtime_fences",
     "decision_log",
     "dependency_graph",
     "export_audit",

@@ -57,8 +57,10 @@ amendment transaction commits. It permits only monotonic candidates, isolates ne
 mutation authority, projects that authority onto the semantic graph, propagates downstream impact,
 and enforces hard breadth limits. The same transaction compares the new surface with active intents.
 Independent or explicitly commutative relationships may proceed; conflicts and unknown relationships
-fail closed. Ordered overlap is returned as an ordering requirement rather than approved because the
-current runtime does not yet fence and refresh an already active worker.
+fail closed. Ordered overlap is returned as an ordering requirement rather than approved. Runtime
+premise fencing now provides the execution primitive that can revoke an already active writer, while
+refresh/rebase/resume orchestration remains a separate lifecycle step before ordered expansion can be
+committed automatically.
 
 ### Dependency graph
 
@@ -68,10 +70,11 @@ Invalidation is deliberately asymmetric:
 
 1. The first hop is filtered by the resource keys changed by the producer.
 2. A consumer affected by that premise becomes `stale`.
-3. Once stale, all outputs from that consumer are untrusted.
-4. Staleness therefore propagates transitively to downstream consumers.
+3. Any active governed broker for that consumer is fenced in the same transaction: prepared operations are failed and the writer lease is released.
+4. Once stale, all outputs from that consumer are untrusted.
+5. Staleness therefore propagates transitively to downstream consumers, which receive their own durable fence evidence.
 
-Every notice records the root producer, direct producer, depth, dependency chain, and changed resource keys. A stale dependency is unavailable in worker context even when its previous intent payload remains inspectable.
+Every notice records the root producer, direct producer, depth, dependency chain, changed resource keys, and runtime-fence identifiers. A stale dependency is unavailable in worker context even when its previous intent payload remains inspectable. Fencing revokes mutation authority; it does not itself refresh or resume the worker.
 
 ### Execution boundary
 

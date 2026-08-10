@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.20] — 2026-08-10
+
+### Added
+
+- add Runtime Premise Fencing so resource-scoped dependency invalidation revokes live broker mutation authority in the same transaction that marks a dependent intent stale;
+- fail prepared-but-uncommitted broker operations, release the governed writer lease, persist a versioned runtime-fence record, and keep future execution blocked until fresh authority is established;
+- expose runtime-fence evidence through the Plane API, CLI, audit export, and packaged JSON Schema while preserving the existing transitive stale-dependency chain.
+
 ## [0.37.19] — 2026-08-09
 
 ### Added
