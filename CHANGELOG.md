@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.27] — 2026-08-10
+
+### Added
+
+- Added a deterministic v2 confirmatory experiment over the exact frozen 30-pair × 3-seed workload, comparing naive physical parallelism, the historical conservative static admission, full semantic deterministic admission v2, and always-serial execution.
+- Added one-command bounded execution across all selected pair/seed units with deterministic counterbalancing of mode order, isolated repositories/worktrees, measured inner overlap, paired wall-clock speedup against serial, and separate outer-pool throughput accounting.
+- Added strict offline status and aggregation that require the complete result matrix before sealing a final report and SHA-256 manifest.
+
+### Changed
+
+- Fresh deterministic-v2 measurements now have a dedicated artifact root and protocol, leaving both published Paper #2 artifacts and the intermediate physical/ablation evidence immutable.
+- Confirmatory reporting directly quantifies the change from historical static admission to deterministic v2 in serialization, reliability, physical concurrency, and wall-clock time without treating benchmark-level fan-out as system speedup.
+
 ## [0.37.26] — 2026-08-10
 
 ### Added

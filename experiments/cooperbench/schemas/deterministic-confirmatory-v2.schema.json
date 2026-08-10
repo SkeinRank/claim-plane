@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.org/schemas/claim-plane/deterministic-confirmatory-v2.schema.json",
+  "title": "Claim Plane Deterministic Confirmatory v2",
+  "type": "object",
+  "required": [
+    "protocol",
+    "study_id",
+    "study_fingerprint",
+    "claim_plane_runtime_version",
+    "complete"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.deterministic-confirmatory.v2"
+    },
+    "study_id": {"type": "string", "minLength": 1},
+    "study_fingerprint": {"type": "string", "minLength": 12},
+    "claim_plane_runtime_version": {"type": "string", "minLength": 1},
+    "frozen_plan_manifest_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "pair_index": {"type": "integer", "minimum": 1, "maximum": 30},
+    "pair_key": {"type": "string"},
+    "coder_seed": {"type": "integer", "enum": [101, 202, 303]},
+    "modes": {
+      "type": "array",
+      "items": {
+        "enum": ["naive_parallel", "legacy_static", "deterministic_v2", "always_serial"]
+      },
+      "uniqueItems": true
+    },
+    "rows": {"type": "array", "items": {"type": "object"}},
+    "expected_pair_units": {"type": "integer", "minimum": 0},
+    "completed_pair_units": {"type": "integer", "minimum": 0},
+    "expected_rows": {"type": "integer", "minimum": 0},
+    "observed_rows": {"type": "integer", "minimum": 0},
+    "mode_summary": {"type": "array", "items": {"type": "object"}},
+    "paired_speedup_vs_serial": {"type": "object"},
+    "deterministic_v2_vs_legacy_static": {"type": ["object", "null"]},
+    "complete": {"type": "boolean"}
+  },
+  "additionalProperties": true
+}

@@ -446,6 +446,66 @@ def cmd_confirmatory_ablation_run(args: argparse.Namespace) -> int:
     _print_json(result)
     return 0 if result.get("complete") else 1
 
+def cmd_confirmatory_final_pair(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.final import parse_confirmatory_modes, run_confirmatory_pair
+
+    result = run_confirmatory_pair(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        pair_index=args.pair,
+        modes=parse_confirmatory_modes(args.modes),
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(
+        {
+            "protocol": result.get("protocol"),
+            "complete": result.get("complete"),
+            "coder_seed": result.get("coder_seed"),
+            "pair_index": result.get("pair_index"),
+            "pair_key": result.get("pair_key"),
+            "artifact": result.get("artifact"),
+            "pair_wall_time_seconds": result.get("pair_wall_time_seconds"),
+        }
+    )
+    return 0
+
+
+def cmd_confirmatory_final_run(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.final import (
+        parse_coder_seeds,
+        parse_confirmatory_modes,
+        run_confirmatory_batch,
+    )
+    from .physical_parallel import parse_pair_indexes
+
+    result = run_confirmatory_batch(
+        _confirmatory_paths(args),
+        seeds=parse_coder_seeds(args.seeds),
+        pair_indexes=parse_pair_indexes(args.pairs, pair_count=30),
+        modes=parse_confirmatory_modes(args.modes),
+        max_parallel_pairs=args.max_parallel_pairs,
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0 if result.get("complete") else 1
+
+
+def cmd_confirmatory_final_status(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.final import confirmatory_status
+
+    _print_json(confirmatory_status(_confirmatory_paths(args)))
+    return 0
+
+
+def cmd_confirmatory_final_aggregate(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.final import aggregate_confirmatory_experiment
+
+    _print_json(aggregate_confirmatory_experiment(_confirmatory_paths(args)))
+    return 0
+
+
 def cmd_confirmatory_status(args: argparse.Namespace) -> int:
     from .confirmatory_30x3.runner import study_status
 
@@ -613,6 +673,68 @@ def _add_confirmatory_commands(sub: Any) -> None:
     ablation_pair.add_argument("--repo", default=".")
     ablation_pair.add_argument("--no-resume", action="store_true")
     ablation_pair.set_defaults(func=cmd_confirmatory_ablation_pair)
+
+    final_run = confirmatory_sub.add_parser(
+        "final-run",
+        help=(
+            "Run the deterministic v2 confirmatory matrix with bounded outer pair "
+            "concurrency and measured inner overlap."
+        ),
+    )
+    _add_confirmatory_paths(final_run)
+    final_run.add_argument(
+        "--seeds",
+        default="101,202,303",
+        help="Comma-separated frozen coder seeds.",
+    )
+    final_run.add_argument(
+        "--pairs",
+        default="1-30",
+        help="One-based pair indexes or ranges, for example 1-6,9,12.",
+    )
+    final_run.add_argument(
+        "--modes",
+        default="naive_parallel,legacy_static,deterministic_v2,always_serial",
+        help="Comma-separated confirmatory execution modes.",
+    )
+    final_run.add_argument(
+        "--max-parallel-pairs",
+        type=int,
+        default=6,
+        help="Maximum number of independent pair/seed processes active at once.",
+    )
+    final_run.add_argument("--repo", default=".")
+    final_run.add_argument("--no-resume", action="store_true")
+    final_run.set_defaults(func=cmd_confirmatory_final_run)
+
+    final_pair = confirmatory_sub.add_parser(
+        "final-pair",
+        help="Execute one pair/seed unit under the deterministic v2 confirmatory modes.",
+    )
+    _add_confirmatory_paths(final_pair)
+    final_pair.add_argument("--seed", required=True, type=int, choices=(101, 202, 303))
+    final_pair.add_argument("--pair", required=True, type=int, choices=range(1, 31))
+    final_pair.add_argument(
+        "--modes",
+        default="naive_parallel,legacy_static,deterministic_v2,always_serial",
+    )
+    final_pair.add_argument("--repo", default=".")
+    final_pair.add_argument("--no-resume", action="store_true")
+    final_pair.set_defaults(func=cmd_confirmatory_final_pair)
+
+    final_status = confirmatory_sub.add_parser(
+        "final-status",
+        help="Report deterministic v2 confirmatory completion without model calls.",
+    )
+    final_status.add_argument("--artifacts", default=".claim-plane/experiments")
+    final_status.set_defaults(func=cmd_confirmatory_final_status)
+
+    final_aggregate = confirmatory_sub.add_parser(
+        "final-aggregate",
+        help="Require and seal the complete deterministic v2 30x3 result matrix.",
+    )
+    final_aggregate.add_argument("--artifacts", default=".claim-plane/experiments")
+    final_aggregate.set_defaults(func=cmd_confirmatory_final_aggregate)
 
     status = confirmatory_sub.add_parser(
         "status", help="Report planner-freeze and nine-shard completion state."

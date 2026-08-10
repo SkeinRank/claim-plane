@@ -274,6 +274,45 @@ This study isolates initial deterministic admission. Runtime amendment and stale
 recovery are evaluated by the deterministic conformance/stress workload rather than being
 silently attributed to frozen pairs that do not exercise those events.
 
+## Deterministic v2 confirmatory experiment
+
+The final fresh experiment keeps the published 30-pair set, coder seeds, Planner v1 outputs,
+and benchmark revision fixed while comparing four modes:
+
+- `naive_parallel`: uncoordinated physical A/B execution;
+- `legacy_static`: the historical conservative static Claim Plane gate;
+- `deterministic_v2`: full semantic deterministic admission;
+- `always_serial`: the reliability and wall-clock baseline.
+
+Run the complete 90 pair/seed units through a bounded six-process outer pool:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory final-run \
+  --cooperbench /path/to/CooperBench \
+  --seeds 101,202,303 \
+  --pairs 1-30 \
+  --max-parallel-pairs 6
+```
+
+The outer pool only reduces experiment turnaround. Each pair/seed subprocess executes its
+four modes in a deterministic counterbalanced order, and the scientific report computes
+paired wall-clock speedup only against the same unit's always-serial run. This keeps harness
+fan-out separate from the Claim Plane result.
+
+Offline progress and strict aggregation are available with:
+
+```bash
+python -m experiments.cooperbench confirmatory final-status
+python -m experiments.cooperbench confirmatory final-aggregate
+```
+
+Artifacts live under `.claim-plane/experiments/deterministic-confirmatory-v2/`. Final
+aggregation requires all 30 pairs × 3 coder seeds × 4 modes (360 rows), then seals
+`analysis/final-report.json` and a SHA-256 manifest. The protocol records pair pass,
+integration success, serialization, observed physical concurrency, inner overlap, paired
+speedup versus serial, coder cost, and the direct deterministic-v2 delta from the historical
+static admission. No result is predeclared by the runner.
+
 ## Pinned Linux environment
 
 A Docker image is provided for runs that should not depend on the host Python toolchain.

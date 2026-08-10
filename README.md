@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.26.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.27.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -1526,6 +1526,29 @@ pair outcomes, measured inner overlap, and wall-clock deltas against `full_v2`. 
 confirmatory artifacts are not rewritten. Runtime amendment and stale-worker recovery remain
 separate conformance/stress mechanisms unless a workload actually exercises them.
 
+The final deterministic v2 confirmatory runner then compares the complete semantic admission
+layer directly against naive parallelism, the historical conservative static gate, and the
+always-serial baseline on the same frozen 30-pair × 3-seed matrix. Pair/seed units run through
+a bounded outer pool, while Claim Plane speedup is computed only from paired inner wall-clock
+measurements against the serial baseline:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory final-run \
+  --cooperbench /path/to/CooperBench \
+  --seeds 101,202,303 \
+  --pairs 1-30 \
+  --max-parallel-pairs 6
+
+python -m experiments.cooperbench confirmatory final-status
+python -m experiments.cooperbench confirmatory final-aggregate
+```
+
+The runner deterministically counterbalances mode order across pair/seed units and writes
+fresh evidence under `.claim-plane/experiments/deterministic-confirmatory-v2/`. The aggregate
+requires all 90 pair/seed units and all four modes before sealing the final report. No
+performance result is bundled with the runtime release; speedup and reliability claims must
+come from completed experiment artifacts.
+
 Aggregation is intentionally strict: it requires all nine completed shards and the full
 360-row pair/seed/arm matrix before writing final analysis artifacts. The output includes
 arm, feature-pair, and repository-task cluster summaries, task-cluster bootstrap confidence
@@ -1553,7 +1576,7 @@ Claim Plane remains an alpha coordination kernel.
 - The default `tree` sandbox detects repository mutations but does not isolate network or the host filesystem; strict OS isolation requires an available supported backend.
 - HMAC evidence provides shared-secret authenticity, not public-key identity or hardware attestation.
 - The router is deterministic and heuristic, not learned.
-- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The published 30-pair × 3-seed confirmatory study found strong reliability gains for conservative static admission, but also showed that static admission largely collapsed toward serialization and that dynamic admission exposed region undercoverage and insufficient amendment handling. Provider calls in that published study were physically sequential, so those published results do not establish wall-clock parallel speedup. Physical Parallel Benchmark v2 can now measure actual inner worker overlap and bounded outer experiment concurrency, but new confirmatory measurements are still required before claiming a speedup.
+- Claim Plane has not yet demonstrated lower total cost to clean merge on large real repositories. The published 30-pair × 3-seed confirmatory study found strong reliability gains for conservative static admission, but also showed that static admission largely collapsed toward serialization and that dynamic admission exposed region undercoverage and insufficient amendment handling. Provider calls in that published study were physically sequential, so those published results do not establish wall-clock parallel speedup. The deterministic v2 confirmatory runner can now execute the frozen 30 × 3 matrix with measured inner overlap and strict paired comparisons, but no new speedup result is claimed until those fresh artifacts are completed and aggregated.
 
 The comparative evaluation requirements are documented in [docs/BENCHMARK.md](docs/BENCHMARK.md), and the study infrastructure is described in [experiments/cooperbench/README.md](experiments/cooperbench/README.md).
 
