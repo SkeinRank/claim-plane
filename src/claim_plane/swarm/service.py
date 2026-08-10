@@ -7,10 +7,16 @@ import json
 import re
 import secrets
 import subprocess
+import tokenize
+from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from claim_plane.core import (
+    PythonStructuralExtractionError,
+    build_python_dependency_graph,
+)
 from claim_plane.swarm.admission import (
     SharedAdmissionStatus,
     compute_shared_admission,
@@ -63,6 +69,59 @@ def _git(root_or_child: str | Path, *args: str) -> str:
         )
     return completed.stdout.strip()
 
+
+
+
+def _git_bytes(root_or_child: str | Path, *args: str) -> bytes:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=Path(root_or_child).resolve(),
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+        stdout = completed.stdout.decode("utf-8", errors="replace").strip()
+        raise ValueError(stderr or stdout or "git failed")
+    return completed.stdout
+
+
+def _python_sources_at_revision(root: Path, revision: str) -> dict[str, str]:
+    """Read tracked Python sources from one pinned Git revision without checkout."""
+
+    listing = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", revision)
+    paths = [
+        raw.decode("utf-8", errors="surrogateescape")
+        for raw in listing.split(b"\0")
+        if raw
+    ]
+    sources: dict[str, str] = {}
+    excluded = {".git", ".claim-plane", ".codex", ".venv", "venv", "node_modules"}
+    for path in paths:
+        parts = tuple(part for part in path.replace("\\", "/").split("/") if part)
+        if not parts or any(part in excluded for part in parts):
+            continue
+        if not path.endswith((".py", ".pyi")):
+            continue
+        raw = _git_bytes(root, "show", f"{revision}:{path}")
+        try:
+            encoding, _ = tokenize.detect_encoding(BytesIO(raw).readline)
+            sources[path] = raw.decode(encoding)
+        except (SyntaxError, UnicodeError) as exc:
+            raise PythonStructuralExtractionError(
+                f"cannot decode pinned Python source {path}: {exc}"
+            ) from exc
+    return sources
+
+
+def _semantic_graph_for_revision(root: Path, revision: str):
+    sources = _python_sources_at_revision(root, revision)
+    if not sources:
+        return None
+    try:
+        return build_python_dependency_graph(sources)
+    except PythonStructuralExtractionError:
+        return None
 
 def resolve_repository_root(root_or_child: str | Path = ".") -> Path:
     return Path(_git(root_or_child, "rev-parse", "--show-toplevel")).resolve()
@@ -304,11 +363,13 @@ def plan_swarm_concurrency(repo: str | Path, session_id: str) -> dict[str, Any]:
             )
         if _resolve_commit(root, current.base_commit) != current.base_commit:
             raise ValueError("swarm session base commit is no longer resolvable")
+        semantic_graph = _semantic_graph_for_revision(root, current.base_commit)
         plan = compute_concurrency_plan(
             current.work_graph,
             current.budget_policy,
             graph_version=current.graph_version,
             budget_version=current.budget_version,
+            semantic_graph=semantic_graph,
         )
         stored, plan_version, changed = store.save_concurrency_plan(
             current.session_id,

@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.37.18] — 2026-08-09
+
+### Added
+
+- add Same-file Admission v2, which lets `region_safe` swarm planning replace unknown line-region overlap with semantic evidence when both work items declare graph-backed mutation roots for the same repository path;
+- admit semantically independent or explicitly commutative same-file work in parallel, derive deterministic producer-before-consumer serialization from `ordered` classifications, and keep conflicting, unresolved, or incomplete evidence fail-closed;
+- build Python semantic evidence from the session's pinned Git revision rather than the dirty working tree, persist source-bound same-file decisions in concurrency-plan metadata, and package a machine-readable Same-file Admission v2 schema.
+
 ## [0.37.17] — 2026-08-09
 
 ### Added

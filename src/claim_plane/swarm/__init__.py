@@ -91,6 +91,14 @@ from claim_plane.swarm.runs import (
     CodexRunState,
     CodexUsage,
 )
+from claim_plane.swarm.same_file_admission import (
+    SAME_FILE_ADMISSION_PROTOCOL,
+    SameFileAdmissionAction,
+    SameFileAdmissionDecision,
+    SameFileAdmissionReason,
+    evaluate_same_file_admission,
+    semantic_changes_for_path,
+)
 from claim_plane.swarm.scheduler import (
     SWARM_SCHEDULER_SNAPSHOT_PROTOCOL,
     ScheduledWork,
@@ -147,6 +155,7 @@ __all__ = [
     "SWARM_OPERATOR_EVENT_PROTOCOL",
     "SWARM_OPERATOR_SNAPSHOT_PROTOCOL",
     "SWARM_RECOVERY_PROTOCOL",
+    "SAME_FILE_ADMISSION_PROTOCOL",
     "SWARM_VERIFICATION_PROTOCOL",
     "SWARM_SCHEDULER_SNAPSHOT_PROTOCOL",
     "SWARM_SESSION_PROTOCOL",
@@ -180,6 +189,9 @@ __all__ = [
     "RetryBudget",
     "RootTask",
     "SameFilePolicy",
+    "SameFileAdmissionAction",
+    "SameFileAdmissionDecision",
+    "SameFileAdmissionReason",
     "ScheduledWork",
     "ScheduledWorkState",
     "SchedulerSnapshot",
@@ -211,6 +223,8 @@ __all__ = [
     "create_swarm_session",
     "create_and_run_swarm_demo",
     "effective_dependencies",
+    "evaluate_same_file_admission",
+    "semantic_changes_for_path",
     "get_codex_run",
     "get_swarm_admission",
     "get_swarm_concurrency_plan",

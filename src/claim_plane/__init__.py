@@ -321,6 +321,12 @@ from claim_plane.swarm import (
     RetryBudget,
     RootTask,
     SameFilePolicy,
+    SAME_FILE_ADMISSION_PROTOCOL,
+    SameFileAdmissionAction,
+    SameFileAdmissionDecision,
+    SameFileAdmissionReason,
+    evaluate_same_file_admission,
+    semantic_changes_for_path,
     ScheduledWork,
     ScheduledWorkState,
     SchedulerSnapshot,
@@ -360,7 +366,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.17"
+__version__ = "0.37.18"
 
 __all__ = [
     "SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL",
@@ -576,6 +582,12 @@ __all__ = [
     "ResourceBudget",
     "RetryBudget",
     "SameFilePolicy",
+    "SAME_FILE_ADMISSION_PROTOCOL",
+    "SameFileAdmissionAction",
+    "SameFileAdmissionDecision",
+    "SameFileAdmissionReason",
+    "evaluate_same_file_admission",
+    "semantic_changes_for_path",
     "ScheduledWork",
     "ScheduledWorkState",
     "SchedulerSnapshot",

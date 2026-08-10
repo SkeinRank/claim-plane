@@ -60,8 +60,17 @@ and unresolved boundaries remain explicit and cannot be interpreted as proof of 
 Semantic Conflict Taxonomy v2 may classify two complete mutation surfaces as `independent`,
 `commutative`, `ordered`, `conflicting`, or `unknown`. `commutative` requires explicit deterministic
 proof evidence; missing graph roots, explicitly unknown changes, shared unresolved boundaries, and
-bounded traversal that cannot prove independence remain `unknown`. The taxonomy is evidence for
-later admission and does not itself grant mutation authority.
+bounded traversal that cannot prove independence remain `unknown`. The taxonomy is evidence for later admission and does not itself grant mutation authority.
+Same-file Admission v2 may consume a complete taxonomy decision during swarm planning when the
+configured same-file policy is `region_safe`. It can remove an otherwise conservative same-file
+serialization constraint only for graph-backed `independent` or explicitly `commutative` mutation
+roots. `ordered` produces a deterministic serialization direction; `conflicting`, `unknown`, missing
+semantic roots, and missing graph evidence do not unlock parallel execution. Explicit same-file
+`serialize` or `deny` policy always wins.
+
+Repository-bound planning derives this semantic evidence from the exact pinned Git revision for the
+swarm session. A dirty working tree is not used as the proof source. The resulting decision and graph
+fingerprint are persisted with the concurrency plan.
 
 Existing runtime intent ordering, stale-state propagation, Git hunk verification, and brokered
 mutation enforcement remain the authoritative execution controls.

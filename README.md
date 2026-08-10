@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.17.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.37.18.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -420,6 +420,7 @@ installation.
 - repository-bound swarm sessions with exact Git bases, planner-proposed work items, deterministic DAG validation, graph fingerprints, dependency layers, and optimistic graph-version replacement;
 - versioned swarm budget policies with hard worker, graph-size, launch, token, cost, wall-time, retry, and concurrency ceilings that the planner cannot widen silently;
 - adaptive concurrency plans that combine the dependency DAG with region, overlap, contract, schema, and worker-budget constraints to produce deterministic execution waves or a fail-closed `replan_required` result;
+- Same-file Admission v2 that can admit unknown-region same-file work when graph-backed symbol mutations are proven `independent` or explicitly `commutative`, while preserving explicit deny/serialize policy and deterministic ordering for semantic producer-consumer dependencies;
 - shared swarm admission that derives one deterministic ChangeIntent per work item, admits concurrent authority against the whole session, and promotes serialization constraints into effective dependencies;
 - a dynamic dependency scheduler that releases only admitted, prerequisite-complete work within current worker capacity and distinguishes runnable, active, retryable, terminal, and dependency-blocked items;
 - a deterministic merge queue that snapshots successful worker worktrees, integrates results on a Claim Plane-owned branch in effective-dependency order, blocks downstream workers until prerequisites are integrated, captures real Git conflicts, and leaves the user target branch untouched;
@@ -955,6 +956,19 @@ print(decision.kind.value, decision.order.value if decision.order else None)
 The taxonomy never grants mutation authority by itself. In particular, `commutative` requires
 explicit deterministic evidence rather than a naming or text-distance heuristic, and `unknown` stays
 fail-closed. Same-file admission consumes this evidence in a later layer.
+
+Same-file Admission v2 is that policy layer for the swarm concurrency planner. Under
+`same_file = "region_safe"`, an unknown line-region overlap can be upgraded only when both work
+items declare semantic mutation roots for the same path and the pinned Dependency Graph v2 snapshot
+classifies them as `independent` or explicitly `commutative`. `ordered` becomes a deterministic
+serialization edge in the required direction. `conflicting`, `unknown`, missing roots, and missing
+graph evidence never unlock parallel execution. Explicit `same_file = "serialize"` or `"deny"`
+remains authoritative even when semantic evidence would otherwise permit concurrency.
+
+Repository-bound swarm planning builds the Python graph from the session's exact pinned Git commit,
+not from dirty working-tree content, and stores each Same-file Admission v2 decision and graph
+fingerprint in the concurrency-plan metadata. This keeps the concurrency proof tied to the same
+repository state as the work graph.
 
 ## Admission semantics
 

@@ -35,7 +35,7 @@ Important safety rules:
 - unknown overlapping writes fail closed;
 - broad scope overlap is not treated as independent;
 - a shared contract is relevant only when it governs the overlapping concept;
-- same-file parallel work requires disjoint declared regions;
+- same-file parallel work requires either disjoint declared regions or a Same-file Admission v2 proof over graph-backed semantic mutation roots;
 - missing explicit dependencies reject admission;
 - proposed explicit and inferred premise edges must leave the graph acyclic.
 
@@ -44,6 +44,13 @@ reserve ownership. Contingent mutations are coordinated as read premises until a
 actually needs them, at which point Claim Plane promotes the exact path and re-runs the
 same deterministic admission transaction. Pattern-based contingent scope is narrowed to
 the requested concrete path instead of turning into a broad write lease.
+
+For swarm planning, Same-file Admission v2 handles the conservative case where two committed file
+writes name the same path but line regions are unavailable. If policy is `region_safe`, the planner
+may use the session's pinned Python Dependency Graph v2 snapshot plus Conflict Taxonomy v2 to prove
+that declared symbol mutations are independent or explicitly commutative. Ordered semantic
+dependencies become scheduler serialization edges in the required direction. Missing semantic roots,
+unresolved evidence, direct conflicts, and explicit serialize/deny policy remain fail-closed.
 
 ### Dependency graph
 

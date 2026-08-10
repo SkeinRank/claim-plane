@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/same-file-admission.schema.json",
+  "title": "Claim Plane Same-file Admission v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "left_id",
+    "right_id",
+    "path",
+    "action",
+    "reason",
+    "semantic_kind",
+    "order",
+    "graph_fingerprint",
+    "semantic_decision_fingerprint",
+    "left_changes",
+    "right_changes",
+    "parallel_safe",
+    "detail",
+    "metadata"
+  ],
+  "properties": {
+    "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "protocol": {"const": "claim-plane.same-file-admission.v2"},
+    "left_id": {"type": "string", "minLength": 1},
+    "right_id": {"type": "string", "minLength": 1},
+    "path": {"type": "string", "minLength": 1},
+    "action": {"enum": ["parallel", "serialize", "deny", "fallback"]},
+    "reason": {
+      "enum": [
+        "policy_deny",
+        "policy_serialize",
+        "missing_semantic_graph",
+        "missing_semantic_roots",
+        "semantic_independent",
+        "semantic_commutative",
+        "semantic_ordered",
+        "semantic_conflicting",
+        "semantic_unknown"
+      ]
+    },
+    "semantic_kind": {
+      "anyOf": [
+        {"enum": ["independent", "commutative", "ordered", "conflicting", "unknown"]},
+        {"type": "null"}
+      ]
+    },
+    "order": {
+      "anyOf": [
+        {"enum": ["left_before_right", "right_before_left"]},
+        {"type": "null"}
+      ]
+    },
+    "graph_fingerprint": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "semantic_decision_fingerprint": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "left_changes": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "right_changes": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "parallel_safe": {"type": "boolean"},
+    "detail": {"type": "string"},
+    "metadata": {"type": "object"}
+  }
+}

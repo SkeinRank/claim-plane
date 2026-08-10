@@ -57,7 +57,7 @@
             "minItems": 1,
             "uniqueItems": true,
             "items": {
-              "enum": ["same_file", "unknown_overlap", "shared_contract", "schema_change"]
+              "enum": ["same_file", "unknown_overlap", "shared_contract", "schema_change", "semantic_order", "semantic_conflict"]
             }
           },
           "resources": {

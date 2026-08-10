@@ -17,13 +17,25 @@ from itertools import combinations
 from typing import Any, Iterable, Mapping
 
 from claim_plane.coordination.admission import parse_line_region
-from claim_plane.core import IntentOperation, ResourceKind
+from claim_plane.core import (
+    CommutativityProof,
+    IntentOperation,
+    ResourceKind,
+    SemanticConflictOrder,
+    SemanticDependencyGraph,
+)
 from claim_plane.swarm.budget import (
     ConflictPolicy,
     SameFilePolicy,
     SwarmBudgetPolicy,
 )
 from claim_plane.swarm.models import WorkGraph, WorkItem
+from claim_plane.swarm.same_file_admission import (
+    SameFileAdmissionAction,
+    SameFileAdmissionDecision,
+    SameFileAdmissionReason,
+    evaluate_same_file_admission,
+)
 
 SWARM_CONCURRENCY_PLAN_PROTOCOL = "claim-plane.swarm-concurrency-plan.v1"
 
@@ -43,6 +55,8 @@ class ConcurrencyConstraintReason(str, Enum):
     UNKNOWN_OVERLAP = "unknown_overlap"
     SHARED_CONTRACT = "shared_contract"
     SCHEMA_CHANGE = "schema_change"
+    SEMANTIC_ORDER = "semantic_order"
+    SEMANTIC_CONFLICT = "semantic_conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +284,7 @@ class _Finding:
     action: ConcurrencyConstraintAction
     resources: tuple[str, ...]
     detail: str
+    order: SemanticConflictOrder | None = None
 
 
 def _committed_operations(item: WorkItem) -> tuple[IntentOperation, ...]:
@@ -454,6 +469,10 @@ def _operation_findings(
     left: WorkItem,
     right: WorkItem,
     policy: SwarmBudgetPolicy,
+    *,
+    semantic_graph: SemanticDependencyGraph | None = None,
+    commutativity_proofs: Iterable[CommutativityProof] = (),
+    same_file_admissions: list[SameFileAdmissionDecision] | None = None,
 ) -> list[_Finding]:
     findings: list[_Finding] = []
     path_kinds = {ResourceKind.FILE, ResourceKind.DOCUMENT}
@@ -464,6 +483,7 @@ def _operation_findings(
         ResourceKind.ROUTE,
         ResourceKind.SCHEMA,
     }
+    evaluated_same_file: dict[str, SameFileAdmissionDecision] = {}
     for left_op in _committed_operations(left):
         for right_op in _committed_operations(right):
             if not (left_op.mutating or right_op.mutating):
@@ -473,6 +493,47 @@ def _operation_findings(
             if left_resource.kind in path_kinds and right_resource.kind in path_kinds:
                 relation = _path_relation(left_op, right_op)
                 resource = _normal_path(left_resource.identifier)
+                if relation == "same_file_unknown_region":
+                    decision = evaluated_same_file.get(resource)
+                    if decision is None:
+                        decision = evaluate_same_file_admission(
+                            left,
+                            right,
+                            resource,
+                            policy,
+                            semantic_graph=semantic_graph,
+                            commutativity_proofs=commutativity_proofs,
+                        )
+                        evaluated_same_file[resource] = decision
+                        if same_file_admissions is not None:
+                            same_file_admissions.append(decision)
+                    if decision.action is SameFileAdmissionAction.PARALLEL:
+                        continue
+                    if decision.action is SameFileAdmissionAction.FALLBACK:
+                        finding = _same_file_finding(relation, policy, resource)
+                        if finding is not None:
+                            findings.append(finding)
+                        continue
+                    reason = (
+                        ConcurrencyConstraintReason.SEMANTIC_ORDER
+                        if decision.reason is SameFileAdmissionReason.SEMANTIC_ORDERED
+                        else ConcurrencyConstraintReason.SEMANTIC_CONFLICT
+                    )
+                    action = (
+                        ConcurrencyConstraintAction.DENY
+                        if decision.action is SameFileAdmissionAction.DENY
+                        else ConcurrencyConstraintAction.SERIALIZE
+                    )
+                    findings.append(
+                        _Finding(
+                            reason,
+                            action,
+                            (resource, *decision.left_changes, *decision.right_changes),
+                            decision.detail,
+                            order=decision.order,
+                        )
+                    )
+                    continue
                 finding = _same_file_finding(relation, policy, resource)
                 if finding is not None:
                     findings.append(finding)
@@ -508,6 +569,10 @@ def _pair_constraint(
     left: WorkItem,
     right: WorkItem,
     policy: SwarmBudgetPolicy,
+    *,
+    semantic_graph: SemanticDependencyGraph | None = None,
+    commutativity_proofs: Iterable[CommutativityProof] = (),
+    same_file_admissions: list[SameFileAdmissionDecision] | None = None,
 ) -> ConcurrencyConstraint | None:
     findings: list[_Finding] = []
     if _schema_change(left) or _schema_change(right):
@@ -530,7 +595,16 @@ def _pair_constraint(
                 "work items share a contract or its bound subject",
             )
         )
-    findings.extend(_operation_findings(left, right, policy))
+    findings.extend(
+        _operation_findings(
+            left,
+            right,
+            policy,
+            semantic_graph=semantic_graph,
+            commutativity_proofs=commutativity_proofs,
+            same_file_admissions=same_file_admissions,
+        )
+    )
     if not findings:
         return None
     action = (
@@ -541,9 +615,17 @@ def _pair_constraint(
     reasons = tuple(item.reason for item in findings)
     resources = tuple(resource for item in findings for resource in item.resources)
     details = "; ".join(sorted({item.detail for item in findings}))
+    orders = {item.order for item in findings if item.order is not None}
+    before, after = left.work_id, right.work_id
+    if len(orders) > 1:
+        action = ConcurrencyConstraintAction.DENY
+        reasons = (*reasons, ConcurrencyConstraintReason.SEMANTIC_CONFLICT)
+        details = details + "; semantic ordering evidence is contradictory"
+    elif orders == {SemanticConflictOrder.RIGHT_BEFORE_LEFT}:
+        before, after = right.work_id, left.work_id
     return ConcurrencyConstraint(
-        before=left.work_id,
-        after=right.work_id,
+        before=before,
+        after=after,
         action=action,
         reasons=reasons,
         resources=resources,
@@ -590,6 +672,8 @@ def compute_concurrency_plan(
     *,
     graph_version: int = 1,
     budget_version: int = 1,
+    semantic_graph: SemanticDependencyGraph | None = None,
+    commutativity_proofs: Iterable[CommutativityProof] = (),
 ) -> ConcurrencyPlan:
     """Compute deterministic safe waves without launching or admitting workers."""
 
@@ -598,12 +682,19 @@ def compute_concurrency_plan(
     rank = {work_id: index for index, work_id in enumerate(order)}
     ancestors = _ancestor_map(graph)
     constraints: list[ConcurrencyConstraint] = []
+    same_file_admissions: list[SameFileAdmissionDecision] = []
+    proofs = tuple(commutativity_proofs)
     for left_id, right_id in combinations(order, 2):
         if left_id in ancestors[right_id] or right_id in ancestors[left_id]:
             continue
         left_id, right_id = sorted((left_id, right_id), key=rank.__getitem__)
         constraint = _pair_constraint(
-            graph.item_map[left_id], graph.item_map[right_id], policy
+            graph.item_map[left_id],
+            graph.item_map[right_id],
+            policy,
+            semantic_graph=semantic_graph,
+            commutativity_proofs=proofs,
+            same_file_admissions=same_file_admissions,
         )
         if constraint is not None:
             constraints.append(constraint)
@@ -633,7 +724,17 @@ def compute_concurrency_plan(
         waves=waves,
         constraints=tuple(constraints),
         metadata={
-            "controller": "deterministic-pairwise-v1",
+            "controller": "deterministic-pairwise-v2",
             "contingent_scope": "excluded_until_amendment",
+            "semantic_graph_fingerprint": (
+                semantic_graph.fingerprint if semantic_graph is not None else None
+            ),
+            "same_file_admissions": [
+                item.to_dict()
+                for item in sorted(
+                    same_file_admissions,
+                    key=lambda item: (item.left_id, item.right_id, item.path),
+                )
+            ],
         },
     )
