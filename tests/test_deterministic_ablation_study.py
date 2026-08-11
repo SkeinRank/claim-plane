@@ -197,15 +197,7 @@ def test_full_v2_keeps_contingent_scope_out_of_initial_authority(
 ) -> None:
     repo, base = _repo(
         tmp_path,
-        {
-            "app.py": (
-                "def first():\n"
-                "    return 1\n"
-                "\n"
-                "def second():\n"
-                "    return 2\n"
-            )
-        },
+        {"app.py": ("def first():\n    return 1\n\ndef second():\n    return 2\n")},
     )
     plan_a = {
         "files": [
@@ -458,6 +450,7 @@ def test_full_v2_does_not_order_stable_contract_caller_callee_edits(
     assert admission["reason"] == "semantic_independent"
     assert admission["semantic_kind"] == "independent"
     anchors = verdict["ablation_evidence"]["intent_ast_anchors"]
-    assert {
-        item["qualified_identifier"] for item in anchors["A"]
-    } == {"FileSystemLoader.get_source", "PackageLoader.get_source"}
+    assert {item["qualified_identifier"] for item in anchors["A"]} == {
+        "FileSystemLoader.get_source",
+        "PackageLoader.get_source",
+    }
