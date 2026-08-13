@@ -445,6 +445,66 @@ def cmd_confirmatory_ablation_run(args: argparse.Namespace) -> int:
     return 0 if result.get("complete") else 1
 
 
+def cmd_confirmatory_scip_v3_pair(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.scip_v3 import parse_scip_v3_profiles, run_scip_v3_pair
+
+    result = run_scip_v3_pair(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        pair_index=args.pair,
+        profiles=parse_scip_v3_profiles(args.profiles),
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(
+        {
+            "protocol": result.get("protocol"),
+            "complete": result.get("complete"),
+            "coder_seed": result.get("coder_seed"),
+            "pair_index": result.get("pair_index"),
+            "pair_key": result.get("pair_key"),
+            "artifact": result.get("artifact"),
+            "pair_wall_time_seconds": result.get("pair_wall_time_seconds"),
+        }
+    )
+    return 0
+
+
+def cmd_confirmatory_scip_v3_run(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.scip_v3 import (
+        parse_scip_v3_profiles,
+        run_scip_v3_batch,
+    )
+    from .confirmatory_30x3.final import parse_coder_seeds
+    from .physical_parallel import parse_pair_indexes
+
+    result = run_scip_v3_batch(
+        _confirmatory_paths(args),
+        seeds=parse_coder_seeds(args.seeds),
+        pair_indexes=parse_pair_indexes(args.pairs, pair_count=30),
+        profiles=parse_scip_v3_profiles(args.profiles),
+        max_parallel_pairs=args.max_parallel_pairs,
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0 if result.get("complete") else 1
+
+
+def cmd_confirmatory_scip_v3_status(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.scip_v3 import scip_v3_status
+
+    _print_json(scip_v3_status(_confirmatory_paths(args)))
+    return 0
+
+
+def cmd_confirmatory_scip_v3_aggregate(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.scip_v3 import aggregate_scip_v3
+
+    _print_json(aggregate_scip_v3(_confirmatory_paths(args)))
+    return 0
+
+
 def cmd_confirmatory_final_pair(args: argparse.Namespace) -> int:
     from .confirmatory_30x3.final import parse_confirmatory_modes, run_confirmatory_pair
 
@@ -675,6 +735,78 @@ def _add_confirmatory_commands(sub: Any) -> None:
     ablation_pair.add_argument("--repo", default=".")
     ablation_pair.add_argument("--no-resume", action="store_true")
     ablation_pair.set_defaults(func=cmd_confirmatory_ablation_pair)
+
+    scip_v3 = confirmatory_sub.add_parser(
+        "scip-v3-run",
+        help=(
+            "Run the SCIP ablation and Physical Parallel Benchmark v3 over selected "
+            "frozen pair/seed units."
+        ),
+    )
+    _add_confirmatory_paths(scip_v3)
+    scip_v3.add_argument(
+        "--seeds",
+        default="101",
+        help="Comma-separated frozen coder seeds; use 101,202,303 for the full matrix.",
+    )
+    scip_v3.add_argument(
+        "--pairs",
+        default="1-6",
+        help="One-based pair indexes or ranges, for example 1-6 or 1-30.",
+    )
+    scip_v3.add_argument(
+        "--profiles",
+        default=(
+            "serial,naive_parallel,builtin_graph,scip_graph_cold,"
+            "scip_cache_blocking"
+        ),
+        help="Comma-separated SCIP v3 execution profiles.",
+    )
+    scip_v3.add_argument(
+        "--max-parallel-pairs",
+        type=int,
+        default=6,
+        help="Maximum independent pair/seed subprocesses active at once.",
+    )
+    scip_v3.add_argument("--repo", default=".")
+    scip_v3.add_argument("--no-resume", action="store_true")
+    scip_v3.set_defaults(func=cmd_confirmatory_scip_v3_run)
+
+    scip_v3_pair = confirmatory_sub.add_parser(
+        "scip-v3-pair",
+        help="Execute one frozen pair/seed unit under all selected SCIP v3 profiles.",
+    )
+    _add_confirmatory_paths(scip_v3_pair)
+    scip_v3_pair.add_argument(
+        "--seed", required=True, type=int, choices=(101, 202, 303)
+    )
+    scip_v3_pair.add_argument(
+        "--pair", required=True, type=int, choices=range(1, 31)
+    )
+    scip_v3_pair.add_argument(
+        "--profiles",
+        default=(
+            "serial,naive_parallel,builtin_graph,scip_graph_cold,"
+            "scip_cache_blocking"
+        ),
+    )
+    scip_v3_pair.add_argument("--repo", default=".")
+    scip_v3_pair.add_argument("--no-resume", action="store_true")
+    scip_v3_pair.set_defaults(func=cmd_confirmatory_scip_v3_pair)
+
+    scip_v3_status = confirmatory_sub.add_parser(
+        "scip-v3-status",
+        help="Report SCIP v3 benchmark completion without model calls.",
+    )
+    scip_v3_status.add_argument("--artifacts", default=".claim-plane/experiments")
+    scip_v3_status.set_defaults(func=cmd_confirmatory_scip_v3_status)
+
+    scip_v3_aggregate = confirmatory_sub.add_parser(
+        "scip-v3-aggregate",
+        help="Require and seal the complete 30x3 SCIP v3 result matrix.",
+    )
+    scip_v3_aggregate.add_argument("--artifacts", default=".claim-plane/experiments")
+    scip_v3_aggregate.set_defaults(func=cmd_confirmatory_scip_v3_aggregate)
 
     final_run = confirmatory_sub.add_parser(
         "final-run",

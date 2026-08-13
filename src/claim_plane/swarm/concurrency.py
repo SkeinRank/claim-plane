@@ -895,6 +895,7 @@ def compute_concurrency_plan(
     budget_version: int = 1,
     semantic_graph: SemanticDependencyGraph | None = None,
     commutativity_proofs: Iterable[CommutativityProof] = (),
+    candidate_blocking_enabled: bool = True,
 ) -> ConcurrencyPlan:
     """Compute deterministic safe waves without launching or admitting workers."""
 
@@ -905,7 +906,11 @@ def compute_concurrency_plan(
     constraints: list[ConcurrencyConstraint] = []
     same_file_admissions: list[SameFileAdmissionDecision] = []
     proofs = tuple(commutativity_proofs)
-    candidate_blocking = _candidate_blocking_plan(graph, semantic_graph)
+    candidate_blocking = (
+        _candidate_blocking_plan(graph, semantic_graph)
+        if candidate_blocking_enabled
+        else None
+    )
     candidate_ids = (
         {item.candidate_id for item in candidate_blocking.subgraphs}
         if candidate_blocking is not None
@@ -989,6 +994,11 @@ def compute_concurrency_plan(
                 None
                 if semantic_graph is None
                 else semantic_graph.metadata.get("invalidation_fingerprint")
+            ),
+            **(
+                {}
+                if candidate_blocking_enabled
+                else {"candidate_blocking_enabled": False}
             ),
             "candidate_blocking": _candidate_blocking_metadata(candidate_blocking),
             "semantic_pairs_pruned_before_classifier": semantic_pairs_pruned,

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/scip-ablation-physical-benchmark-v3.schema.json",
+  "title": "Claim Plane SCIP Ablation and Physical Parallel Benchmark v3",
+  "type": "object",
+  "required": [
+    "protocol",
+    "study_id",
+    "study_fingerprint",
+    "seeds",
+    "pair_indexes",
+    "profiles",
+    "complete",
+    "profile_summary",
+    "paired_speedup_vs_serial"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.scip-ablation-physical-benchmark.v3"
+    },
+    "study_id": {"type": "string", "minLength": 1},
+    "study_fingerprint": {"type": "string", "minLength": 12},
+    "seeds": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "pair_indexes": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1, "maximum": 30},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "serial",
+          "naive_parallel",
+          "builtin_graph",
+          "scip_graph_cold",
+          "scip_cache_blocking"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "expected_pair_units": {"type": "integer", "minimum": 0},
+    "completed_pair_units": {"type": "integer", "minimum": 0},
+    "expected_rows": {"type": "integer", "minimum": 0},
+    "observed_rows": {"type": "integer", "minimum": 0},
+    "complete": {"type": "boolean"},
+    "missing_pair_units": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "profile_summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "profile",
+          "observations",
+          "pair_pass_rate",
+          "integration_success_rate",
+          "serialization_rate",
+          "physical_concurrency_rate",
+          "mean_active_agents",
+          "mean_critical_path_seconds",
+          "mean_execution_wall_time_seconds",
+          "mean_control_plane_wall_time_seconds",
+          "mean_end_to_end_wall_time_seconds"
+        ],
+        "properties": {
+          "profile": {"type": "string"},
+          "observations": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": true
+      }
+    },
+    "paired_speedup_vs_serial": {"type": "object"}
+  },
+  "additionalProperties": true
+}

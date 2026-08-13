@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-08-13
+
+### Added
+
+- Added SCIP Ablation and Physical Parallel Benchmark v3 over the frozen CooperBench workload, with paired serial, naive-parallel, builtin-graph, cold-SCIP, and warm-SCIP-plus-blocking profiles.
+- Added explicit control-plane timing for builtin graph construction, SCIP indexing, SCIP decoding/graph projection, graph merge, admission, and end-to-end wall-clock attribution.
+- Added measured mean-active-agent and critical-path metrics, paired execution/end-to-end speedup versus serial, bounded outer pair-process execution, resumable pair artifacts, offline status, and strict final aggregation.
+- Added a dedicated v3 result schema and fail-closed benchmark handling that forbids silently labeling builtin fallback as SCIP-backed evidence.
+
+### Changed
+
+- Concurrency planning can disable affected-subgraph candidate blocking explicitly for controlled ablation while preserving the existing default behavior and fingerprints.
+
 ## [0.44.0] — 2026-08-13
 
 ### Added

@@ -313,6 +313,61 @@ integration success, serialization, observed physical concurrency, inner overlap
 speedup versus serial, coder cost, and the direct deterministic-v2 delta from the historical
 static admission. No result is predeclared by the runner.
 
+## SCIP ablation and Physical Parallel Benchmark v3
+
+The next experiment keeps the same frozen pair set, coder seeds, Planner v1 outputs,
+and physical timing instrumentation while isolating the code-intelligence path. Five
+paired profiles are available:
+
+- `serial`: always-serial reliability and wall-clock baseline;
+- `naive_parallel`: uncoordinated physical A/B execution;
+- `builtin_graph`: deterministic builtin semantic graph with candidate blocking disabled;
+- `scip_graph_cold`: required fresh SCIP index merged with the builtin graph, with candidate
+  blocking disabled;
+- `scip_cache_blocking`: the same revision reusing builtin/SCIP caches with
+  affected-subgraph candidate blocking enabled.
+
+Run the initial six-pair check:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory scip-v3-run \
+  --cooperbench /path/to/CooperBench \
+  --seeds 101 \
+  --pairs 1-6 \
+  --max-parallel-pairs 6
+```
+
+A working `scip-python` executable is required for the two SCIP profiles. Those profiles
+fail closed if SCIP is unavailable, the checkout does not exactly match the frozen base
+revision, or provider evidence is stale; the harness never records a builtin fallback as
+a SCIP result. The cold profile clears an isolated per-pair code-intelligence cache and
+forces indexing. The warm profile then reuses that exact revision cache.
+
+Each profile records pair pass, integration success, serialization, observed physical
+concurrency, measured mean active agents, critical-path time, execution wall time,
+control-plane wall time, and end-to-end wall time. Reports include paired execution-only
+and end-to-end speedup versus the same pair/seed unit's serial run. SCIP indexing, decode,
+graph merge, admission, and cache-hit costs remain separate so indexing overhead cannot be
+hidden inside a speedup claim. Outer pair-process concurrency is reported only as harness
+throughput.
+
+After the six-pair check, the same protocol can execute the complete frozen matrix:
+
+```bash
+OPENROUTER_API_KEY=... python -m experiments.cooperbench confirmatory scip-v3-run \
+  --cooperbench /path/to/CooperBench \
+  --seeds 101,202,303 \
+  --pairs 1-30 \
+  --max-parallel-pairs 6
+
+python -m experiments.cooperbench confirmatory scip-v3-status
+python -m experiments.cooperbench confirmatory scip-v3-aggregate
+```
+
+Artifacts live under `.claim-plane/experiments/scip-ablation-physical-v3/` and use the
+`claim-plane.scip-ablation-physical-benchmark.v3` protocol. Aggregation never predeclares
+a target speedup; it seals only observed results.
+
 ## Pinned Linux environment
 
 A Docker image is provided for runs that should not depend on the host Python toolchain.
