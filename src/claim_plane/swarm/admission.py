@@ -420,8 +420,16 @@ def compute_shared_admission(
         status=status,
         admissions=tuple(records),
         metadata={
-            "engine": "claim-plane-admission-v1",
-            "dependency_model": "work-graph-plus-serialization-edges",
+            "engine": (
+                "claim-plane-graph-aware-admission-v1"
+                if plan.metadata.get("semantic_graph_fingerprint") is not None
+                else "claim-plane-admission-v1"
+            ),
+            "dependency_model": "work-graph-plus-graph-derived-serialization-edges",
+            "candidate_blocking": plan.metadata.get("candidate_blocking"),
+            "semantic_pairs_pruned_before_classifier": plan.metadata.get(
+                "semantic_pairs_pruned_before_classifier", 0
+            ),
             "contingent_scope": "projected-as-read-until-amendment",
         },
     )

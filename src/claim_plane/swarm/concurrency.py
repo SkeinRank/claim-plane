@@ -18,12 +18,15 @@ from typing import Any, Iterable, Mapping
 
 from claim_plane.coordination.admission import parse_line_region
 from claim_plane.core import (
+    AffectedSubgraphCandidateBlockingPlan,
     CommutativityProof,
     IntentOperation,
     ResourceKind,
     SemanticConflictKind,
     SemanticConflictOrder,
     SemanticDependencyGraph,
+    SemanticMutationCandidate,
+    build_affected_subgraph_candidate_blocking,
     classify_semantic_conflict,
 )
 from claim_plane.swarm.budget import (
@@ -498,6 +501,7 @@ def _cross_file_semantic_finding(
     *,
     semantic_graph: SemanticDependencyGraph | None,
     commutativity_proofs: Iterable[CommutativityProof],
+    semantic_pair_pruned: bool = False,
 ) -> _Finding | None:
     """Classify graph-backed semantic dependencies across disjoint file surfaces.
 
@@ -506,7 +510,7 @@ def _cross_file_semantic_finding(
     relationships still need ordering even when Git would see no textual overlap.
     """
 
-    if semantic_graph is None:
+    if semantic_graph is None or semantic_pair_pruned:
         return None
     left_paths = _semantic_mutation_paths(left)
     right_paths = _semantic_mutation_paths(right)
@@ -562,6 +566,8 @@ def _operation_findings(
     semantic_graph: SemanticDependencyGraph | None = None,
     commutativity_proofs: Iterable[CommutativityProof] = (),
     same_file_admissions: list[SameFileAdmissionDecision] | None = None,
+    semantic_pair_pruned: bool = False,
+    candidate_blocking_fingerprint: str | None = None,
 ) -> list[_Finding]:
     findings: list[_Finding] = []
     path_kinds = {ResourceKind.FILE, ResourceKind.DOCUMENT}
@@ -593,14 +599,47 @@ def _operation_findings(
                 ):
                     decision = evaluated_same_file.get(resource)
                     if decision is None:
-                        decision = evaluate_same_file_admission(
-                            left,
-                            right,
-                            resource,
-                            policy,
-                            semantic_graph=semantic_graph,
-                            commutativity_proofs=commutativity_proofs,
-                        )
+                        left_changes = semantic_changes_for_item(left, semantic_graph)
+                        right_changes = semantic_changes_for_item(right, semantic_graph)
+                        if (
+                            semantic_pair_pruned
+                            and policy.concurrency.same_file is SameFilePolicy.REGION_SAFE
+                            and left_changes
+                            and right_changes
+                        ):
+                            decision = SameFileAdmissionDecision(
+                                left_id=left.work_id,
+                                right_id=right.work_id,
+                                path=resource,
+                                action=SameFileAdmissionAction.PARALLEL,
+                                reason=SameFileAdmissionReason.SEMANTIC_INDEPENDENT,
+                                semantic_kind=SemanticConflictKind.INDEPENDENT,
+                                graph_fingerprint=semantic_graph.fingerprint,
+                                left_changes=tuple(
+                                    item.identity for item in left_changes
+                                ),
+                                right_changes=tuple(
+                                    item.identity for item in right_changes
+                                ),
+                                detail=(
+                                    "affected-subgraph candidate blocking proved "
+                                    "the semantic mutation surfaces disjoint"
+                                ),
+                                metadata={
+                                    "admission_source": "affected-subgraph-candidate-blocking-v1",
+                                    "candidate_blocking_fingerprint": candidate_blocking_fingerprint,
+                                    "classifier_invoked": False,
+                                },
+                            )
+                        else:
+                            decision = evaluate_same_file_admission(
+                                left,
+                                right,
+                                resource,
+                                policy,
+                                semantic_graph=semantic_graph,
+                                commutativity_proofs=commutativity_proofs,
+                            )
                         evaluated_same_file[resource] = decision
                         if same_file_admissions is not None:
                             same_file_admissions.append(decision)
@@ -693,6 +732,8 @@ def _pair_constraint(
     semantic_graph: SemanticDependencyGraph | None = None,
     commutativity_proofs: Iterable[CommutativityProof] = (),
     same_file_admissions: list[SameFileAdmissionDecision] | None = None,
+    semantic_pair_pruned: bool = False,
+    candidate_blocking_fingerprint: str | None = None,
 ) -> ConcurrencyConstraint | None:
     findings: list[_Finding] = []
     if _schema_change(left) or _schema_change(right):
@@ -721,6 +762,7 @@ def _pair_constraint(
         policy,
         semantic_graph=semantic_graph,
         commutativity_proofs=commutativity_proofs,
+        semantic_pair_pruned=semantic_pair_pruned,
     )
     if semantic_finding is not None:
         findings.append(semantic_finding)
@@ -732,6 +774,8 @@ def _pair_constraint(
             semantic_graph=semantic_graph,
             commutativity_proofs=commutativity_proofs,
             same_file_admissions=same_file_admissions,
+            semantic_pair_pruned=semantic_pair_pruned,
+            candidate_blocking_fingerprint=candidate_blocking_fingerprint,
         )
     )
     if not findings:
@@ -795,6 +839,54 @@ def _execution_waves(
     return tuple(waves)
 
 
+def _candidate_blocking_plan(
+    graph: WorkGraph,
+    semantic_graph: SemanticDependencyGraph | None,
+) -> AffectedSubgraphCandidateBlockingPlan | None:
+    """Build one source-bound semantic pair prefilter for graph-aware admission."""
+
+    if semantic_graph is None:
+        return None
+    candidates: list[SemanticMutationCandidate] = []
+    for item in graph.work_items:
+        changes = semantic_changes_for_item(item, semantic_graph)
+        if not changes:
+            continue
+        candidates.append(
+            SemanticMutationCandidate(
+                candidate_id=item.work_id,
+                changes=changes,
+                metadata={"source": "swarm-work-item"},
+            )
+        )
+    if len(candidates) < 2:
+        return None
+    return build_affected_subgraph_candidate_blocking(semantic_graph, candidates)
+
+
+def _candidate_blocking_metadata(
+    plan: AffectedSubgraphCandidateBlockingPlan | None,
+) -> dict[str, Any] | None:
+    if plan is None:
+        return None
+    fail_closed = [
+        item.candidate_id for item in plan.subgraphs if item.fail_closed
+    ]
+    return {
+        "protocol": plan.protocol,
+        "fingerprint": plan.fingerprint,
+        "graph_fingerprint": plan.graph_fingerprint,
+        "candidate_count": len(plan.subgraphs),
+        "total_pair_count": plan.total_pair_count,
+        "selected_pair_count": plan.selected_pair_count,
+        "pruned_pair_count": plan.pruned_pair_count,
+        "pruning_ratio": plan.pruning_ratio,
+        "fail_closed_candidate_ids": sorted(fail_closed),
+        "algorithm": plan.metadata.get("algorithm"),
+        "pairwise_graph_walks": plan.metadata.get("pairwise_graph_walks"),
+    }
+
+
 def compute_concurrency_plan(
     graph: WorkGraph,
     policy: SwarmBudgetPolicy,
@@ -813,10 +905,28 @@ def compute_concurrency_plan(
     constraints: list[ConcurrencyConstraint] = []
     same_file_admissions: list[SameFileAdmissionDecision] = []
     proofs = tuple(commutativity_proofs)
+    candidate_blocking = _candidate_blocking_plan(graph, semantic_graph)
+    candidate_ids = (
+        {item.candidate_id for item in candidate_blocking.subgraphs}
+        if candidate_blocking is not None
+        else set()
+    )
+    candidate_blocking_fingerprint = (
+        candidate_blocking.fingerprint if candidate_blocking is not None else None
+    )
+    semantic_pairs_pruned = 0
     for left_id, right_id in combinations(order, 2):
         if left_id in ancestors[right_id] or right_id in ancestors[left_id]:
             continue
         left_id, right_id = sorted((left_id, right_id), key=rank.__getitem__)
+        semantic_pair_pruned = bool(
+            candidate_blocking is not None
+            and left_id in candidate_ids
+            and right_id in candidate_ids
+            and candidate_blocking.pair(left_id, right_id) is None
+        )
+        if semantic_pair_pruned:
+            semantic_pairs_pruned += 1
         constraint = _pair_constraint(
             graph.item_map[left_id],
             graph.item_map[right_id],
@@ -824,6 +934,8 @@ def compute_concurrency_plan(
             semantic_graph=semantic_graph,
             commutativity_proofs=proofs,
             same_file_admissions=same_file_admissions,
+            semantic_pair_pruned=semantic_pair_pruned,
+            candidate_blocking_fingerprint=candidate_blocking_fingerprint,
         )
         if constraint is not None:
             constraints.append(constraint)
@@ -853,11 +965,13 @@ def compute_concurrency_plan(
         waves=waves,
         constraints=tuple(constraints),
         metadata={
-            "controller": "deterministic-pairwise-v2",
+            "controller": "graph-aware-admission-v1",
             "contingent_scope": "excluded_until_amendment",
             "semantic_graph_fingerprint": (
                 semantic_graph.fingerprint if semantic_graph is not None else None
             ),
+            "candidate_blocking": _candidate_blocking_metadata(candidate_blocking),
+            "semantic_pairs_pruned_before_classifier": semantic_pairs_pruned,
             "same_file_admissions": [
                 item.to_dict()
                 for item in sorted(

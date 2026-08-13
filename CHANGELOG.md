@@ -8,6 +8,20 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-08-13
+
+### Added
+
+- Connected affected-subgraph candidate blocking to swarm concurrency planning so graph-proven independent mutation pairs bypass expensive semantic conflict classification while retained and fail-closed pairs continue through the full classifier.
+- Connected clean, revision-matched repository planning to the cached SCIP index → Semantic Resource IR → evidence-bearing dependency graph path, merged with the builtin Python graph while preserving builtin authority identities; dirty or unavailable SCIP environments fall back to the pinned builtin graph.
+- Added graph-aware same-file admission evidence that can admit disjoint semantic mutation surfaces under `region_safe` policy without weakening explicit `serialize` or `deny` policy.
+- Added continuous runnable-frontier scheduler evidence and regression coverage proving dependency-ready work can be released as soon as capacity becomes available rather than waiting for a static execution-wave barrier.
+
+### Changed
+
+- Swarm shared admission now records the source-bound semantic graph and candidate-blocking evidence carried by graph-derived serialization dependencies.
+- Concurrency-plan metadata reports candidate count, selected/pruned semantic pairs, fail-closed candidates, pruning ratio, and blocker fingerprint for benchmark attribution.
+
 ## [0.42.0] — 2026-08-13
 
 ### Added

@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.42.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.43.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -964,6 +964,21 @@ Candidate blocking is conservative and does not make an admission decision. Miss
 unknown change semantics, unresolved dependency boundaries, or bounded traversal retain the
 affected candidate against every other candidate. An omitted pair therefore means both sides had
 complete unbounded graph evidence and disjoint affected subgraphs.
+
+Swarm planning consumes that proof before semantic conflict classification. Pairs omitted by the
+blocker skip the expensive graph classifier; retained pairs continue through the ordinary
+independent/commutative/ordered/conflicting decision path. Under `region_safe` same-file policy, a
+complete disjoint affected-subgraph proof can admit the semantic mutations directly, while explicit
+`serialize` and `deny` policy remains authoritative. Runtime scheduling uses the resulting
+graph-derived dependency edges as a continuous runnable frontier, so a dependency-ready work item
+can use newly available capacity without waiting for every item in an earlier advisory wave.
+
+For repository-bound swarm planning, a clean checkout at the pinned session revision can enrich the
+builtin Python dependency graph with cached SCIP evidence automatically. The builtin graph keeps
+canonical local resource identities; SCIP contributes additional evidence-bearing relations and
+provider-only external nodes. If the checkout is dirty, the pinned revision differs from `HEAD`, or
+the optional SCIP indexer is unavailable, planning falls back to the non-executing builtin graph
+read directly from the pinned Git revision.
 
 Local project symbol identity deliberately excludes SCIP package version because the Python
 indexer is bound to the current Git revision. The revision remains provenance metadata, while the

@@ -13,8 +13,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from claim_plane.code_intelligence import (
+    ScipDependencyGraphError,
+    ScipIndexError,
+    ScipIndexManager,
+    ScipSemanticResourceError,
+    build_scip_dependency_graph,
+    build_scip_semantic_resource_index,
+)
 from claim_plane.core import (
     PythonStructuralExtractionError,
+    SemanticDependencyGraph,
     build_python_dependency_graph,
 )
 from claim_plane.swarm.admission import (
@@ -112,14 +121,67 @@ def _python_sources_at_revision(root: Path, revision: str) -> dict[str, str]:
     return sources
 
 
-def _semantic_graph_for_revision(root: Path, revision: str):
+def _merge_semantic_dependency_graphs(
+    primary: SemanticDependencyGraph,
+    evidence: SemanticDependencyGraph,
+) -> SemanticDependencyGraph:
+    """Merge provider evidence without replacing canonical builtin resources.
+
+    Local SCIP and builtin Python resources intentionally share stable identities but
+    may carry different provider metadata. The builtin resource remains the canonical
+    authority coordinate while SCIP contributes additional edges/evidence and any
+    provider-only external nodes.
+    """
+
+    nodes = {item.identity: item for item in primary.nodes}
+    for item in evidence.nodes:
+        nodes.setdefault(item.identity, item)
+    return SemanticDependencyGraph(
+        nodes=tuple(nodes.values()),
+        edges=(*primary.edges, *evidence.edges),
+        source_digests=primary.source_digests,
+        metadata={
+            **dict(primary.metadata),
+            "code_intelligence_sources": ["builtin-python", "scip"],
+            "builtin_graph_fingerprint": primary.fingerprint,
+            "scip_graph_fingerprint": evidence.fingerprint,
+        },
+    )
+
+
+def _semantic_graph_for_revision(
+    root: Path, revision: str
+) -> SemanticDependencyGraph | None:
     sources = _python_sources_at_revision(root, revision)
-    if not sources:
-        return None
+    builtin = None
+    if sources:
+        try:
+            builtin = build_python_dependency_graph(sources)
+        except PythonStructuralExtractionError:
+            builtin = None
+
+    # SCIP indexes the checked-out workspace. It is only admissible as evidence for a
+    # pinned swarm session when the checkout is exactly that revision and clean. A dirty
+    # workspace must never leak into planning for the immutable session base commit.
+    head = _git(root, "rev-parse", "HEAD").lower()
+    clean = not _git(root, "status", "--porcelain", "--untracked-files=normal")
+    if head != revision.lower() or not clean:
+        return builtin
+
     try:
-        return build_python_dependency_graph(sources)
-    except PythonStructuralExtractionError:
-        return None
+        artifact = ScipIndexManager().index_repository(root, revision=revision)
+        scip_index = build_scip_semantic_resource_index(artifact)
+        scip_graph = build_scip_dependency_graph(scip_index)
+    except (
+        ScipIndexError,
+        ScipSemanticResourceError,
+        ScipDependencyGraphError,
+    ):
+        return builtin
+
+    if builtin is None:
+        return scip_graph
+    return _merge_semantic_dependency_graphs(builtin, scip_graph)
 
 
 def resolve_repository_root(root_or_child: str | Path = ".") -> Path:

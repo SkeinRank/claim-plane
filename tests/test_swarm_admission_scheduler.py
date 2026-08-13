@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import subprocess
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -124,10 +125,9 @@ raise SystemExit({exit_code})
     return script
 
 
-def _sleeping_fake_codex(tmp_path: Path) -> Path:
+def _sleeping_fake_codex(tmp_path: Path, *, sleep_seconds: float = 0.5) -> Path:
     script = tmp_path / "fake-codex-sleeping"
-    script.write_text(
-        """#!/usr/bin/env python3
+    body = """#!/usr/bin/env python3
 import json
 import pathlib
 import sys
@@ -138,13 +138,12 @@ if "--version" in sys.argv:
 args = sys.argv[1:]
 output = pathlib.Path(args[args.index("--output-last-message") + 1])
 print(json.dumps({"type": "thread.started", "thread_id": "thread-test"}), flush=True)
-time.sleep(0.5)
+time.sleep(__SLEEP__)
 print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}}), flush=True)
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text("done\n", encoding="utf-8")
-""",
-        encoding="utf-8",
-    )
+""".replace("__SLEEP__", repr(sleep_seconds))
+    script.write_text(body, encoding="utf-8")
     script.chmod(0o755)
     return script
 
@@ -303,3 +302,66 @@ def test_atomic_scheduler_reservation_prevents_stale_double_dispatch(
     assert len(outcomes) == 1
     assert len(errors) == 1
     assert "dispatchable" in str(errors[0]) or "max_active" in str(errors[0])
+
+
+def test_scheduler_uses_continuous_frontier_instead_of_static_wave_barrier(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    _create(
+        repo,
+        [
+            _item("a", "src/a.py"),
+            _item("b", "src/b.py"),
+            _item("c", "src/shared.py", depends_on=("a",)),
+        ],
+        max_active=2,
+    )
+    admit_swarm_session(repo, "swm-admission")
+    provision_swarm_worktrees(repo, "swm-admission")
+    slow = _sleeping_fake_codex(tmp_path, sleep_seconds=2.0)
+    fast = _fake_codex(tmp_path)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            run_codex_work_item,
+            repo,
+            "swm-admission",
+            "b",
+            codex_binary=str(slow),
+        )
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            current = get_swarm_scheduler(repo, "swm-admission")
+            states = {
+                item["work_id"]: item["state"]
+                for item in current["scheduler"]["work"]
+            }
+            if states.get("b") == "active":
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("slow worker did not become active")
+
+        run_codex_work_item(
+            repo,
+            "swm-admission",
+            "a",
+            codex_binary=str(fast),
+        )
+        frontier = get_swarm_scheduler(repo, "swm-admission")
+        states = {
+            item["work_id"]: item["state"]
+            for item in frontier["scheduler"]["work"]
+        }
+        assert states["a"] == "succeeded"
+        assert states["b"] != "succeeded"
+        assert states["c"] == "runnable"
+        assert "c" in frontier["summary"]["dispatchable_work_ids"]
+        assert frontier["scheduler"]["metadata"]["ordering"] == (
+            "continuous-runnable-frontier-v1"
+        )
+        assert frontier["scheduler"]["metadata"]["static_waves"] == (
+            "advisory_only_not_a_runtime_barrier"
+        )
+        future.result(timeout=5)

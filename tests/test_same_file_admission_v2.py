@@ -351,3 +351,83 @@ def test_overlapping_regions_can_be_refined_by_semantic_roots() -> None:
     assert len(evidence) == 1
     assert evidence[0]["action"] == "parallel"
     assert evidence[0]["reason"] == "semantic_independent"
+
+
+def test_candidate_blocking_prunes_independent_same_file_before_classifier(
+    monkeypatch,
+) -> None:
+    import claim_plane.swarm.concurrency as concurrency_module
+    import claim_plane.swarm.same_file_admission as same_file_module
+
+    semantic = build_python_dependency_graph(
+        {
+            "parser.py": dedent(
+                """
+                def parse(value):
+                    return 1
+
+                def validate(value):
+                    return 2
+                """
+            ).lstrip()
+        }
+    )
+    graph = _graph(
+        _item("parse", "parser.py", "parse"),
+        _item("validate", "parser.py", "validate"),
+    )
+
+    def unexpected_classifier(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("semantic conflict classifier should have been pruned")
+
+    monkeypatch.setattr(
+        concurrency_module, "classify_semantic_conflict", unexpected_classifier
+    )
+    monkeypatch.setattr(
+        same_file_module, "classify_semantic_conflict", unexpected_classifier
+    )
+
+    plan = compute_concurrency_plan(graph, _policy(), semantic_graph=semantic)
+
+    assert [wave.work_ids for wave in plan.waves] == [("parse", "validate")]
+    blocking = plan.metadata["candidate_blocking"]
+    assert blocking["candidate_count"] == 2
+    assert blocking["total_pair_count"] == 1
+    assert blocking["selected_pair_count"] == 0
+    assert blocking["pruned_pair_count"] == 1
+    assert plan.metadata["semantic_pairs_pruned_before_classifier"] == 1
+    evidence = plan.metadata["same_file_admissions"][0]
+    assert evidence["action"] == "parallel"
+    assert evidence["reason"] == "semantic_independent"
+    assert evidence["metadata"]["classifier_invoked"] is False
+    assert evidence["metadata"]["candidate_blocking_fingerprint"] == blocking["fingerprint"]
+
+
+def test_candidate_blocking_retains_dependency_pair_for_graph_classification() -> None:
+    semantic = build_python_dependency_graph(
+        {
+            "app.py": dedent(
+                """
+                def parse(value: str) -> str:
+                    return value
+
+                def consume(value: str) -> str:
+                    return parse(value)
+                """
+            ).lstrip()
+        }
+    )
+    graph = _graph(
+        _item("consumer", "app.py", "consume"),
+        _item("producer", "app.py", "parse", change_kind="contract"),
+    )
+
+    plan = compute_concurrency_plan(graph, _policy(), semantic_graph=semantic)
+
+    blocking = plan.metadata["candidate_blocking"]
+    assert blocking["candidate_count"] == 2
+    assert blocking["selected_pair_count"] == 1
+    assert blocking["pruned_pair_count"] == 0
+    assert plan.metadata["semantic_pairs_pruned_before_classifier"] == 0
+    assert [wave.work_ids for wave in plan.waves] == [("producer",), ("consumer",)]
+    assert ConcurrencyConstraintReason.SEMANTIC_ORDER in plan.constraints[0].reasons

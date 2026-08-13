@@ -314,11 +314,15 @@ def compute_scheduler_snapshot(
         work=tuple(final),
         metadata={
             "success_semantics": "codex_execution_succeeded_not_verified",
-            "ordering": "effective-dependencies-then-topological-fairness",
+            "ordering": "continuous-runnable-frontier-v1",
+            "static_waves": "advisory_only_not_a_runtime_barrier",
             "dependency_release": (
                 "integrated"
                 if integrated_work_ids is not None
                 else "execution_succeeded"
             ),
+            "dependency_ready_count": len(candidates),
+            "frontier_dispatchable_count": len(dispatchable),
+            "frontier_capacity_queued_count": max(0, len(candidates) - len(dispatchable)),
         },
     )
