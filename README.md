@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.38.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.39.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -888,6 +888,26 @@ Provider manifests declare supported languages and capabilities, including wheth
 analysis is non-executing. Provider selection is deterministic and can be pinned by id when a
 repository needs a specific backend. The existing `build_python_dependency_graph` API remains
 available unchanged.
+
+SCIP indexes can be prepared independently of provider selection. Claim Plane gives the external
+indexer an explicit repository root and an isolated temporary output path, validates the emitted
+`index.scip`, and stores it under a revision-aware user cache outside the repository. Cache identity
+includes the checked-out Git revision, a content fingerprint for dirty or untracked workspace state,
+the indexer identity/version, the analyzed Python environment fingerprint, and project metadata. A
+stale explicit revision fails closed rather than labeling the current checkout as an older source
+state.
+
+```python
+from claim_plane import ScipIndexManager
+
+artifact = ScipIndexManager().index_repository(".")
+print(artifact.cache_hit, artifact.revision, artifact.index_path)
+```
+
+The default Python command is `scip-python`; it remains an external tool rather than a Python
+runtime dependency of Claim Plane. The generated SCIP protobuf stays opaque at this boundary so
+indexing cost, cold/warm cache behavior, and artifact provenance can be measured separately from
+semantic graph conversion.
 
 ## Python structural extraction
 

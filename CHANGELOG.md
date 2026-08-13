@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-08-13
+
+### Added
+
+- Added external SCIP index generation with a source-bound `index.scip` artifact contract and explicit failure modes for unavailable, failed, timed-out, or non-producing indexers.
+- Added revision-aware SCIP caching keyed by repository identity, checked-out Git revision, dirty/untracked workspace content, indexer identity/version, analyzed Python environment, and project metadata.
+- Added cache integrity validation with SHA-256 digests, atomic artifact/metadata writes, cold/warm cache signaling, and automatic rebuild of corrupt entries.
+
+### Changed
+
+- SCIP indexing now uses explicit repository/output arguments and an isolated temporary artifact path so index generation does not leave `index.scip` in the analyzed repository.
+- Explicit source revisions are treated as checkout assertions and fail closed when they do not resolve to the current `HEAD`.
+
 ## [0.38.0] — 2026-08-13
 
 ### Added
