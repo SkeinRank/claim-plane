@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.40.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.41.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -917,6 +917,26 @@ artifact = ScipIndexManager().index_repository(".")
 resources = build_scip_semantic_resource_index(artifact)
 print(resources.fingerprint, len(resources.resources))
 ```
+
+The projected index can be converted into an evidence-bearing Semantic Dependency Graph.
+SCIP occurrence roles produce document-to-symbol define/import/read/write/reference edges, while
+declared symbol relationships remain explicit reference, implementation, type-definition, or
+definition relations. Every SCIP-backed edge records the source revision, workspace fingerprint,
+artifact digest, provider identity, and available source coordinates.
+
+```python
+from claim_plane import build_scip_dependency_graph
+
+graph = build_scip_dependency_graph(resources)
+for edge in graph.edges:
+    if edge.evidence:
+        print(edge.relation.value, edge.evidence[0].provider_id)
+```
+
+SCIP does not claim to be a call graph, so ordinary reference evidence is not relabeled as a call.
+Language frontends can later combine finer structural ownership with this source-bound evidence.
+Unresolved global targets stay explicit with `unresolved` resolution instead of being treated as
+independent repository resources.
 
 Local project symbol identity deliberately excludes SCIP package version because the Python
 indexer is bound to the current Git revision. The revision remains provenance metadata, while the

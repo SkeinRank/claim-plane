@@ -80,6 +80,9 @@ _RELATION_PREFERENCE = {
     DependencyRelation.IMPORTS: 6,
     DependencyRelation.PUBLIC_API: 7,
     DependencyRelation.DEFINES: 8,
+    DependencyRelation.REFERENCES: 9,
+    DependencyRelation.IMPLEMENTS: 10,
+    DependencyRelation.DEFINITION_OF: 11,
 }
 
 

@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-13
+
+### Added
+
+- Added immutable dependency-edge evidence records with provider, revision, workspace, artifact, source-range, and source-specific provenance while preserving evidence-free graph serialization compatibility.
+- Added SCIP-backed dependency graph projection for document occurrences and declared symbol relationships, including explicit reference, implementation, type-definition, definition, import, read, write, and define relations.
+- Added fail-closed symbol/stable-id binding checks and explicit unresolved dependency nodes so missing SCIP targets remain visible instead of being treated as proof of independence.
+
+### Changed
+
+- SCIP occurrence coordinates are retained in their native zero-based half-open form as evidence while dependency-edge line locations remain one-based for existing graph consumers.
+- SCIP code-navigation relationships are preserved according to their native semantics rather than being reclassified as call-graph edges.
+
 ## [0.40.0] — 2026-08-13
 
 ### Added

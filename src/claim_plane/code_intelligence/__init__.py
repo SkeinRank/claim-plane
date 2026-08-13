@@ -34,6 +34,11 @@ from claim_plane.code_intelligence.scip import (
     ScipRevisionMismatch,
     capture_scip_repository_state,
 )
+from claim_plane.code_intelligence.scip_graph import (
+    SCIP_DEPENDENCY_GRAPH_PROTOCOL,
+    ScipDependencyGraphError,
+    build_scip_dependency_graph,
+)
 from claim_plane.code_intelligence.scip_ir import (
     SCIP_OCCURRENCE_PROTOCOL,
     SCIP_RELATIONSHIP_PROTOCOL,
@@ -63,11 +68,13 @@ __all__ = [
     "SCIP_INDEX_ARTIFACT_PROTOCOL",
     "SCIP_INDEX_CACHE_PROTOCOL",
     "SCIP_INDEX_CACHE_SCHEMA",
+    "SCIP_DEPENDENCY_GRAPH_PROTOCOL",
     "SCIP_OCCURRENCE_PROTOCOL",
     "SCIP_RELATIONSHIP_PROTOCOL",
     "SCIP_SEMANTIC_RESOURCE_INDEX_PROTOCOL",
     "SCIP_SYMBOL_RESOURCE_PROTOCOL",
     "ScipArtifactMismatch",
+    "ScipDependencyGraphError",
     "ScipDecodeError",
     "ScipOccurrence",
     "ScipRelationship",
@@ -75,6 +82,7 @@ __all__ = [
     "ScipSemanticResourceIndex",
     "ScipSourceRange",
     "ScipSymbolResource",
+    "build_scip_dependency_graph",
     "build_scip_semantic_resource_index",
     "ScipIndexArtifact",
     "ScipIndexError",

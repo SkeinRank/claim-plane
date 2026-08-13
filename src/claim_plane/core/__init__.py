@@ -33,8 +33,10 @@ from claim_plane.core.recovery import (
 )
 from claim_plane.core.governance import GovernancePolicy
 from claim_plane.core.dependency_graph import (
+    DEPENDENCY_EVIDENCE_PROTOCOL,
     SEMANTIC_DEPENDENCY_GRAPH_PROTOCOL,
     DependencyEdge,
+    DependencyEvidence,
     DependencyNode,
     DependencyRelation,
     DependencyResolution,
