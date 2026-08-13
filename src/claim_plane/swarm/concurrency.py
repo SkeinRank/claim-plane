@@ -22,6 +22,7 @@ from claim_plane.core import (
     CommutativityProof,
     IntentOperation,
     ResourceKind,
+    SemanticConflictDecision,
     SemanticConflictKind,
     SemanticConflictOrder,
     SemanticDependencyGraph,
@@ -29,6 +30,7 @@ from claim_plane.core import (
     build_affected_subgraph_candidate_blocking,
     classify_semantic_conflict,
 )
+from claim_plane.swarm.admission_attribution import build_admission_decision_attribution
 from claim_plane.swarm.budget import (
     ConflictPolicy,
     SameFilePolicy,
@@ -250,7 +252,7 @@ class ConcurrencyPlan:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def summary(self) -> dict[str, Any]:
-        return {
+        result = {
             "status": self.status.value,
             "work_items": self.work_item_count,
             "wave_count": len(self.waves),
@@ -261,6 +263,10 @@ class ConcurrencyPlan:
             "waves": [list(wave.work_ids) for wave in self.waves],
             "fingerprint": self.fingerprint(),
         }
+        attribution = self.metadata.get("admission_attribution_summary")
+        if isinstance(attribution, Mapping):
+            result["admission_attribution"] = dict(attribution)
+        return result
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ConcurrencyPlan":
@@ -502,6 +508,7 @@ def _cross_file_semantic_finding(
     semantic_graph: SemanticDependencyGraph | None,
     commutativity_proofs: Iterable[CommutativityProof],
     semantic_pair_pruned: bool = False,
+    semantic_decisions: list[SemanticConflictDecision] | None = None,
 ) -> _Finding | None:
     """Classify graph-backed semantic dependencies across disjoint file surfaces.
 
@@ -529,6 +536,8 @@ def _cross_file_semantic_finding(
         commutativity_proofs=commutativity_proofs,
         mutation_sensitive_ordering=True,
     )
+    if semantic_decisions is not None:
+        semantic_decisions.append(decision)
     if decision.kind in {
         SemanticConflictKind.INDEPENDENT,
         SemanticConflictKind.COMMUTATIVE,
@@ -734,6 +743,7 @@ def _pair_constraint(
     same_file_admissions: list[SameFileAdmissionDecision] | None = None,
     semantic_pair_pruned: bool = False,
     candidate_blocking_fingerprint: str | None = None,
+    semantic_decisions: list[SemanticConflictDecision] | None = None,
 ) -> ConcurrencyConstraint | None:
     findings: list[_Finding] = []
     if _schema_change(left) or _schema_change(right):
@@ -763,6 +773,7 @@ def _pair_constraint(
         semantic_graph=semantic_graph,
         commutativity_proofs=commutativity_proofs,
         semantic_pair_pruned=semantic_pair_pruned,
+        semantic_decisions=semantic_decisions,
     )
     if semantic_finding is not None:
         findings.append(semantic_finding)
@@ -905,6 +916,7 @@ def compute_concurrency_plan(
     ancestors = _ancestor_map(graph)
     constraints: list[ConcurrencyConstraint] = []
     same_file_admissions: list[SameFileAdmissionDecision] = []
+    semantic_decisions: list[SemanticConflictDecision] = []
     proofs = tuple(commutativity_proofs)
     candidate_blocking = (
         _candidate_blocking_plan(graph, semantic_graph)
@@ -941,6 +953,7 @@ def compute_concurrency_plan(
             same_file_admissions=same_file_admissions,
             semantic_pair_pruned=semantic_pair_pruned,
             candidate_blocking_fingerprint=candidate_blocking_fingerprint,
+            semantic_decisions=semantic_decisions,
         )
         if constraint is not None:
             constraints.append(constraint)
@@ -959,11 +972,25 @@ def compute_concurrency_plan(
             max_active=policy.workers.max_active,
         )
     )
+    graph_fingerprint = graph.fingerprint()
+    budget_fingerprint = policy.fingerprint()
+    attribution = build_admission_decision_attribution(
+        graph,
+        graph_fingerprint=graph_fingerprint,
+        budget_fingerprint=budget_fingerprint,
+        constraints=constraints,
+        candidate_blocking=candidate_blocking,
+        same_file_admissions=same_file_admissions,
+        semantic_decisions=semantic_decisions,
+        semantic_graph_fingerprint=(
+            semantic_graph.fingerprint if semantic_graph is not None else None
+        ),
+    )
     return ConcurrencyPlan(
         graph_version=graph_version,
-        graph_fingerprint=graph.fingerprint(),
+        graph_fingerprint=graph_fingerprint,
         budget_version=budget_version,
-        budget_fingerprint=policy.fingerprint(),
+        budget_fingerprint=budget_fingerprint,
         max_active_workers=policy.workers.max_active,
         work_item_count=len(graph.work_items),
         status=status,
@@ -971,6 +998,8 @@ def compute_concurrency_plan(
         constraints=tuple(constraints),
         metadata={
             "controller": "graph-aware-admission-v1",
+            "admission_attribution": attribution.to_dict(),
+            "admission_attribution_summary": attribution.summary(),
             "contingent_scope": "excluded_until_amendment",
             "semantic_graph_fingerprint": (
                 semantic_graph.fingerprint if semantic_graph is not None else None

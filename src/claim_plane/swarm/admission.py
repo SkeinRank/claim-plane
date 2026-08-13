@@ -251,7 +251,7 @@ class SharedAdmissionPlan:
         return _fingerprint(self.to_dict())
 
     def summary(self) -> dict[str, Any]:
-        return {
+        result = {
             "status": self.status.value,
             "work_items": len(self.admissions),
             "admitted": sum(1 for item in self.admissions if item.allowed),
@@ -263,6 +263,10 @@ class SharedAdmissionPlan:
             },
             "fingerprint": self.fingerprint(),
         }
+        attribution = self.metadata.get("admission_attribution_summary")
+        if isinstance(attribution, Mapping):
+            result["admission_attribution"] = dict(attribution)
+        return result
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "SharedAdmissionPlan":
@@ -426,6 +430,10 @@ def compute_shared_admission(
                 else "claim-plane-admission-v1"
             ),
             "dependency_model": "work-graph-plus-graph-derived-serialization-edges",
+            "admission_attribution": plan.metadata.get("admission_attribution"),
+            "admission_attribution_summary": plan.metadata.get(
+                "admission_attribution_summary"
+            ),
             "candidate_blocking": plan.metadata.get("candidate_blocking"),
             "semantic_graph_fingerprint": plan.metadata.get("semantic_graph_fingerprint"),
             "semantic_graph_revision": plan.metadata.get("semantic_graph_revision"),

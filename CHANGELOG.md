@@ -8,6 +8,15 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-08-13
+
+### Added
+
+- Added deterministic Admission Decision Attribution covering every work-item pair with a stable `parallel_eligible`, `ordered_by_dependency`, `serialized`, or `denied` disposition and machine-readable reason codes.
+- Added declared committed authority surfaces to pair evidence so later granularity work can distinguish broad file authority from symbol/contract authority without changing current admission semantics.
+- Added source-bound attribution for work-graph dependencies, concurrency constraints, affected-subgraph candidate blocking, same-file semantic admission, and cross-file semantic classification, with deterministic fingerprints and summary counts.
+- Carried admission attribution through concurrency-plan and shared-admission metadata for offline diagnosis and later ablation studies.
+
 ## [0.45.3] — 2026-08-13
 
 ### Fixed

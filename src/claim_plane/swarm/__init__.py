@@ -1,5 +1,15 @@
 """Swarm planning, admission, scheduling, and execution protocols."""
 
+from claim_plane.swarm.admission_attribution import (
+    ADMISSION_DECISION_ATTRIBUTION_PROTOCOL,
+    AdmissionAttributionReason,
+    AdmissionDecisionAttributionReport,
+    AdmissionPairAttribution,
+    AdmissionPairDisposition,
+    DeclaredAuthoritySurface,
+    authority_surfaces_for_item,
+    build_admission_decision_attribution,
+)
 from claim_plane.swarm.admission import (
     SWARM_SHARED_ADMISSION_PROTOCOL,
     SharedAdmissionPlan,
@@ -181,6 +191,12 @@ from claim_plane.swarm.worktrees import (
 )
 
 __all__ = [
+    "ADMISSION_DECISION_ATTRIBUTION_PROTOCOL",
+    "AdmissionAttributionReason",
+    "AdmissionDecisionAttributionReport",
+    "AdmissionPairAttribution",
+    "AdmissionPairDisposition",
+    "DeclaredAuthoritySurface",
     "SWARM_BUDGET_POLICY_PROTOCOL",
     "SWARM_CODEX_RUN_PROTOCOL",
     "SWARM_CONCURRENCY_PLAN_PROTOCOL",
@@ -268,6 +284,8 @@ __all__ = [
     "cancel_codex_run",
     "cancel_swarm_session",
     "cleanup_swarm_worktrees",
+    "authority_surfaces_for_item",
+    "build_admission_decision_attribution",
     "compute_concurrency_plan",
     "build_integration_preflight",
     "inspect_actual_mutation_surface",

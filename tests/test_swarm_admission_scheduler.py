@@ -162,6 +162,11 @@ def test_shared_admission_turns_serialization_into_effective_dependency(
     }
     assert records["a"]["effective_dependencies"] == []
     assert records["b"]["effective_dependencies"] == ["a"]
+    metadata = result["shared_admission"]["metadata"]
+    assert metadata["admission_attribution"]["protocol"] == (
+        "claim-plane.admission-decision-attribution.v1"
+    )
+    assert metadata["admission_attribution_summary"]["serialized_pairs"] == 1
     scheduler = get_swarm_scheduler(repo, "swm-admission")
     assert scheduler["summary"]["dispatchable_work_ids"] == ["a"]
 

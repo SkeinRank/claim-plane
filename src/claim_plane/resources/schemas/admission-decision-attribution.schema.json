@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/admission-decision-attribution.schema.json",
+  "title": "Claim Plane Admission Decision Attribution v1",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reason": {
+      "enum": [
+        "declared_dependency",
+        "same_file",
+        "unknown_overlap",
+        "shared_contract",
+        "schema_change",
+        "semantic_order",
+        "semantic_conflict",
+        "affected_subgraph_disjoint",
+        "semantic_independent",
+        "semantic_commutative",
+        "no_blocking_evidence"
+      ]
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access",
+        "kind",
+        "identifier",
+        "semantic_key",
+        "path",
+        "region",
+        "commitment",
+        "mutating"
+      ],
+      "properties": {
+        "access": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identifier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "semantic_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commitment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mutating": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "left_id",
+        "right_id",
+        "disposition",
+        "parallel_eligible",
+        "primary_reason",
+        "reasons",
+        "before_id",
+        "after_id",
+        "resources",
+        "detail",
+        "left_authority",
+        "right_authority",
+        "evidence"
+      ],
+      "properties": {
+        "left_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "right_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "disposition": {
+          "enum": [
+            "parallel_eligible",
+            "ordered_by_dependency",
+            "serialized",
+            "denied"
+          ]
+        },
+        "parallel_eligible": {
+          "type": "boolean"
+        },
+        "primary_reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/reason"
+          }
+        },
+        "before_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "after_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "detail": {
+          "type": "string"
+        },
+        "left_authority": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/authority"
+          }
+        },
+        "right_authority": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/authority"
+          }
+        },
+        "evidence": {
+          "type": "object"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pair_count",
+        "parallel_eligible_pairs",
+        "dependency_ordered_pairs",
+        "serialized_pairs",
+        "denied_pairs",
+        "disposition_counts",
+        "reason_counts",
+        "primary_reason_counts",
+        "blocking_reason_counts",
+        "fingerprint"
+      ],
+      "properties": {
+        "pair_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parallel_eligible_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dependency_ordered_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serialized_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "denied_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "disposition_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "parallel_eligible",
+            "ordered_by_dependency",
+            "serialized",
+            "denied"
+          ],
+          "properties": {
+            "parallel_eligible": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ordered_by_dependency": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "serialized": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "denied": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "reason_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "primary_reason_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "blocking_reason_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "graph_fingerprint",
+    "budget_fingerprint",
+    "semantic_graph_fingerprint",
+    "pairs",
+    "summary",
+    "metadata"
+  ],
+  "properties": {
+    "fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "protocol": {
+      "const": "claim-plane.admission-decision-attribution.v1"
+    },
+    "graph_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "budget_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "semantic_graph_fingerprint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pairs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pair"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

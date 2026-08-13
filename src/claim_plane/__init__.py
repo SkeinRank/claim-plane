@@ -387,6 +387,14 @@ from claim_plane.runtime import (
     serve_broker,
 )
 from claim_plane.swarm import (
+    ADMISSION_DECISION_ATTRIBUTION_PROTOCOL,
+    AdmissionAttributionReason,
+    AdmissionDecisionAttributionReport,
+    AdmissionPairAttribution,
+    AdmissionPairDisposition,
+    DeclaredAuthoritySurface,
+    authority_surfaces_for_item,
+    build_admission_decision_attribution,
     CodexRunBudget,
     CodexRunRecord,
     CodexRunState,
@@ -477,9 +485,17 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.45.3"
+__version__ = "0.46.0"
 
 __all__ = [
+    "ADMISSION_DECISION_ATTRIBUTION_PROTOCOL",
+    "AdmissionAttributionReason",
+    "AdmissionDecisionAttributionReport",
+    "AdmissionPairAttribution",
+    "AdmissionPairDisposition",
+    "DeclaredAuthoritySurface",
+    "authority_surfaces_for_item",
+    "build_admission_decision_attribution",
     "BUILTIN_PYTHON_PROVIDER_ID",
     "DEFAULT_SCIP_ENVIRONMENT_PROBE_COMMAND",
     "DEFAULT_SCIP_INDEX_TIMEOUT_SECONDS",
