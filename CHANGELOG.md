@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-08-13
+
+### Added
+
+- Added affected-subgraph candidate blocking over Semantic Dependency Graph v2, with deterministic inverted indexing of mutation impact surfaces before pairwise semantic conflict classification.
+- Added immutable candidate/subgraph/pair evidence records with pruning metrics, stable fingerprints, and round-trip serialization for benchmark and replay use.
+- Added fail-closed retention for missing graph roots, unknown change semantics, unresolved dependency boundaries, and bounded traversals so incomplete evidence cannot be mistaken for independence.
+
+### Changed
+
+- Broad file-level mutation roots expand to their defined semantic resources, while file ownership carrier edges are excluded from ordinary symbol-to-symbol candidate overlap to preserve useful same-file concurrency.
+- Candidate blocking uses a deliberately broader semantic relation surface than impact classification so future graph-aware admission can refine retained pairs without reintroducing false-negative pruning.
+
 ## [0.41.0] — 2026-08-13
 
 ### Added

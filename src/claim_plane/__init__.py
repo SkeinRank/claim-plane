@@ -151,6 +151,16 @@ from claim_plane.oss_pilot import (
     run_oss_pilot_acceptance,
 )
 from claim_plane.core import (
+    AFFECTED_SUBGRAPH_CANDIDATE_BLOCKING_PROTOCOL,
+    CANDIDATE_AFFECTED_SUBGRAPH_PROTOCOL,
+    CANDIDATE_PAIR_PROTOCOL,
+    AffectedSubgraphCandidateBlockingPlan,
+    CandidateAffectedSubgraph,
+    CandidateBlockingReason,
+    CandidateFailClosedReason,
+    SemanticConflictCandidatePair,
+    SemanticMutationCandidate,
+    build_affected_subgraph_candidate_blocking,
     RUNTIME_FENCE_PROTOCOL,
     RuntimeFence,
     RuntimeFenceReason,
@@ -454,7 +464,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.41.0"
+__version__ = "0.42.0"
 
 __all__ = [
     "BUILTIN_PYTHON_PROVIDER_ID",
@@ -518,6 +528,16 @@ __all__ = [
     "SemanticAmendmentExecution",
     "SemanticAmendmentReason",
     "assess_semantic_amendment",
+    "AFFECTED_SUBGRAPH_CANDIDATE_BLOCKING_PROTOCOL",
+    "CANDIDATE_AFFECTED_SUBGRAPH_PROTOCOL",
+    "CANDIDATE_PAIR_PROTOCOL",
+    "AffectedSubgraphCandidateBlockingPlan",
+    "CandidateAffectedSubgraph",
+    "CandidateBlockingReason",
+    "CandidateFailClosedReason",
+    "SemanticConflictCandidatePair",
+    "SemanticMutationCandidate",
+    "build_affected_subgraph_candidate_blocking",
     "SEMANTIC_CONFLICT_TAXONOMY_PROTOCOL",
     "CommutativityProof",
     "SemanticConflictDecision",

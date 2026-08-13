@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.41.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.42.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -937,6 +937,33 @@ SCIP does not claim to be a call graph, so ordinary reference evidence is not re
 Language frontends can later combine finer structural ownership with this source-bound evidence.
 Unresolved global targets stay explicit with `unresolved` resolution instead of being treated as
 independent repository resources.
+
+Before pairwise semantic conflict classification, Claim Plane can build an affected-subgraph
+candidate plan. Each mutation root is expanded through the reverse dependency surface once, then
+an inverted resource index selects only candidate pairs whose affected subgraphs overlap. Broad
+file mutations explicitly include the semantic resources they define without using file ownership
+as evidence that otherwise independent symbols conflict.
+
+```python
+from claim_plane import (
+    SemanticMutationCandidate,
+    build_affected_subgraph_candidate_blocking,
+)
+
+plan = build_affected_subgraph_candidate_blocking(
+    graph,
+    (
+        SemanticMutationCandidate("worker-a", left_changes),
+        SemanticMutationCandidate("worker-b", right_changes),
+    ),
+)
+print(plan.selected_pair_count, plan.pruned_pair_count)
+```
+
+Candidate blocking is conservative and does not make an admission decision. Missing graph roots,
+unknown change semantics, unresolved dependency boundaries, or bounded traversal retain the
+affected candidate against every other candidate. An omitted pair therefore means both sides had
+complete unbounded graph evidence and disjoint affected subgraphs.
 
 Local project symbol identity deliberately excludes SCIP package version because the Python
 indexer is bound to the current Git revision. The revision remains provenance metadata, while the
