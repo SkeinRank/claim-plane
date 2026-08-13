@@ -190,6 +190,7 @@ def test_v3_schema_and_cli_contract_are_registered() -> None:
     )
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     assert schema["properties"]["protocol"]["const"] == scip_v3.SCIP_PHYSICAL_V3_PROTOCOL
+    assert schema["properties"]["result_revision"]["const"] == scip_v3.SCIP_PHYSICAL_V3_RESULT_REVISION
 
     parser = build_parser()
     args = parser.parse_args(
@@ -205,3 +206,151 @@ def test_v3_schema_and_cli_contract_are_registered() -> None:
     assert args.seeds == "101"
     assert args.pairs == "1-6"
     assert args.max_parallel_pairs == 6
+
+
+
+def test_agent_failure_is_retained_for_reliability_but_excluded_from_speedup() -> None:
+    failed = {
+        "agent_execution_failure": True,
+        "integration_success": False,
+        "execution_wall_time_seconds": 10.0,
+        "end_to_end_wall_time_seconds": 12.0,
+    }
+    validity = scip_v3._measurement_validity(failed)
+    assert validity == {
+        "execution_outcome": "agent_failure",
+        "speedup_eligible": False,
+        "speedup_exclusion_reason": "agent_execution_failure",
+    }
+
+    serial = {
+        "integration_success": True,
+        "execution_wall_time_seconds": 100.0,
+        "end_to_end_wall_time_seconds": 100.0,
+    }
+    execution, end_to_end, reason = scip_v3._paired_speedup(serial, failed)
+    assert execution is None
+    assert end_to_end is None
+    assert reason == "agent_execution_failure"
+
+
+def test_integration_failure_remains_timing_eligible() -> None:
+    row = {
+        "integration_success": False,
+        "execution_wall_time_seconds": 50.0,
+        "end_to_end_wall_time_seconds": 50.0,
+    }
+    validity = scip_v3._measurement_validity(row)
+    assert validity["execution_outcome"] == "integration_failure"
+    assert validity["speedup_eligible"] is True
+
+    serial = {
+        "integration_success": True,
+        "execution_wall_time_seconds": 100.0,
+        "end_to_end_wall_time_seconds": 100.0,
+    }
+    execution, end_to_end, reason = scip_v3._paired_speedup(serial, row)
+    assert execution == pytest.approx(2.0)
+    assert end_to_end == pytest.approx(2.0)
+    assert reason is None
+
+
+def test_profile_summary_excludes_truncated_attempt_from_latency_means() -> None:
+    rows = [
+        {
+            "scip_v3_profile": "scip_cache_blocking",
+            "integration_success": True,
+            "pair_pass": True,
+            "serialized": False,
+            "physical_concurrency_observed": True,
+            "execution_wall_time_seconds": 100.0,
+            "control_plane_wall_time_seconds": 5.0,
+            "end_to_end_wall_time_seconds": 105.0,
+            "critical_path_seconds": 80.0,
+            "mean_active_agents": 1.5,
+            "control_plane": {"scip_cache_hit": True},
+        },
+        {
+            "scip_v3_profile": "scip_cache_blocking",
+            "agent_execution_failure": True,
+            "integration_success": False,
+            "pair_pass": False,
+            "serialized": True,
+            "physical_concurrency_observed": False,
+            "execution_wall_time_seconds": 10.0,
+            "control_plane_wall_time_seconds": 5.0,
+            "end_to_end_wall_time_seconds": 15.0,
+            "critical_path_seconds": 5.0,
+            "mean_active_agents": 1.0,
+            "control_plane": {"scip_cache_hit": True},
+        },
+    ]
+    summary = scip_v3._profile_summary(rows, scip_v3.ScipV3Profile.SCIP_CACHE_BLOCKING)
+    assert summary["observations"] == 2
+    assert summary["timing_observations"] == 1
+    assert summary["excluded_timing_observations"] == 1
+    assert summary["execution_outcome_counts"]["agent_failure"] == 1
+    assert summary["mean_execution_wall_time_seconds"] == pytest.approx(100.0)
+    assert summary["mean_attempt_wall_time_seconds"] == pytest.approx(55.0)
+
+
+def test_legacy_rows_can_be_annotated_without_rerunning_models() -> None:
+    legacy = {
+        "agent_execution_failure": True,
+        "integration_success": False,
+        "error": "Coding agent failed to produce a valid tool action after 4 transport attempts.",
+    }
+    annotated = scip_v3._annotate_measurement_validity(legacy)
+    assert annotated["execution_outcome"] == "agent_failure"
+    assert annotated["speedup_eligible"] is False
+    assert annotated["speedup_exclusion_reason"] == "agent_execution_failure"
+
+
+
+def test_paired_speedup_matches_exact_pair_and_coder_seed() -> None:
+    rows = []
+    for seed, serial_seconds, profile_seconds in [(101, 100.0, 50.0), (202, 200.0, 200.0)]:
+        rows.extend(
+            [
+                {
+                    "pair": "same-pair",
+                    "pair_index": 1,
+                    "coder_seed": seed,
+                    "scip_v3_profile": "serial",
+                    "integration_success": True,
+                    "execution_wall_time_seconds": serial_seconds,
+                    "end_to_end_wall_time_seconds": serial_seconds,
+                },
+                {
+                    "pair": "same-pair",
+                    "pair_index": 1,
+                    "coder_seed": seed,
+                    "scip_v3_profile": "scip_cache_blocking",
+                    "integration_success": True,
+                    "execution_wall_time_seconds": profile_seconds,
+                    "end_to_end_wall_time_seconds": profile_seconds,
+                },
+            ]
+        )
+
+    summary, exclusions = scip_v3._paired_speedup_summary(
+        rows,
+        (scip_v3.ScipV3Profile.SERIAL, scip_v3.ScipV3Profile.SCIP_CACHE_BLOCKING),
+    )
+    warm = summary["scip_cache_blocking"]
+    assert warm["valid_speedup_observations"] == 2
+    assert warm["mean_execution_speedup_vs_serial"] == pytest.approx(1.5)
+    assert warm["median_execution_speedup_vs_serial"] == pytest.approx(1.5)
+    assert exclusions == []
+
+
+
+def test_v3_result_identity_is_revisioned_without_losing_legacy_lookup() -> None:
+    profiles = (
+        scip_v3.ScipV3Profile.SERIAL,
+        scip_v3.ScipV3Profile.SCIP_CACHE_BLOCKING,
+    )
+    assert scip_v3.SCIP_PHYSICAL_V3_RESULT_REVISION == 2
+    assert scip_v3._result_name(profiles) != scip_v3._legacy_result_name(profiles)
+    assert scip_v3._result_name(profiles).startswith("result-")
+    assert scip_v3._legacy_result_name(profiles).startswith("result-")

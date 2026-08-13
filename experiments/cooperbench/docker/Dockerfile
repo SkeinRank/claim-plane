@@ -1,9 +1,10 @@
-ARG NODE_IMAGE=node:20.19.4-bookworm-slim
-FROM ${NODE_IMAGE} AS node-runtime
+ARG NODE_IMAGE=node:20.19.4-bookworm-slim@sha256:6db5e436948af8f0244488a1f658c2c8e55a3ae51ca2e1686ed042be8f25f70a
+ARG BASE_IMAGE=python@sha256:9bed8554e926c07c6f908841d5ee88c33e8df9236b191526bbce81a9062ab43a
 
-ARG BASE_IMAGE=python:3.12.11-bookworm@sha256:9bed8554e926c07c6f908841d5ee88c33e8df9236b191526bbce81a9062ab43a
+FROM ${NODE_IMAGE} AS node-runtime
 FROM ${BASE_IMAGE}
 
+ARG PYTHON_VERSION=3.12.13
 ARG UV_VERSION=0.11.29
 ARG NODE_VERSION=20.19.4
 ARG SCIP_PYTHON_VERSION=0.6.6
@@ -17,8 +18,9 @@ ENV PYTHONHASHSEED=0 \
     TZ=UTC \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    CLAIM_PLANE_RESEARCH_ENVIRONMENT=cooperbench-linux-v2 \
-    CLAIM_PLANE_RESEARCH_BASE_IMAGE=python:3.12.11-bookworm@sha256:9bed8554e926c07c6f908841d5ee88c33e8df9236b191526bbce81a9062ab43a \
+    CLAIM_PLANE_RESEARCH_ENVIRONMENT=cooperbench-linux-v3 \
+    CLAIM_PLANE_RESEARCH_BASE_IMAGE=python@sha256:9bed8554e926c07c6f908841d5ee88c33e8df9236b191526bbce81a9062ab43a \
+    CLAIM_PLANE_RESEARCH_PYTHON_VERSION=${PYTHON_VERSION} \
     CLAIM_PLANE_RESEARCH_UV_VERSION=${UV_VERSION} \
     CLAIM_PLANE_RESEARCH_NODE_VERSION=${NODE_VERSION} \
     CLAIM_PLANE_RESEARCH_SCIP_PYTHON_VERSION=${SCIP_PYTHON_VERSION} \
@@ -36,7 +38,8 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && grep -F "${SCIP_PYTHON_VERSION}" /tmp/scip-python.version >/dev/null \
     && rm -f /tmp/scip-python.version
 
-RUN python -m pip install --no-cache-dir \
+RUN test "$(python -c 'import platform; print(platform.python_version())')" = "${PYTHON_VERSION}" \
+    && python -m pip install --no-cache-dir \
       "pip==25.1.1" \
       "setuptools==80.9.0" \
       "uv==${UV_VERSION}" \

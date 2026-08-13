@@ -65,6 +65,7 @@ from .plans import load_plan_bundle, validate_plan_bundle
 from .runner import _legacy_pair, load_confirmatory_study
 
 SCIP_PHYSICAL_V3_PROTOCOL = "claim-plane.scip-ablation-physical-benchmark.v3"
+SCIP_PHYSICAL_V3_RESULT_REVISION = 2
 
 
 class ScipV3Profile(str, Enum):
@@ -73,6 +74,14 @@ class ScipV3Profile(str, Enum):
     BUILTIN_GRAPH = "builtin_graph"
     SCIP_GRAPH_COLD = "scip_graph_cold"
     SCIP_CACHE_BLOCKING = "scip_cache_blocking"
+
+
+class ScipV3ExecutionOutcome(str, Enum):
+    SUCCESS = "success"
+    AGENT_FAILURE = "agent_failure"
+    INTEGRATION_FAILURE = "integration_failure"
+    INFRASTRUCTURE_FAILURE = "infrastructure_failure"
+    POLICY_BLOCK = "policy_block"
 
 
 DEFAULT_SCIP_V3_PROFILES = tuple(ScipV3Profile)
@@ -592,6 +601,82 @@ def _critical_path_seconds(row: Mapping[str, Any]) -> float:
     return float(row.get("coder_latency_critical", 0.0) or 0.0)
 
 
+def _measurement_validity(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Classify whether a completed attempt is valid for wall-clock speedup.
+
+    Correctness outcomes remain observable for every attempt.  Only truncated attempts
+    caused by agent/protocol, harness/planner, or policy-enforcement failures are excluded
+    from timing claims so a fast failure can never become an apparent speedup.  A normal
+    integration failure remains timing-eligible because both agent executions completed
+    and the failed integration is itself the measured naive-parallel outcome.
+    """
+
+    if bool(row.get("agent_execution_failure")):
+        return {
+            "execution_outcome": ScipV3ExecutionOutcome.AGENT_FAILURE.value,
+            "speedup_eligible": False,
+            "speedup_exclusion_reason": "agent_execution_failure",
+        }
+    if bool(row.get("harness_failure")) or bool(row.get("planner_failure")):
+        reason = "harness_failure" if bool(row.get("harness_failure")) else "planner_failure"
+        return {
+            "execution_outcome": ScipV3ExecutionOutcome.INFRASTRUCTURE_FAILURE.value,
+            "speedup_eligible": False,
+            "speedup_exclusion_reason": reason,
+        }
+    if bool(row.get("scope_enforcement_failure")):
+        return {
+            "execution_outcome": ScipV3ExecutionOutcome.POLICY_BLOCK.value,
+            "speedup_eligible": False,
+            "speedup_exclusion_reason": "scope_enforcement_failure",
+        }
+    if row.get("integration_success") is False:
+        return {
+            "execution_outcome": ScipV3ExecutionOutcome.INTEGRATION_FAILURE.value,
+            "speedup_eligible": True,
+            "speedup_exclusion_reason": None,
+        }
+    return {
+        "execution_outcome": ScipV3ExecutionOutcome.SUCCESS.value,
+        "speedup_eligible": True,
+        "speedup_exclusion_reason": None,
+    }
+
+
+def _annotate_measurement_validity(row: Mapping[str, Any]) -> dict[str, Any]:
+    annotated = dict(row)
+    validity = _measurement_validity(annotated)
+    # Recompute rather than trusting persisted derived fields. This makes 0.45.2 able to
+    # re-aggregate 0.45.0/0.45.1 raw artifacts without rerunning model calls.
+    annotated.update(validity)
+    return annotated
+
+
+def _paired_speedup(
+    serial: Mapping[str, Any], row: Mapping[str, Any]
+) -> tuple[float | None, float | None, str | None]:
+    serial_validity = _measurement_validity(serial)
+    row_validity = _measurement_validity(row)
+    if not bool(serial_validity["speedup_eligible"]):
+        return (
+            None,
+            None,
+            f"serial:{serial_validity['speedup_exclusion_reason']}",
+        )
+    if not bool(row_validity["speedup_eligible"]):
+        return None, None, str(row_validity["speedup_exclusion_reason"])
+
+    execution = float(row.get("execution_wall_time_seconds", 0.0) or 0.0)
+    serial_execution = float(serial.get("execution_wall_time_seconds", 0.0) or 0.0)
+    e2e = float(row.get("end_to_end_wall_time_seconds", 0.0) or 0.0)
+    serial_e2e = float(serial.get("end_to_end_wall_time_seconds", 0.0) or 0.0)
+    if execution <= 0 or serial_execution <= 0:
+        return None, None, "non_positive_execution_wall_time"
+    if e2e <= 0 or serial_e2e <= 0:
+        return None, None, "non_positive_end_to_end_wall_time"
+    return serial_execution / execution, serial_e2e / e2e, None
+
+
 def run_scip_v3_pair(
     paths: ConfirmatoryPaths,
     *,
@@ -683,21 +768,26 @@ def run_scip_v3_pair(
         finished = time.time_ns()
         execution_seconds = (finished - started) / 1_000_000_000
         control_seconds = float(timing.get("control_plane_seconds", 0.0) or 0.0)
-        normalized = {
-            **dict(row),
-            "scip_v3_profile": profile.value,
-            "scip_v3_description": spec.description,
-            "scip_v3_execution_ordinal": ordinal,
-            "execution_wall_time_seconds": execution_seconds,
-            "control_plane_wall_time_seconds": control_seconds,
-            "end_to_end_wall_time_seconds": execution_seconds + control_seconds,
-            "critical_path_seconds": _critical_path_seconds(row),
-            "mean_active_agents": _mean_active_agents(row),
-            "control_plane": timing,
-            "scip_v3_gate": gate,
-            "provider_stats": _provider_stats(),
-            "agent_traces": list(AGENT_TRACE_LOGS),
-        }
+        normalized = _annotate_measurement_validity(
+            {
+                **dict(row),
+                "coder_seed": coder_seed,
+                "pair_index": pair_index,
+                "pair_key": pair.key,
+                "scip_v3_profile": profile.value,
+                "scip_v3_description": spec.description,
+                "scip_v3_execution_ordinal": ordinal,
+                "execution_wall_time_seconds": execution_seconds,
+                "control_plane_wall_time_seconds": control_seconds,
+                "end_to_end_wall_time_seconds": execution_seconds + control_seconds,
+                "critical_path_seconds": _critical_path_seconds(row),
+                "mean_active_agents": _mean_active_agents(row),
+                "control_plane": timing,
+                "scip_v3_gate": gate,
+                "provider_stats": _provider_stats(),
+                "agent_traces": list(AGENT_TRACE_LOGS),
+            }
+        )
         rows.append(normalized)
         _atomic_json(output_dir / f"{profile.value}.json", normalized)
     pair_finished = time.time_ns()
@@ -706,14 +796,16 @@ def run_scip_v3_pair(
     serial = by_profile.get(ScipV3Profile.SERIAL.value)
     comparisons: list[dict[str, Any]] = []
     if serial is not None:
-        serial_execution = float(serial.get("execution_wall_time_seconds", 0.0) or 0.0)
-        serial_e2e = float(serial.get("end_to_end_wall_time_seconds", 0.0) or 0.0)
         for profile in selected:
             row = by_profile.get(profile.value)
             if row is None:
                 continue
             execution = float(row.get("execution_wall_time_seconds", 0.0) or 0.0)
             e2e = float(row.get("end_to_end_wall_time_seconds", 0.0) or 0.0)
+            execution_speedup, e2e_speedup, exclusion_reason = _paired_speedup(
+                serial, row
+            )
+            validity = _measurement_validity(row)
             comparisons.append(
                 {
                     "profile": profile.value,
@@ -723,24 +815,22 @@ def run_scip_v3_pair(
                     "physical_concurrency_observed": bool(
                         row.get("physical_concurrency_observed")
                     ),
+                    "execution_outcome": validity["execution_outcome"],
+                    "speedup_eligible": exclusion_reason is None,
+                    "speedup_exclusion_reason": exclusion_reason,
                     "execution_wall_time_seconds": execution,
                     "control_plane_wall_time_seconds": row.get(
                         "control_plane_wall_time_seconds"
                     ),
                     "end_to_end_wall_time_seconds": e2e,
-                    "speedup_vs_serial_execution": (
-                        serial_execution / execution
-                        if serial_execution > 0 and execution > 0
-                        else None
-                    ),
-                    "speedup_vs_serial_end_to_end": (
-                        serial_e2e / e2e if serial_e2e > 0 and e2e > 0 else None
-                    ),
+                    "speedup_vs_serial_execution": execution_speedup,
+                    "speedup_vs_serial_end_to_end": e2e_speedup,
                 }
             )
 
     result = {
         "protocol": SCIP_PHYSICAL_V3_PROTOCOL,
+        "result_revision": SCIP_PHYSICAL_V3_RESULT_REVISION,
         "study_id": study.study_id,
         "study_fingerprint": fingerprint,
         "claim_plane_runtime_version": _runtime_version(),
@@ -781,16 +871,42 @@ def _rate(rows: Sequence[Mapping[str, Any]], field: str) -> float | None:
 
 
 def _profile_summary(rows: Sequence[Mapping[str, Any]], profile: ScipV3Profile) -> dict[str, Any]:
-    selected = [row for row in rows if row.get("scip_v3_profile") == profile.value]
-    execution = [float(row.get("execution_wall_time_seconds", 0.0) or 0.0) for row in selected]
-    control = [float(row.get("control_plane_wall_time_seconds", 0.0) or 0.0) for row in selected]
-    e2e = [float(row.get("end_to_end_wall_time_seconds", 0.0) or 0.0) for row in selected]
-    critical = [float(row.get("critical_path_seconds", 0.0) or 0.0) for row in selected]
-    active = [float(row.get("mean_active_agents", 0.0) or 0.0) for row in selected]
+    selected = [
+        _annotate_measurement_validity(row)
+        for row in rows
+        if row.get("scip_v3_profile") == profile.value
+    ]
+    timing_selected = [row for row in selected if bool(row.get("speedup_eligible"))]
+    execution = [
+        float(row.get("execution_wall_time_seconds", 0.0) or 0.0)
+        for row in timing_selected
+    ]
+    control = [
+        float(row.get("control_plane_wall_time_seconds", 0.0) or 0.0)
+        for row in timing_selected
+    ]
+    e2e = [
+        float(row.get("end_to_end_wall_time_seconds", 0.0) or 0.0)
+        for row in timing_selected
+    ]
+    critical = [
+        float(row.get("critical_path_seconds", 0.0) or 0.0)
+        for row in timing_selected
+    ]
+    active = [float(row.get("mean_active_agents", 0.0) or 0.0) for row in timing_selected]
+    outcome_counts = {outcome.value: 0 for outcome in ScipV3ExecutionOutcome}
+    for row in selected:
+        outcome_counts[str(row["execution_outcome"])] += 1
+    raw_execution = [
+        float(row.get("execution_wall_time_seconds", 0.0) or 0.0) for row in selected
+    ]
     return {
         "profile": profile.value,
         "description": _PROFILE_SPECS[profile].description,
         "observations": len(selected),
+        "timing_observations": len(timing_selected),
+        "excluded_timing_observations": len(selected) - len(timing_selected),
+        "execution_outcome_counts": outcome_counts,
         "pair_pass_rate": _rate(selected, "pair_pass"),
         "integration_success_rate": _rate(selected, "integration_success"),
         "serialization_rate": _rate(selected, "serialized"),
@@ -801,6 +917,7 @@ def _profile_summary(rows: Sequence[Mapping[str, Any]], profile: ScipV3Profile) 
         "median_execution_wall_time_seconds": statistics.median(execution) if execution else None,
         "mean_control_plane_wall_time_seconds": _mean(control),
         "mean_end_to_end_wall_time_seconds": _mean(e2e),
+        "mean_attempt_wall_time_seconds": _mean(raw_execution),
         "scip_cache_hit_rate": (
             None
             if not [
@@ -822,9 +939,95 @@ def _profile_summary(rows: Sequence[Mapping[str, Any]], profile: ScipV3Profile) 
     }
 
 
-def _result_name(profiles: Sequence[ScipV3Profile]) -> str:
+def _legacy_result_name(profiles: Sequence[ScipV3Profile]) -> str:
     key = "+".join(sorted(profile.value for profile in profiles))
     return f"result-{hashlib.sha256(key.encode()).hexdigest()[:12]}.json"
+
+
+def _result_name(profiles: Sequence[ScipV3Profile]) -> str:
+    key = "+".join(sorted(profile.value for profile in profiles))
+    revisioned = f"{key}|result-revision={SCIP_PHYSICAL_V3_RESULT_REVISION}"
+    return f"result-{hashlib.sha256(revisioned.encode()).hexdigest()[:12]}.json"
+
+
+def _paired_speedup_summary(
+    rows: Sequence[Mapping[str, Any]],
+    profiles: Sequence[ScipV3Profile],
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    serial_rows = {
+        (int(row.get("pair_index", -1)), int(row.get("coder_seed", -1))): row
+        for row in rows
+        if row.get("scip_v3_profile") == ScipV3Profile.SERIAL.value
+    }
+    paired: dict[str, list[float]] = {profile.value: [] for profile in profiles}
+    paired_e2e: dict[str, list[float]] = {profile.value: [] for profile in profiles}
+    exclusions: list[dict[str, Any]] = []
+    exclusion_counts: dict[str, dict[str, int]] = {profile.value: {} for profile in profiles}
+    for row in rows:
+        profile = str(row.get("scip_v3_profile"))
+        if profile not in paired:
+            continue
+        serial = serial_rows.get(
+            (int(row.get("pair_index", -1)), int(row.get("coder_seed", -1)))
+        )
+        if serial is None:
+            reason = "missing_paired_serial"
+            exclusion_counts[profile][reason] = exclusion_counts[profile].get(reason, 0) + 1
+            exclusions.append(
+                {
+                    "profile": profile,
+                    "coder_seed": row.get("coder_seed"),
+                    "pair_index": row.get("pair_index"),
+                    "pair": row.get("pair"),
+                    "reason": reason,
+                }
+            )
+            continue
+        execution_speedup, e2e_speedup, reason = _paired_speedup(serial, row)
+        if reason is not None:
+            exclusion_counts[profile][reason] = exclusion_counts[profile].get(reason, 0) + 1
+            exclusions.append(
+                {
+                    "profile": profile,
+                    "coder_seed": row.get("coder_seed"),
+                    "pair_index": row.get("pair_index"),
+                    "pair": row.get("pair"),
+                    "reason": reason,
+                    "serial_execution_outcome": _measurement_validity(serial)[
+                        "execution_outcome"
+                    ],
+                    "profile_execution_outcome": _measurement_validity(row)[
+                        "execution_outcome"
+                    ],
+                }
+            )
+            continue
+        assert execution_speedup is not None
+        assert e2e_speedup is not None
+        paired[profile].append(execution_speedup)
+        paired_e2e[profile].append(e2e_speedup)
+    speedups = {
+        profile.value: {
+            "paired_observations": len(paired[profile.value]),
+            "valid_speedup_observations": len(paired[profile.value]),
+            "excluded_speedup_observations": sum(
+                exclusion_counts[profile.value].values()
+            ),
+            "exclusion_reasons": dict(sorted(exclusion_counts[profile.value].items())),
+            "mean_execution_speedup_vs_serial": _mean(paired[profile.value]),
+            "median_execution_speedup_vs_serial": (
+                statistics.median(paired[profile.value]) if paired[profile.value] else None
+            ),
+            "mean_end_to_end_speedup_vs_serial": _mean(paired_e2e[profile.value]),
+            "median_end_to_end_speedup_vs_serial": (
+                statistics.median(paired_e2e[profile.value])
+                if paired_e2e[profile.value]
+                else None
+            ),
+        }
+        for profile in profiles
+    }
+    return speedups, exclusions
 
 
 def build_scip_v3_report(
@@ -834,6 +1037,7 @@ def build_scip_v3_report(
     pair_indexes: Sequence[int] = tuple(range(1, N_PAIRS + 1)),
     profiles: Sequence[ScipV3Profile | str] = DEFAULT_SCIP_V3_PROFILES,
     require_complete: bool = False,
+    allow_legacy: bool = False,
 ) -> dict[str, Any]:
     selected_profiles = parse_scip_v3_profiles(profiles)
     selected_seeds = parse_coder_seeds(tuple(seeds))
@@ -848,12 +1052,22 @@ def build_scip_v3_report(
     rows: list[dict[str, Any]] = []
     missing: list[str] = []
     name = _result_name(selected_profiles)
+    legacy_name = _legacy_result_name(selected_profiles)
     completed_units = 0
+    legacy_artifact_units = 0
+    execution_environments_by_fingerprint: dict[str, dict[str, Any]] = {}
     for seed in selected_seeds:
         for pair_index in selected_pairs:
-            path = _pair_dir(
+            pair_dir = _pair_dir(
                 paths, fingerprint=fingerprint, coder_seed=seed, pair_index=pair_index
-            ) / name
+            )
+            path = pair_dir / name
+            using_legacy = False
+            if not path.exists() and allow_legacy:
+                legacy_path = pair_dir / legacy_name
+                if legacy_path.exists():
+                    path = legacy_path
+                    using_legacy = True
             if not path.exists():
                 missing.append(f"seed-{seed}/pair-{pair_index:02d}")
                 continue
@@ -862,52 +1076,51 @@ def build_scip_v3_report(
                 missing.append(f"seed-{seed}/pair-{pair_index:02d}")
                 continue
             completed_units += 1
+            if using_legacy:
+                legacy_artifact_units += 1
+            payload_environment = payload.get("environment")
+            if isinstance(payload_environment, dict):
+                encoded_environment = json.dumps(
+                    payload_environment, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+                environment_fingerprint = hashlib.sha256(encoded_environment).hexdigest()
+                execution_environments_by_fingerprint.setdefault(
+                    environment_fingerprint, dict(payload_environment)
+                )
             payload_rows = payload.get("rows") or []
             if isinstance(payload_rows, list):
-                rows.extend(dict(row) for row in payload_rows if isinstance(row, dict))
+                for row in payload_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    normalized_row = dict(row)
+                    normalized_row["coder_seed"] = seed
+                    normalized_row["pair_index"] = pair_index
+                    normalized_row.setdefault("pair_key", payload.get("pair_key"))
+                    rows.append(_annotate_measurement_validity(normalized_row))
     if require_complete and missing:
         raise RuntimeError(f"SCIP v3 matrix is incomplete: {len(missing)} pair units missing")
 
-    serial_rows = {
-        (str(row.get("pair")), int(row.get("coder_seed", -1))): row
-        for row in rows
-        if row.get("scip_v3_profile") == ScipV3Profile.SERIAL.value
-    }
-    paired: dict[str, list[float]] = {profile.value: [] for profile in selected_profiles}
-    paired_e2e: dict[str, list[float]] = {profile.value: [] for profile in selected_profiles}
-    for row in rows:
-        serial = serial_rows.get((str(row.get("pair")), int(row.get("coder_seed", -1))))
-        if serial is None:
-            continue
-        execution = float(row.get("execution_wall_time_seconds", 0.0) or 0.0)
-        serial_execution = float(serial.get("execution_wall_time_seconds", 0.0) or 0.0)
-        e2e = float(row.get("end_to_end_wall_time_seconds", 0.0) or 0.0)
-        serial_e2e = float(serial.get("end_to_end_wall_time_seconds", 0.0) or 0.0)
-        profile = str(row.get("scip_v3_profile"))
-        if execution > 0 and serial_execution > 0:
-            paired[profile].append(serial_execution / execution)
-        if e2e > 0 and serial_e2e > 0:
-            paired_e2e[profile].append(serial_e2e / e2e)
-    speedups = {
-        profile.value: {
-            "paired_observations": len(paired[profile.value]),
-            "mean_execution_speedup_vs_serial": _mean(paired[profile.value]),
-            "median_execution_speedup_vs_serial": (
-                statistics.median(paired[profile.value]) if paired[profile.value] else None
-            ),
-            "mean_end_to_end_speedup_vs_serial": _mean(paired_e2e[profile.value]),
-            "median_end_to_end_speedup_vs_serial": (
-                statistics.median(paired_e2e[profile.value])
-                if paired_e2e[profile.value]
-                else None
-            ),
-        }
-        for profile in selected_profiles
-    }
+    speedups, exclusions = _paired_speedup_summary(rows, selected_profiles)
+    execution_environments = [
+        execution_environments_by_fingerprint[key]
+        for key in sorted(execution_environments_by_fingerprint)
+    ]
+    if require_complete and legacy_artifact_units:
+        raise RuntimeError(
+            "SCIP v3 final aggregation refuses legacy result artifacts; rerun those pair/seed units "
+            f"under result revision {SCIP_PHYSICAL_V3_RESULT_REVISION}"
+        )
+    if require_complete and len(execution_environments) != 1:
+        raise RuntimeError(
+            "SCIP v3 final aggregation requires exactly one execution environment; "
+            f"observed {len(execution_environments)}"
+        )
+    aggregation_environment = runtime_environment()
     expected_units = len(selected_seeds) * len(selected_pairs)
     expected_rows = expected_units * len(selected_profiles)
     return {
         "protocol": SCIP_PHYSICAL_V3_PROTOCOL,
+        "result_revision": SCIP_PHYSICAL_V3_RESULT_REVISION,
         "study_id": study.study_id,
         "study_fingerprint": fingerprint,
         "claim_plane_runtime_version": _runtime_version(),
@@ -922,6 +1135,7 @@ def build_scip_v3_report(
         "missing_pair_units": missing,
         "profile_summary": [_profile_summary(rows, profile) for profile in selected_profiles],
         "paired_speedup_vs_serial": speedups,
+        "speedup_exclusions": exclusions,
         "cold_warm_interpretation": (
             "scip_graph_cold forces a new SCIP index in an isolated per-pair cache; "
             "scip_cache_blocking reuses that exact revision cache and enables affected-subgraph blocking."
@@ -929,7 +1143,15 @@ def build_scip_v3_report(
         "outer_concurrency_interpretation": (
             "Outer pair concurrency reduces experiment turnaround only and is excluded from Claim Plane speedup."
         ),
-        "environment": runtime_environment(),
+        "legacy_artifact_units": legacy_artifact_units,
+        "execution_environment_count": len(execution_environments),
+        "execution_environments": execution_environments,
+        "aggregation_environment": aggregation_environment,
+        "environment": (
+            execution_environments[0]
+            if len(execution_environments) == 1
+            else aggregation_environment
+        ),
     }
 
 
@@ -985,6 +1207,7 @@ def run_scip_v3_batch(
     result = {
         **pool,
         "protocol": SCIP_PHYSICAL_V3_PROTOCOL,
+        "result_revision": SCIP_PHYSICAL_V3_RESULT_REVISION,
         "study_id": study.study_id,
         "study_fingerprint": fingerprint,
         "claim_plane_runtime_version": _runtime_version(),
@@ -1002,6 +1225,7 @@ def run_scip_v3_batch(
                 "pairs": selected_pairs,
                 "profiles": [profile.value for profile in selected_profiles],
                 "max_parallel_pairs": max_parallel_pairs,
+                "result_revision": SCIP_PHYSICAL_V3_RESULT_REVISION,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -1015,7 +1239,10 @@ def run_scip_v3_batch(
 
 def scip_v3_status(paths: ConfirmatoryPaths) -> dict[str, Any]:
     try:
-        return {"prepared": True, **build_scip_v3_report(paths, require_complete=False)}
+        return {
+            "prepared": True,
+            **build_scip_v3_report(paths, require_complete=False, allow_legacy=True),
+        }
     except (FileNotFoundError, RuntimeError):
         return {
             "protocol": SCIP_PHYSICAL_V3_PROTOCOL,
@@ -1035,6 +1262,7 @@ def aggregate_scip_v3(paths: ConfirmatoryPaths) -> dict[str, Any]:
     _atomic_json(final, report)
     manifest = {
         "protocol": SCIP_PHYSICAL_V3_PROTOCOL,
+        "result_revision": SCIP_PHYSICAL_V3_RESULT_REVISION,
         "study_fingerprint": fingerprint,
         "final_report": final.name,
         "final_report_sha256": _sha256_file(final),
@@ -1055,7 +1283,9 @@ def aggregate_scip_v3(paths: ConfirmatoryPaths) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_SCIP_V3_PROFILES",
     "SCIP_PHYSICAL_V3_PROTOCOL",
+    "SCIP_PHYSICAL_V3_RESULT_REVISION",
     "ScipV3Profile",
+    "ScipV3ExecutionOutcome",
     "aggregate_scip_v3",
     "build_pair_admission_profiles",
     "build_scip_v3_report",

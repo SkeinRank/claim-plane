@@ -52,6 +52,7 @@ def runtime_environment() -> dict[str, Any]:
             "scip_python_version": _command_version("scip-python", "--version"),
             "container_environment": os.environ.get("CLAIM_PLANE_RESEARCH_ENVIRONMENT"),
             "container_base_image": os.environ.get("CLAIM_PLANE_RESEARCH_BASE_IMAGE"),
+            "container_python_version": os.environ.get("CLAIM_PLANE_RESEARCH_PYTHON_VERSION"),
             "container_node_version": os.environ.get("CLAIM_PLANE_RESEARCH_NODE_VERSION"),
             "container_scip_python_version": os.environ.get(
                 "CLAIM_PLANE_RESEARCH_SCIP_PYTHON_VERSION"

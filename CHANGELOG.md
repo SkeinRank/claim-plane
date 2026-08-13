@@ -8,12 +8,23 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.45.2] — 2026-08-13
+
+### Fixed
+
+- Hardened SCIP v3 timing validity so truncated agent, infrastructure, or policy-enforcement failures remain visible in reliability results but cannot be counted as latency improvements or paired speedups.
+- Bound every SCIP v3 row to its explicit coder seed and pair index, and pair speedup only with the serial execution from that exact pair/seed unit.
+- Added deterministic speedup-exclusion evidence and outcome counts so existing raw v3 artifacts can be re-aggregated without rerunning model calls.
+- Synchronized the pinned CooperBench environment evidence with the observed Python 3.12.13 runtime and made the Docker build fail if the interpreter does not match the lock.
+- Fixed Docker build-argument scope for the pinned base image and Node stage, and moved the corrected toolchain to an isolated `cooperbench-linux-v3` environment.
+- Revisioned SCIP v3 pair-result identity so final aggregation cannot mix earlier smoke artifacts with new benchmark runs; offline status can still re-aggregate legacy raw artifacts for diagnosis.
+
 ## [0.45.1] — 2026-08-13
 
 ### Changed
 
 - Updated the CooperBench research environment for SCIP v3 with Node 20.19.4 and `@sourcegraph/scip-python` 0.6.6, with both tool versions recorded in runtime environment evidence.
-- Added SCIP v3 smoke and status workflows with an explicit SCIP toolchain preflight and an isolated `claim-plane-cooperbench:0.10.0` research image.
+- Added SCIP v3 smoke and status workflows with an explicit SCIP toolchain preflight and an isolated research image.
 - The SCIP v3 smoke workflow defaults to two concurrent outer pair processes to reduce local indexing contention while keeping outer concurrency configurable independently from measured inner A/B concurrency.
 
 ## [0.45.0] — 2026-08-13

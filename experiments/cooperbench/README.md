@@ -345,11 +345,15 @@ forces indexing. The warm profile then reuses that exact revision cache.
 
 Each profile records pair pass, integration success, serialization, observed physical
 concurrency, measured mean active agents, critical-path time, execution wall time,
-control-plane wall time, and end-to-end wall time. Reports include paired execution-only
-and end-to-end speedup versus the same pair/seed unit's serial run. SCIP indexing, decode,
-graph merge, admission, and cache-hit costs remain separate so indexing overhead cannot be
-hidden inside a speedup claim. Outer pair-process concurrency is reported only as harness
-throughput.
+control-plane wall time, and end-to-end wall time. Reports classify completed attempts as
+`success`, `agent_failure`, `integration_failure`, `infrastructure_failure`, or
+`policy_block`. Truncated agent/infrastructure/policy attempts remain in reliability
+statistics but are excluded from latency and paired-speedup claims; integration failures
+remain timing-valid because both agent executions completed. Paired execution-only and
+end-to-end speedup always use the serial run from the exact same pair and coder seed, and
+reports preserve every exclusion reason. SCIP indexing, decode, graph merge, admission, and
+cache-hit costs remain separate so indexing overhead cannot be hidden inside a speedup claim.
+Outer pair-process concurrency is reported only as harness throughput.
 
 After the six-pair check, the same protocol can execute the complete frozen matrix:
 
@@ -365,13 +369,16 @@ python -m experiments.cooperbench confirmatory scip-v3-aggregate
 ```
 
 Artifacts live under `.claim-plane/experiments/scip-ablation-physical-v3/` and use the
-`claim-plane.scip-ablation-physical-benchmark.v3` protocol. Aggregation never predeclares
-a target speedup; it seals only observed results.
+`claim-plane.scip-ablation-physical-benchmark.v3` protocol. Pair-result identities are
+revisioned independently from the protocol: offline status may normalize older raw smoke
+artifacts, while strict final aggregation accepts only the current result revision and one
+execution environment. Aggregation never predeclares a target speedup; it seals only
+observed results.
 
 ## Pinned Linux environment
 
 A Docker image is provided for runs that should not depend on the host Python toolchain.
-Its environment lock fixes Python 3.12.11, `uv` 0.11.29, Node 20.19.4,
+Its `cooperbench-linux-v3` environment lock fixes the observed Python runtime at 3.12.13, `uv` 0.11.29, Node 20.19.4,
 `@sourcegraph/scip-python` 0.6.6, UTC, `C.UTF-8`, and the benchmark Git identity. Docker remains optional; none of these dependencies are imported
 by the installable Claim Plane runtime.
 
