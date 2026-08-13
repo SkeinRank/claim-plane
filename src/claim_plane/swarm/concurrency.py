@@ -970,6 +970,26 @@ def compute_concurrency_plan(
             "semantic_graph_fingerprint": (
                 semantic_graph.fingerprint if semantic_graph is not None else None
             ),
+            "semantic_graph_revision": (
+                None
+                if semantic_graph is None
+                else semantic_graph.metadata.get("source_revision")
+            ),
+            "semantic_graph_workspace_fingerprint": (
+                None
+                if semantic_graph is None
+                else semantic_graph.metadata.get("workspace_fingerprint")
+            ),
+            "semantic_graph_refresh_mode": (
+                None
+                if semantic_graph is None
+                else semantic_graph.metadata.get("refresh_mode")
+            ),
+            "semantic_graph_invalidation_fingerprint": (
+                None
+                if semantic_graph is None
+                else semantic_graph.metadata.get("invalidation_fingerprint")
+            ),
             "candidate_blocking": _candidate_blocking_metadata(candidate_blocking),
             "semantic_pairs_pruned_before_classifier": semantic_pairs_pruned,
             "same_file_admissions": [

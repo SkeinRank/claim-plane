@@ -16,6 +16,21 @@ from claim_plane.code_intelligence.builtin import (
     BUILTIN_PYTHON_PROVIDER_VERSION,
     BuiltinPythonCodeIntelligenceProvider,
 )
+from claim_plane.code_intelligence.graph_state import (
+    SEMANTIC_GRAPH_BUILDER_SCHEMA,
+    SEMANTIC_GRAPH_CACHE_PROTOCOL,
+    SEMANTIC_GRAPH_CACHE_SCHEMA,
+    SEMANTIC_GRAPH_INVALIDATION_PROTOCOL,
+    SEMANTIC_GRAPH_SNAPSHOT_PROTOCOL,
+    SemanticGraphInvalidationPlan,
+    SemanticGraphRevisionCache,
+    SemanticGraphSnapshot,
+    SemanticGraphStateError,
+    StaleSemanticGraphError,
+    assert_semantic_graph_fresh,
+    plan_semantic_graph_invalidation,
+    refresh_python_dependency_graph_incrementally,
+)
 from claim_plane.code_intelligence.scip import (
     DEFAULT_SCIP_ENVIRONMENT_PROBE_COMMAND,
     DEFAULT_SCIP_INDEX_TIMEOUT_SECONDS,
@@ -61,6 +76,19 @@ from claim_plane.code_intelligence.registry import (
 )
 
 __all__ = [
+    "SEMANTIC_GRAPH_BUILDER_SCHEMA",
+    "SEMANTIC_GRAPH_CACHE_PROTOCOL",
+    "SEMANTIC_GRAPH_CACHE_SCHEMA",
+    "SEMANTIC_GRAPH_INVALIDATION_PROTOCOL",
+    "SEMANTIC_GRAPH_SNAPSHOT_PROTOCOL",
+    "SemanticGraphInvalidationPlan",
+    "SemanticGraphRevisionCache",
+    "SemanticGraphSnapshot",
+    "SemanticGraphStateError",
+    "StaleSemanticGraphError",
+    "assert_semantic_graph_fresh",
+    "plan_semantic_graph_invalidation",
+    "refresh_python_dependency_graph_incrementally",
     "BUILTIN_PYTHON_PROVIDER_ID",
     "DEFAULT_SCIP_ENVIRONMENT_PROBE_COMMAND",
     "DEFAULT_SCIP_INDEX_TIMEOUT_SECONDS",

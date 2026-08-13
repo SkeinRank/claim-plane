@@ -8,6 +8,20 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-08-13
+
+### Added
+
+- Added revision-bound semantic graph snapshots in the user cache, with exact-revision reuse and atomic persistence outside analyzed repositories.
+- Added dependency-component invalidation for builtin Python graphs so changed sources rebuild only the connected semantic surface while unaffected graph components are retained.
+- Added stale-state fencing that rejects semantic graphs or dependency evidence bound to another source revision or workspace fingerprint before graph-aware planning/admission can use them.
+
+### Changed
+
+- Repository-bound planning now records semantic graph revision, workspace, refresh mode, and invalidation fingerprints in concurrency/shared-admission evidence.
+- Adding a new source path, encountering an old unresolved edge during source changes, or losing a safe old graph root forces a full rebuild instead of assuming local invalidation is complete.
+- Persisted graph-aware concurrency plans must remain bound to the swarm session base revision and the same candidate-blocking graph before shared admission proceeds.
+
 ## [0.43.0] — 2026-08-13
 
 ### Added

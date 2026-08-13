@@ -427,6 +427,17 @@ def compute_shared_admission(
             ),
             "dependency_model": "work-graph-plus-graph-derived-serialization-edges",
             "candidate_blocking": plan.metadata.get("candidate_blocking"),
+            "semantic_graph_fingerprint": plan.metadata.get("semantic_graph_fingerprint"),
+            "semantic_graph_revision": plan.metadata.get("semantic_graph_revision"),
+            "semantic_graph_workspace_fingerprint": plan.metadata.get(
+                "semantic_graph_workspace_fingerprint"
+            ),
+            "semantic_graph_refresh_mode": plan.metadata.get(
+                "semantic_graph_refresh_mode"
+            ),
+            "semantic_graph_invalidation_fingerprint": plan.metadata.get(
+                "semantic_graph_invalidation_fingerprint"
+            ),
             "semantic_pairs_pruned_before_classifier": plan.metadata.get(
                 "semantic_pairs_pruned_before_classifier", 0
             ),

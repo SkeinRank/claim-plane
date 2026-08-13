@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.43.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.44.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -979,6 +979,16 @@ canonical local resource identities; SCIP contributes additional evidence-bearin
 provider-only external nodes. If the checkout is dirty, the pinned revision differs from `HEAD`, or
 the optional SCIP indexer is unavailable, planning falls back to the non-executing builtin graph
 read directly from the pinned Git revision.
+
+Builtin semantic graphs are also cached by repository identity and pinned revision outside the
+repository. Across revisions, Claim Plane compares source digests, invalidates the changed semantic
+component in both dependency directions, rebuilds only the affected Python paths with full
+repository resolution context, and retains disconnected components unchanged. New source paths,
+old unresolved edges whose resolution may change, or missing old graph roots force a full rebuild.
+Every graph-aware concurrency plan records the semantic source revision and refresh/invalidation
+evidence; a stored plan whose semantic graph no longer matches the swarm base is fenced before
+shared admission rather than silently reused. SCIP edge evidence is likewise rejected when its
+revision or workspace fingerprint disagrees with the pinned source state.
 
 Local project symbol identity deliberately excludes SCIP package version because the Python
 indexer is bound to the current Git revision. The revision remains provenance metadata, while the

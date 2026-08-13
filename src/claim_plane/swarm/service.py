@@ -18,13 +18,17 @@ from claim_plane.code_intelligence import (
     ScipIndexError,
     ScipIndexManager,
     ScipSemanticResourceError,
+    SemanticGraphRevisionCache,
+    SemanticGraphSnapshot,
+    StaleSemanticGraphError,
+    assert_semantic_graph_fresh,
     build_scip_dependency_graph,
     build_scip_semantic_resource_index,
+    refresh_python_dependency_graph_incrementally,
 )
 from claim_plane.core import (
     PythonStructuralExtractionError,
     SemanticDependencyGraph,
-    build_python_dependency_graph,
 )
 from claim_plane.swarm.admission import (
     SharedAdmissionStatus,
@@ -121,32 +125,88 @@ def _python_sources_at_revision(root: Path, revision: str) -> dict[str, str]:
     return sources
 
 
+def _source_digest_map(sources: Mapping[str, str]) -> dict[str, str]:
+    return {
+        path: hashlib.sha256(source.encode("utf-8")).hexdigest()
+        for path, source in sorted(sources.items())
+    }
+
+
+def _builtin_semantic_graph_for_revision(
+    root: Path,
+    revision: str,
+    sources: Mapping[str, str],
+) -> SemanticDependencyGraph | None:
+    if not sources:
+        return None
+    repository_identity = _repository_identity(root)
+    cache = SemanticGraphRevisionCache()
+    current_digests = _source_digest_map(sources)
+    exact = cache.load_exact(repository_identity, revision)
+    if exact is not None and exact.graph.source_digests == current_digests:
+        assert_semantic_graph_fresh(exact.graph, expected_revision=revision)
+        return exact.graph
+
+    previous_snapshot = cache.load_latest(repository_identity)
+    previous = None if previous_snapshot is None else previous_snapshot.graph
+    graph, _ = refresh_python_dependency_graph_incrementally(
+        previous,
+        sources,
+        revision=revision,
+    )
+    assert_semantic_graph_fresh(graph, expected_revision=revision)
+    cache.store(
+        SemanticGraphSnapshot(
+            repository_identity=repository_identity,
+            revision=revision,
+            graph=graph,
+        )
+    )
+    return graph
+
+
 def _merge_semantic_dependency_graphs(
     primary: SemanticDependencyGraph,
     evidence: SemanticDependencyGraph,
 ) -> SemanticDependencyGraph:
-    """Merge provider evidence without replacing canonical builtin resources.
+    """Merge provider evidence without replacing canonical builtin resources."""
 
-    Local SCIP and builtin Python resources intentionally share stable identities but
-    may carry different provider metadata. The builtin resource remains the canonical
-    authority coordinate while SCIP contributes additional edges/evidence and any
-    provider-only external nodes.
-    """
-
+    primary_revision = str(primary.metadata.get("source_revision") or "").lower()
+    evidence_revision = str(
+        evidence.metadata.get("source_revision") or evidence.metadata.get("revision") or ""
+    ).lower()
+    if not primary_revision or not evidence_revision or primary_revision != evidence_revision:
+        raise StaleSemanticGraphError(
+            "cannot merge semantic graphs bound to different or missing revisions"
+        )
     nodes = {item.identity: item for item in primary.nodes}
     for item in evidence.nodes:
         nodes.setdefault(item.identity, item)
-    return SemanticDependencyGraph(
+    merged = SemanticDependencyGraph(
         nodes=tuple(nodes.values()),
         edges=(*primary.edges, *evidence.edges),
         source_digests=primary.source_digests,
         metadata={
             **dict(primary.metadata),
+            "source_revision": primary_revision,
+            "workspace_fingerprint": evidence.metadata.get("workspace_fingerprint"),
             "code_intelligence_sources": ["builtin-python", "scip"],
             "builtin_graph_fingerprint": primary.fingerprint,
             "scip_graph_fingerprint": evidence.fingerprint,
+            "scip_artifact_sha256": evidence.metadata.get("artifact_sha256"),
+            "freshness_fence": "validated",
         },
     )
+    assert_semantic_graph_fresh(
+        merged,
+        expected_revision=primary_revision,
+        expected_workspace_fingerprint=(
+            None
+            if evidence.metadata.get("workspace_fingerprint") is None
+            else str(evidence.metadata["workspace_fingerprint"])
+        ),
+    )
+    return merged
 
 
 def _semantic_graph_for_revision(
@@ -156,27 +216,48 @@ def _semantic_graph_for_revision(
     builtin = None
     if sources:
         try:
-            builtin = build_python_dependency_graph(sources)
-        except PythonStructuralExtractionError:
+            builtin = _builtin_semantic_graph_for_revision(root, revision, sources)
+        except (PythonStructuralExtractionError, StaleSemanticGraphError):
             builtin = None
 
-    # SCIP indexes the checked-out workspace. It is only admissible as evidence for a
-    # pinned swarm session when the checkout is exactly that revision and clean. A dirty
-    # workspace must never leak into planning for the immutable session base commit.
+    # SCIP indexes the checked-out workspace. It is admissible only when checkout and
+    # worktree state exactly match the pinned swarm base. Any mismatch fences provider
+    # evidence and leaves the pinned-git builtin graph as the safe fallback.
     head = _git(root, "rev-parse", "HEAD").lower()
     clean = not _git(root, "status", "--porcelain", "--untracked-files=normal")
     if head != revision.lower() or not clean:
+        if builtin is not None:
+            assert_semantic_graph_fresh(builtin, expected_revision=revision)
         return builtin
 
     try:
         artifact = ScipIndexManager().index_repository(root, revision=revision)
         scip_index = build_scip_semantic_resource_index(artifact)
-        scip_graph = build_scip_dependency_graph(scip_index)
+        raw_scip_graph = build_scip_dependency_graph(scip_index)
+        scip_graph = SemanticDependencyGraph(
+            nodes=raw_scip_graph.nodes,
+            edges=raw_scip_graph.edges,
+            source_digests=raw_scip_graph.source_digests,
+            metadata={
+                **dict(raw_scip_graph.metadata),
+                "source_revision": revision.lower(),
+                "source_mode": "checked_out_workspace",
+                "freshness_fence": "validated",
+            },
+        )
+        assert_semantic_graph_fresh(
+            scip_graph,
+            expected_revision=revision,
+            expected_workspace_fingerprint=artifact.workspace_fingerprint,
+        )
     except (
         ScipIndexError,
         ScipSemanticResourceError,
         ScipDependencyGraphError,
+        StaleSemanticGraphError,
     ):
+        if builtin is not None:
+            assert_semantic_graph_fresh(builtin, expected_revision=revision)
         return builtin
 
     if builtin is None:
@@ -413,6 +494,36 @@ def validate_budget_policy(
     }
 
 
+def _require_semantic_plan_fresh(
+    session: SwarmSession,
+    plan: Any,
+) -> None:
+    """Fence persisted graph-aware planning evidence from another source revision."""
+
+    semantic_fingerprint = plan.metadata.get("semantic_graph_fingerprint")
+    if semantic_fingerprint is None:
+        return
+    revision = str(plan.metadata.get("semantic_graph_revision") or "").lower()
+    if not revision:
+        raise ValueError("concurrency plan semantic graph has no revision binding")
+    if revision != session.base_commit.lower():
+        raise ValueError(
+            "concurrency plan semantic graph is stale for the session base commit"
+        )
+    blocker = plan.metadata.get("candidate_blocking")
+    if isinstance(blocker, Mapping):
+        blocker_graph = blocker.get("graph_fingerprint")
+        if blocker_graph is not None and str(blocker_graph) != str(semantic_fingerprint):
+            raise ValueError(
+                "concurrency plan candidate blocking is bound to another semantic graph"
+            )
+    workspace = plan.metadata.get("semantic_graph_workspace_fingerprint")
+    if workspace is not None:
+        value = str(workspace).lower()
+        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+            raise ValueError("concurrency plan semantic workspace fingerprint is invalid")
+
+
 def plan_swarm_concurrency(repo: str | Path, session_id: str) -> dict[str, Any]:
     root = resolve_repository_root(repo)
     _require_initialized(root)
@@ -432,6 +543,7 @@ def plan_swarm_concurrency(repo: str | Path, session_id: str) -> dict[str, Any]:
             budget_version=current.budget_version,
             semantic_graph=semantic_graph,
         )
+        _require_semantic_plan_fresh(current, plan)
         stored, plan_version, changed = store.save_concurrency_plan(
             current.session_id,
             plan,
@@ -465,6 +577,7 @@ def get_swarm_concurrency_plan(repo: str | Path, session_id: str) -> dict[str, A
             "run 'claim-plane swarm plan' first"
         )
     plan, plan_version = stored
+    _require_semantic_plan_fresh(current, plan)
     if (
         plan.graph_version != current.graph_version
         or plan.graph_fingerprint != current.graph_fingerprint
@@ -515,6 +628,7 @@ def admit_swarm_session(repo: str | Path, session_id: str) -> dict[str, Any]:
                 "'claim-plane swarm plan' first"
             )
         concurrency, _ = stored_plan
+        _require_semantic_plan_fresh(session, concurrency)
         admission = compute_shared_admission(session, concurrency)
         stored, admission_version, changed = store.save_shared_admission(
             session_id,

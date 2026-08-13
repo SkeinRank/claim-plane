@@ -765,13 +765,33 @@ def _shared_states(
 
 def build_python_dependency_graph(
     sources: Mapping[str, str],
+    *,
+    emit_paths: Iterable[str] | None = None,
 ) -> SemanticDependencyGraph:
-    """Build a deterministic semantic dependency graph for Python repository sources."""
+    """Build a deterministic semantic dependency graph for Python repository sources.
+
+    ``emit_paths`` keeps the complete repository available for name/import resolution while
+    limiting graph emission to selected source paths.  It is used by incremental graph
+    refresh; callers that omit it receive the historical whole-repository behavior.
+    """
 
     repository = _prepare_repository(sources)
     accumulator = _GraphAccumulator()
+    selected_paths = (
+        set(repository.structural)
+        if emit_paths is None
+        else {str(path) for path in emit_paths}
+    )
+    unknown_paths = selected_paths.difference(repository.structural)
+    if unknown_paths:
+        raise ValueError(
+            "emit_paths contains sources outside the prepared Python repository: "
+            + ", ".join(sorted(unknown_paths))
+        )
 
     for path, index in sorted(repository.structural.items()):
+        if path not in selected_paths:
+            continue
         is_test = _is_test_path(path)
         accumulator.node(
             index.file_resource,

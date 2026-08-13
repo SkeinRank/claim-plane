@@ -264,6 +264,9 @@ def test_session_plan_is_durable_idempotent_and_invalidated(tmp_path: Path) -> N
     assert second["created"] is False
     assert first["plan_version"] == second["plan_version"] == 1
     assert loaded["plan_fingerprint"] == first["plan_fingerprint"]
+    semantic_metadata = first["concurrency_plan"]["metadata"]
+    assert semantic_metadata["semantic_graph_revision"] == _git(repo, "rev-parse", "HEAD")
+    assert semantic_metadata["semantic_graph_refresh_mode"] in {"full", "reused", "incremental"}
 
     replacement = _spec()["work_graph"]
     assert isinstance(replacement, dict)
@@ -288,3 +291,23 @@ def test_session_plan_is_durable_idempotent_and_invalidated(tmp_path: Path) -> N
     )
     with pytest.raises(KeyError, match="has no concurrency plan"):
         get_swarm_concurrency_plan(repo, "swm-plan")
+
+
+def test_repository_planning_incrementally_refreshes_builtin_graph_across_commits(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    create_swarm_session(repo, spec=_spec(), session_id="swm-before-refresh")
+    first = plan_swarm_concurrency(repo, "swm-before-refresh")
+    assert first["concurrency_plan"]["metadata"]["semantic_graph_refresh_mode"] == "full"
+
+    (repo / "src" / "a.py").write_text("value = 2\n", encoding="utf-8")
+    _git(repo, "add", "src/a.py")
+    _git(repo, "commit", "-qm", "change a")
+
+    create_swarm_session(repo, spec=_spec(), session_id="swm-after-refresh")
+    second = plan_swarm_concurrency(repo, "swm-after-refresh")
+    metadata = second["concurrency_plan"]["metadata"]
+    assert metadata["semantic_graph_revision"] == _git(repo, "rev-parse", "HEAD")
+    assert metadata["semantic_graph_refresh_mode"] == "incremental"
+    assert metadata["semantic_graph_invalidation_fingerprint"] is not None
