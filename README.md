@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.37.31.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.38.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -860,6 +860,34 @@ to mutate a predeclared contingent path. Broad contingent globs are narrowed to 
 concrete path being requested rather than promoted as one broad write reservation.
 Contingent surfaces may be inspected read-only before promotion, and those possible read
 premises still participate in coordination against active writers.
+
+## Code intelligence providers
+
+Claim Plane exposes a versioned provider boundary between language-specific static analysis and
+the language-neutral Semantic Dependency Graph consumed by impact, conflict, and admission
+reasoning. The built-in Python provider wraps the existing non-executing AST analysis; callers can
+pin a provider explicitly, and future backends can implement the same contract without changing
+core concurrency semantics.
+
+```python
+from claim_plane import CodeIntelligenceRequest, analyze_code_intelligence
+
+snapshot = analyze_code_intelligence(
+    CodeIntelligenceRequest(
+        language="python",
+        sources={"src/app.py": "def run():\n    return 1\n"},
+        revision="abc123",
+    )
+)
+
+print(snapshot.provider_id)
+print(snapshot.graph.fingerprint)
+```
+
+Provider manifests declare supported languages and capabilities, including whether repository
+analysis is non-executing. Provider selection is deterministic and can be pinned by id when a
+repository needs a specific backend. The existing `build_python_dependency_graph` API remains
+available unchanged.
 
 ## Python structural extraction
 

@@ -1,5 +1,22 @@
 """Claim Plane — semantic concurrency control for parallel coding agents."""
 
+from claim_plane.code_intelligence import (
+    BUILTIN_PYTHON_PROVIDER_ID,
+    BUILTIN_PYTHON_PROVIDER_VERSION,
+    CODE_INTELLIGENCE_PROVIDER_PROTOCOL,
+    CODE_INTELLIGENCE_SNAPSHOT_PROTOCOL,
+    BuiltinPythonCodeIntelligenceProvider,
+    CodeIntelligenceCapability,
+    CodeIntelligenceProvider,
+    CodeIntelligenceProviderError,
+    CodeIntelligenceProviderManifest,
+    CodeIntelligenceProviderRegistry,
+    CodeIntelligenceRequest,
+    CodeIntelligenceSnapshot,
+    CodeIntelligenceUnsupportedRequest,
+    analyze_code_intelligence,
+    default_code_intelligence_registry,
+)
 from claim_plane.controlled_run import (
     CONTROLLED_RUN_PROTOCOL,
     ControlledRunError,
@@ -403,9 +420,24 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.37.31"
+__version__ = "0.38.0"
 
 __all__ = [
+    "BUILTIN_PYTHON_PROVIDER_ID",
+    "BUILTIN_PYTHON_PROVIDER_VERSION",
+    "CODE_INTELLIGENCE_PROVIDER_PROTOCOL",
+    "CODE_INTELLIGENCE_SNAPSHOT_PROTOCOL",
+    "BuiltinPythonCodeIntelligenceProvider",
+    "CodeIntelligenceCapability",
+    "CodeIntelligenceProvider",
+    "CodeIntelligenceProviderError",
+    "CodeIntelligenceProviderManifest",
+    "CodeIntelligenceProviderRegistry",
+    "CodeIntelligenceRequest",
+    "CodeIntelligenceSnapshot",
+    "CodeIntelligenceUnsupportedRequest",
+    "analyze_code_intelligence",
+    "default_code_intelligence_registry",
     "RUNTIME_FENCE_PROTOCOL",
     "RuntimeFence",
     "RuntimeFenceReason",

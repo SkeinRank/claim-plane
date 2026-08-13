@@ -136,7 +136,7 @@ wheels = [
 
 [[package]]
 name = "claim-plane"
-version = "0.37.31"
+version = "0.38.0"
 source = { editable = "." }
 
 [package.optional-dependencies]

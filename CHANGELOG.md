@@ -8,6 +8,18 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-08-13
+
+### Added
+
+- Added a versioned Code Intelligence Provider API that separates language-specific repository analysis from Claim Plane's language-neutral semantic dependency model.
+- Added deterministic provider manifests, capability negotiation, explicit provider selection, source-map and repository request modes, and provider-bound snapshot fingerprints.
+- Added the existing non-executing Python AST/dependency analysis as the built-in `builtin-python` provider while preserving the direct Python graph builders for compatibility.
+
+### Changed
+
+- Exposed provider-neutral code-intelligence entry points at the package root so future backends can supply semantic graph evidence without changing impact, conflict, or admission consumers.
+
 ## [0.37.31] — 2026-08-10
 
 ### Changed
