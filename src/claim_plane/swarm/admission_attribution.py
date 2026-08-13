@@ -20,6 +20,9 @@ from claim_plane.core import (
     AffectedSubgraphCandidateBlockingPlan,
     SemanticConflictDecision,
 )
+from claim_plane.swarm.authority_projection import (
+    SymbolScopedAuthorityProjectionReport,
+)
 from claim_plane.swarm.models import WorkGraph, WorkItem
 from claim_plane.swarm.same_file_admission import (
     SameFileAdmissionAction,
@@ -476,6 +479,7 @@ def build_admission_decision_attribution(
     same_file_admissions: Iterable[SameFileAdmissionDecision] = (),
     semantic_decisions: Iterable[SemanticConflictDecision] = (),
     semantic_graph_fingerprint: str | None = None,
+    authority_projection: SymbolScopedAuthorityProjectionReport | None = None,
 ) -> AdmissionDecisionAttributionReport:
     """Build deterministic pair-level decision attribution without changing policy."""
 
@@ -492,6 +496,9 @@ def build_admission_decision_attribution(
     for item in semantic_decisions:
         semantic_map.setdefault(_pair_key(item.left_id, item.right_id), []).append(item)
 
+    projection_map = (
+        authority_projection.item_map if authority_projection is not None else {}
+    )
     candidate_ids = (
         {item.candidate_id for item in candidate_blocking.subgraphs}
         if candidate_blocking is not None
@@ -520,6 +527,18 @@ def build_admission_decision_attribution(
 
         evidence: dict[str, Any] = {
             "same_file_admissions": [item.to_dict() for item in pair_same_file],
+            "symbol_authority_projection": {
+                "left": (
+                    projection_map[left_id].to_dict()
+                    if left_id in projection_map
+                    else None
+                ),
+                "right": (
+                    projection_map[right_id].to_dict()
+                    if right_id in projection_map
+                    else None
+                ),
+            },
             "semantic_classifications": [
                 {
                     "fingerprint": item.fingerprint,
@@ -657,7 +676,16 @@ def build_admission_decision_attribution(
             "expected_pair_count": (
                 len(graph.work_items) * (len(graph.work_items) - 1) // 2
             ),
-            "authority_projection": "declared-committed-operations-v1",
+            "authority_projection": (
+                authority_projection.protocol
+                if authority_projection is not None
+                else "declared-committed-operations-v1"
+            ),
+            "authority_projection_fingerprint": (
+                authority_projection.fingerprint
+                if authority_projection is not None
+                else None
+            ),
         },
     )
 

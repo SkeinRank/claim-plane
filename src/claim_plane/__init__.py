@@ -395,6 +395,15 @@ from claim_plane.swarm import (
     DeclaredAuthoritySurface,
     authority_surfaces_for_item,
     build_admission_decision_attribution,
+    SYMBOL_SCOPED_AUTHORITY_PROJECTION_PROTOCOL,
+    SymbolProjectionSource,
+    SymbolProjectionReason,
+    SymbolProjectionEvidence,
+    WorkItemAuthorityProjection,
+    SymbolScopedAuthorityProjectionReport,
+    build_symbol_scoped_authority_projection,
+    projected_analysis_graph,
+    projected_operations_for_work,
     CodexRunBudget,
     CodexRunRecord,
     CodexRunState,
@@ -485,7 +494,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.46.0"
+__version__ = "0.47.0"
 
 __all__ = [
     "ADMISSION_DECISION_ATTRIBUTION_PROTOCOL",
@@ -496,6 +505,15 @@ __all__ = [
     "DeclaredAuthoritySurface",
     "authority_surfaces_for_item",
     "build_admission_decision_attribution",
+    "SYMBOL_SCOPED_AUTHORITY_PROJECTION_PROTOCOL",
+    "SymbolProjectionSource",
+    "SymbolProjectionReason",
+    "SymbolProjectionEvidence",
+    "WorkItemAuthorityProjection",
+    "SymbolScopedAuthorityProjectionReport",
+    "build_symbol_scoped_authority_projection",
+    "projected_analysis_graph",
+    "projected_operations_for_work",
     "BUILTIN_PYTHON_PROVIDER_ID",
     "DEFAULT_SCIP_ENVIRONMENT_PROBE_COMMAND",
     "DEFAULT_SCIP_INDEX_TIMEOUT_SECONDS",

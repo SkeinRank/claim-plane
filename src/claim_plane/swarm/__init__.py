@@ -10,6 +10,17 @@ from claim_plane.swarm.admission_attribution import (
     authority_surfaces_for_item,
     build_admission_decision_attribution,
 )
+from claim_plane.swarm.authority_projection import (
+    SYMBOL_SCOPED_AUTHORITY_PROJECTION_PROTOCOL,
+    SymbolProjectionSource,
+    SymbolProjectionReason,
+    SymbolProjectionEvidence,
+    WorkItemAuthorityProjection,
+    SymbolScopedAuthorityProjectionReport,
+    build_symbol_scoped_authority_projection,
+    projected_analysis_graph,
+    projected_operations_for_work,
+)
 from claim_plane.swarm.admission import (
     SWARM_SHARED_ADMISSION_PROTOCOL,
     SharedAdmissionPlan,

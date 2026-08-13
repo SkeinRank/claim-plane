@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/symbol-scoped-authority-projection.schema.json",
+  "title": "Claim Plane Symbol-Scoped Authority Projection v2",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "operation": {
+      "type": "object"
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "source",
+        "reason",
+        "symbol_identity",
+        "symbol_qualified_name",
+        "symbol_region",
+        "provider",
+        "source_region"
+      ],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "source": {
+          "enum": ["declared_symbol", "region_enclosed_symbol"]
+        },
+        "reason": {
+          "enum": ["exact_declared_symbol", "unique_region_symbol"]
+        },
+        "symbol_identity": {"type": "string", "minLength": 1},
+        "symbol_qualified_name": {"type": "string", "minLength": 1},
+        "symbol_region": {"type": ["string", "null"]},
+        "provider": {"type": "string", "minLength": 1},
+        "source_region": {"type": ["string", "null"]}
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_id",
+        "narrowed",
+        "removed_file_operation_count",
+        "synthesized_symbol_operation_count",
+        "projected_symbol_identities",
+        "projected_operations",
+        "analysis_operations",
+        "evidence",
+        "preserved_reasons"
+      ],
+      "properties": {
+        "work_id": {"type": "string", "minLength": 1},
+        "narrowed": {"type": "boolean"},
+        "removed_file_operation_count": {"type": "integer", "minimum": 0},
+        "synthesized_symbol_operation_count": {"type": "integer", "minimum": 0},
+        "projected_symbol_identities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "projected_operations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/operation"}
+        },
+        "analysis_operations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/operation"}
+        },
+        "evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidence"}
+        },
+        "preserved_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "exact_declared_symbol",
+              "unique_region_symbol",
+              "no_semantic_graph",
+              "no_exact_symbol_evidence",
+              "ambiguous_region",
+              "destructive_access",
+              "pattern_path",
+              "non_mutating_surface"
+            ]
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_item_count",
+        "narrowed_work_items",
+        "preserved_work_items",
+        "removed_file_operations",
+        "synthesized_symbol_operations",
+        "projected_symbol_count",
+        "fingerprint"
+      ],
+      "properties": {
+        "work_item_count": {"type": "integer", "minimum": 0},
+        "narrowed_work_items": {"type": "integer", "minimum": 0},
+        "preserved_work_items": {"type": "integer", "minimum": 0},
+        "removed_file_operations": {"type": "integer", "minimum": 0},
+        "synthesized_symbol_operations": {"type": "integer", "minimum": 0},
+        "projected_symbol_count": {"type": "integer", "minimum": 0},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "work_graph_fingerprint",
+    "semantic_graph_fingerprint",
+    "items",
+    "summary",
+    "metadata"
+  ],
+  "properties": {
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "protocol": {
+      "const": "claim-plane.symbol-scoped-authority-projection.v2"
+    },
+    "work_graph_fingerprint": {"$ref": "#/$defs/sha256"},
+    "semantic_graph_fingerprint": {
+      "anyOf": [
+        {"$ref": "#/$defs/sha256"},
+        {"type": "null"}
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/item"}
+    },
+    "summary": {"$ref": "#/$defs/summary"},
+    "metadata": {"type": "object"}
+  }
+}

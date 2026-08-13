@@ -8,6 +8,18 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-08-13
+
+### Added
+
+- Added Symbol-Scoped Authority Projection v2, which removes redundant broad file carriers from pairwise admission analysis only when an exact declared symbol is graph-backed or a bounded file region is uniquely enclosed by one pinned semantic symbol.
+- Added fail-closed projection evidence, source-bound fingerprints, per-work-item narrowing summaries, and attribution wiring so every admission decision can show the effective symbol projection alongside the original declared authority.
+- Added region-derived symbol synthesis for semantic admission/candidate blocking while preserving the original worker mutation authority and final verification surface.
+
+### Changed
+
+- Shared admission now consumes the source-bound symbol projection for conflict analysis without changing the worker intent stored for execution. Explicit same-file serialize/deny policy and destructive or unresolved broad authority remain authoritative.
+
 ## [0.46.0] — 2026-08-13
 
 ### Added

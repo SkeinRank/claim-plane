@@ -31,6 +31,10 @@ from claim_plane.core import (
     classify_semantic_conflict,
 )
 from claim_plane.swarm.admission_attribution import build_admission_decision_attribution
+from claim_plane.swarm.authority_projection import (
+    build_symbol_scoped_authority_projection,
+    projected_analysis_graph,
+)
 from claim_plane.swarm.budget import (
     ConflictPolicy,
     SameFilePolicy,
@@ -659,11 +663,15 @@ def _operation_findings(
                         if finding is not None:
                             findings.append(finding)
                         continue
-                    reason = (
-                        ConcurrencyConstraintReason.SEMANTIC_ORDER
-                        if decision.reason is SameFileAdmissionReason.SEMANTIC_ORDERED
-                        else ConcurrencyConstraintReason.SEMANTIC_CONFLICT
-                    )
+                    if decision.reason in {
+                        SameFileAdmissionReason.POLICY_DENY,
+                        SameFileAdmissionReason.POLICY_SERIALIZE,
+                    }:
+                        reason = ConcurrencyConstraintReason.SAME_FILE
+                    elif decision.reason is SameFileAdmissionReason.SEMANTIC_ORDERED:
+                        reason = ConcurrencyConstraintReason.SEMANTIC_ORDER
+                    else:
+                        reason = ConcurrencyConstraintReason.SEMANTIC_CONFLICT
                     action = (
                         ConcurrencyConstraintAction.DENY
                         if decision.action is SameFileAdmissionAction.DENY
@@ -911,6 +919,10 @@ def compute_concurrency_plan(
     """Compute deterministic safe waves without launching or admitting workers."""
 
     policy.validate_work_item_count(len(graph.work_items))
+    authority_projection = build_symbol_scoped_authority_projection(
+        graph, semantic_graph
+    )
+    analysis_graph = projected_analysis_graph(graph, authority_projection)
     order = graph.topological_order()
     rank = {work_id: index for index, work_id in enumerate(order)}
     ancestors = _ancestor_map(graph)
@@ -919,7 +931,7 @@ def compute_concurrency_plan(
     semantic_decisions: list[SemanticConflictDecision] = []
     proofs = tuple(commutativity_proofs)
     candidate_blocking = (
-        _candidate_blocking_plan(graph, semantic_graph)
+        _candidate_blocking_plan(analysis_graph, semantic_graph)
         if candidate_blocking_enabled
         else None
     )
@@ -945,8 +957,8 @@ def compute_concurrency_plan(
         if semantic_pair_pruned:
             semantic_pairs_pruned += 1
         constraint = _pair_constraint(
-            graph.item_map[left_id],
-            graph.item_map[right_id],
+            analysis_graph.item_map[left_id],
+            analysis_graph.item_map[right_id],
             policy,
             semantic_graph=semantic_graph,
             commutativity_proofs=proofs,
@@ -985,6 +997,7 @@ def compute_concurrency_plan(
         semantic_graph_fingerprint=(
             semantic_graph.fingerprint if semantic_graph is not None else None
         ),
+        authority_projection=authority_projection,
     )
     return ConcurrencyPlan(
         graph_version=graph_version,
@@ -998,6 +1011,8 @@ def compute_concurrency_plan(
         constraints=tuple(constraints),
         metadata={
             "controller": "graph-aware-admission-v1",
+            "symbol_authority_projection": authority_projection.to_dict(),
+            "symbol_authority_projection_summary": authority_projection.summary(),
             "admission_attribution": attribution.to_dict(),
             "admission_attribution_summary": attribution.summary(),
             "contingent_scope": "excluded_until_amendment",

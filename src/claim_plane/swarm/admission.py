@@ -16,6 +16,10 @@ from typing import Any, Mapping
 
 from claim_plane.coordination.admission import AdmissionEngine
 from claim_plane.core import AdmissionKind, ChangeIntent, ResourceKind
+from claim_plane.swarm.authority_projection import (
+    SymbolScopedAuthorityProjectionReport,
+    projected_operations_for_work,
+)
 from claim_plane.swarm.concurrency import (
     ConcurrencyConstraintAction,
     ConcurrencyPlan,
@@ -348,6 +352,27 @@ def _semantic_conflict_projection(intent: ChangeIntent) -> ChangeIntent:
     )
 
 
+def _symbol_conflict_projection(
+    intent: ChangeIntent,
+    work_id: str,
+    projection: SymbolScopedAuthorityProjectionReport | None,
+) -> ChangeIntent:
+    if projection is None:
+        return _semantic_conflict_projection(intent)
+    operations = projected_operations_for_work(projection, work_id)
+    if operations == intent.operations:
+        return intent
+    return replace(
+        intent,
+        operations=operations,
+        metadata={
+            **dict(intent.metadata),
+            "shared_conflict_projection": projection.protocol,
+            "shared_conflict_projection_fingerprint": projection.fingerprint,
+        },
+    )
+
+
 def compute_shared_admission(
     session: SwarmSession, plan: ConcurrencyPlan
 ) -> SharedAdmissionPlan:
@@ -379,18 +404,34 @@ def compute_shared_admission(
         )
         for work_id in order
     }
+    projection_payload = plan.metadata.get("symbol_authority_projection")
+    authority_projection = (
+        SymbolScopedAuthorityProjectionReport.from_dict(projection_payload)
+        if isinstance(projection_payload, Mapping)
+        else None
+    )
+    if (
+        authority_projection is not None
+        and authority_projection.work_graph_fingerprint != session.graph_fingerprint
+    ):
+        raise ValueError("symbol authority projection is stale for the swarm session")
+
     engine = AdmissionEngine()
     known_intent_ids = tuple(intent_ids.values())
     admitted_by_work: dict[str, ChangeIntent] = {}
     records: list[WorkAdmission] = []
     for work_id in order:
         potentially_concurrent = [
-            _semantic_conflict_projection(admitted_by_work[other])
+            _symbol_conflict_projection(
+                admitted_by_work[other], other, authority_projection
+            )
             for other in order
             if other in admitted_by_work and other not in ancestors[work_id]
         ]
         decision = engine.evaluate(
-            _semantic_conflict_projection(intents[work_id]),
+            _symbol_conflict_projection(
+                intents[work_id], work_id, authority_projection
+            ),
             potentially_concurrent,
             known_intent_ids=known_intent_ids,
         )
@@ -433,6 +474,12 @@ def compute_shared_admission(
             "admission_attribution": plan.metadata.get("admission_attribution"),
             "admission_attribution_summary": plan.metadata.get(
                 "admission_attribution_summary"
+            ),
+            "symbol_authority_projection": plan.metadata.get(
+                "symbol_authority_projection"
+            ),
+            "symbol_authority_projection_summary": plan.metadata.get(
+                "symbol_authority_projection_summary"
             ),
             "candidate_blocking": plan.metadata.get("candidate_blocking"),
             "semantic_graph_fingerprint": plan.metadata.get("semantic_graph_fingerprint"),
