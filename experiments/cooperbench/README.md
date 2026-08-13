@@ -371,8 +371,8 @@ a target speedup; it seals only observed results.
 ## Pinned Linux environment
 
 A Docker image is provided for runs that should not depend on the host Python toolchain.
-Its environment lock fixes Python 3.12.11, `uv` 0.11.29, UTC, `C.UTF-8`, and the
-benchmark Git identity. Docker remains optional; none of these dependencies are imported
+Its environment lock fixes Python 3.12.11, `uv` 0.11.29, Node 20.19.4,
+`@sourcegraph/scip-python` 0.6.6, UTC, `C.UTF-8`, and the benchmark Git identity. Docker remains optional; none of these dependencies are imported
 by the installable Claim Plane runtime.
 
 Build and inspect the image:

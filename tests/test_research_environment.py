@@ -16,11 +16,17 @@ def test_environment_lock_matches_dockerfile() -> None:
         ROOT / "experiments" / "cooperbench" / "docker" / "Dockerfile"
     ).read_text(encoding="utf-8")
 
-    assert lock["environment_id"] == "cooperbench-linux-v1"
+    assert lock["environment_id"] == "cooperbench-linux-v2"
     assert lock["python_version"] == "3.12.11"
     assert lock["uv_version"] == "0.11.29"
+    assert lock["node_version"] == "20.19.4"
+    assert lock["scip_python_version"] == "0.6.6"
     assert lock["base_image"] in dockerfile
     assert f"ARG UV_VERSION={lock['uv_version']}" in dockerfile
+    assert f"ARG NODE_VERSION={lock['node_version']}" in dockerfile
+    assert f"ARG SCIP_PYTHON_VERSION={lock['scip_python_version']}" in dockerfile
+    assert lock["node_image"] in dockerfile
+    assert f"@sourcegraph/scip-python@${{SCIP_PYTHON_VERSION}}" in dockerfile
 
 
 def test_environment_cli_never_prints_secret_value(capsys, monkeypatch) -> None:

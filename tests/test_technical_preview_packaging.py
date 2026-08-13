@@ -52,7 +52,7 @@ def test_preview_version_and_public_contract_are_consistent() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = technical_preview_manifest(ROOT)
 
-    assert __version__ == "0.45.0"
+    assert __version__ == "0.45.1"
     assert project["project"]["version"] == __version__
     assert manifest["version"] == __version__
     assert manifest["channel"] == "single-agent-codex"

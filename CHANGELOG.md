@@ -8,6 +8,14 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.45.1] — 2026-08-13
+
+### Changed
+
+- Updated the CooperBench research environment for SCIP v3 with Node 20.19.4 and `@sourcegraph/scip-python` 0.6.6, with both tool versions recorded in runtime environment evidence.
+- Added SCIP v3 smoke and status workflows with an explicit SCIP toolchain preflight and an isolated `claim-plane-cooperbench:0.10.0` research image.
+- The SCIP v3 smoke workflow defaults to two concurrent outer pair processes to reduce local indexing contention while keeping outer concurrency configurable independently from measured inner A/B concurrency.
+
 ## [0.45.0] — 2026-08-13
 
 ### Added

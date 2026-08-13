@@ -48,8 +48,14 @@ def runtime_environment() -> dict[str, Any]:
             "machine": platform.machine(),
             "git_version": _command_version("git", "--version"),
             "uv_version": _command_version("uv", "--version"),
+            "node_version": _command_version("node", "--version"),
+            "scip_python_version": _command_version("scip-python", "--version"),
             "container_environment": os.environ.get("CLAIM_PLANE_RESEARCH_ENVIRONMENT"),
             "container_base_image": os.environ.get("CLAIM_PLANE_RESEARCH_BASE_IMAGE"),
+            "container_node_version": os.environ.get("CLAIM_PLANE_RESEARCH_NODE_VERSION"),
+            "container_scip_python_version": os.environ.get(
+                "CLAIM_PLANE_RESEARCH_SCIP_PYTHON_VERSION"
+            ),
             "claim_plane_git_commit": os.environ.get("CLAIM_PLANE_RESEARCH_GIT_COMMIT"),
             "openrouter_api_key_present": "OPENROUTER_API_KEY" in os.environ,
         },
