@@ -15,7 +15,7 @@ Task-bound authority. Controlled scope. Verifiable delivery.
 
 </div>
 
-> **Technical Preview — 0.39.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
+> **Technical Preview — 0.40.0.** APIs, evidence formats, and deployment contracts may change before 1.0.
 
 ## Quick start
 
@@ -905,9 +905,25 @@ print(artifact.cache_hit, artifact.revision, artifact.index_path)
 ```
 
 The default Python command is `scip-python`; it remains an external tool rather than a Python
-runtime dependency of Claim Plane. The generated SCIP protobuf stays opaque at this boundary so
-indexing cost, cold/warm cache behavior, and artifact provenance can be measured separately from
-semantic graph conversion.
+runtime dependency of Claim Plane. Index generation and cache accounting remain separate from
+semantic conversion. A sealed artifact can then be projected into Semantic Resource IR while
+preserving raw SCIP occurrences and relationships as revision-bound evidence for later graph
+enrichment.
+
+```python
+from claim_plane import ScipIndexManager, build_scip_semantic_resource_index
+
+artifact = ScipIndexManager().index_repository(".")
+resources = build_scip_semantic_resource_index(artifact)
+print(resources.fingerprint, len(resources.resources))
+```
+
+Local project symbol identity deliberately excludes SCIP package version because the Python
+indexer is bound to the current Git revision. The revision remains provenance metadata, while the
+same function or class keeps one stable Claim Plane identity across commits. External package
+identity retains scheme, package manager, package name, and descriptors while treating package
+version as evidence rather than authority identity. Local SCIP-only symbols are not promoted into
+repository authority resources.
 
 ## Python structural extraction
 

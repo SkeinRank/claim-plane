@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-08-13
+
+### Added
+
+- Added dependency-free SCIP protobuf decoding for documents, symbol information, occurrences, typed and legacy source ranges, signatures, and declared symbol relationships.
+- Added revision-bound SCIP-to-Semantic-Resource-IR projection with stable local project symbol identity, file resources, external symbol records, occurrence provenance, and relationship evidence for later dependency-graph enrichment.
+- Added artifact integrity revalidation before semantic conversion and fail-closed handling for malformed protobuf payloads, invalid repository-relative document paths, duplicate documents, and conflicting symbol identities.
+
+### Changed
+
+- Local project SCIP package versions are now treated as provenance rather than semantic identity, preventing the Git revision embedded by the indexer from changing a function or class resource identity on every commit.
+- Local document-only SCIP symbols remain occurrence evidence and are not promoted into repository authority resources.
+
 ## [0.39.0] — 2026-08-13
 
 ### Added

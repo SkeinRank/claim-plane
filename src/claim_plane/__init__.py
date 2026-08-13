@@ -11,6 +11,10 @@ from claim_plane.code_intelligence import (
     SCIP_INDEX_ARTIFACT_PROTOCOL,
     SCIP_INDEX_CACHE_PROTOCOL,
     SCIP_INDEX_CACHE_SCHEMA,
+    SCIP_OCCURRENCE_PROTOCOL,
+    SCIP_RELATIONSHIP_PROTOCOL,
+    SCIP_SEMANTIC_RESOURCE_INDEX_PROTOCOL,
+    SCIP_SYMBOL_RESOURCE_PROTOCOL,
     BuiltinPythonCodeIntelligenceProvider,
     CodeIntelligenceCapability,
     CodeIntelligenceProvider,
@@ -20,6 +24,8 @@ from claim_plane.code_intelligence import (
     CodeIntelligenceRequest,
     CodeIntelligenceSnapshot,
     CodeIntelligenceUnsupportedRequest,
+    ScipArtifactMismatch,
+    ScipDecodeError,
     ScipIndexArtifact,
     ScipIndexError,
     ScipIndexerConfig,
@@ -29,7 +35,14 @@ from claim_plane.code_intelligence import (
     ScipRevisionCache,
     ScipRepositoryState,
     ScipRevisionMismatch,
+    ScipOccurrence,
+    ScipRelationship,
+    ScipSemanticResourceError,
+    ScipSemanticResourceIndex,
+    ScipSourceRange,
+    ScipSymbolResource,
     capture_scip_repository_state,
+    build_scip_semantic_resource_index,
     analyze_code_intelligence,
     default_code_intelligence_registry,
 )
@@ -436,7 +449,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.39.0"
+__version__ = "0.40.0"
 
 __all__ = [
     "BUILTIN_PYTHON_PROVIDER_ID",
@@ -446,6 +459,19 @@ __all__ = [
     "SCIP_INDEX_ARTIFACT_PROTOCOL",
     "SCIP_INDEX_CACHE_PROTOCOL",
     "SCIP_INDEX_CACHE_SCHEMA",
+    "SCIP_OCCURRENCE_PROTOCOL",
+    "SCIP_RELATIONSHIP_PROTOCOL",
+    "SCIP_SEMANTIC_RESOURCE_INDEX_PROTOCOL",
+    "SCIP_SYMBOL_RESOURCE_PROTOCOL",
+    "ScipArtifactMismatch",
+    "ScipDecodeError",
+    "ScipOccurrence",
+    "ScipRelationship",
+    "ScipSemanticResourceError",
+    "ScipSemanticResourceIndex",
+    "ScipSourceRange",
+    "ScipSymbolResource",
+    "build_scip_semantic_resource_index",
     "ScipIndexArtifact",
     "ScipIndexError",
     "ScipIndexerConfig",
