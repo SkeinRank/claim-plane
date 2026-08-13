@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -354,3 +355,132 @@ def test_v3_result_identity_is_revisioned_without_losing_legacy_lookup() -> None
     assert scip_v3._result_name(profiles) != scip_v3._legacy_result_name(profiles)
     assert scip_v3._result_name(profiles).startswith("result-")
     assert scip_v3._legacy_result_name(profiles).startswith("result-")
+
+
+def test_run_pair_resume_ignores_legacy_profile_only_artifact(monkeypatch, tmp_path) -> None:
+    pair = SimpleNamespace(
+        repo="example_repo",
+        task_id=7,
+        feature_a=2,
+        feature_b=3,
+        key="example_repo/task7/feature2+feature3",
+        gold_conflict=False,
+    )
+    study = SimpleNamespace(pairs=(pair,), coder_seeds=(101, 202, 303))
+    paths = scip_v3.ConfirmatoryPaths(
+        cooperbench=tmp_path / "cooperbench",
+        artifact_root=tmp_path / "artifacts",
+        repo_cache=tmp_path / "repos",
+        workspace_root=tmp_path / "worktrees",
+    )
+    profiles = scip_v3.DEFAULT_SCIP_V3_PROFILES
+    fingerprint = "f" * 64
+    output_dir = scip_v3._pair_dir(
+        paths, fingerprint=fingerprint, coder_seed=101, pair_index=1
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    legacy_path = output_dir / scip_v3._legacy_result_name(profiles)
+    legacy_path.write_text(
+        json.dumps({"complete": True, "sentinel": "legacy-result"}), encoding="utf-8"
+    )
+
+    pair_id = "example_repo/task7/feature2+feature3"
+    monkeypatch.setattr(scip_v3, "load_confirmatory_study", lambda _paths: study)
+    monkeypatch.setattr(scip_v3, "study_fingerprint", lambda _study: fingerprint)
+    monkeypatch.setattr(
+        scip_v3,
+        "load_plan_bundle",
+        lambda _path: {
+            "pairs": {
+                pair_id: {
+                    "A": {"plan": {"files": []}},
+                    "B": {"plan": {"files": []}},
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(scip_v3, "validate_plan_bundle", lambda _bundle, _study: None)
+
+    class ReachedExecution(RuntimeError):
+        pass
+
+    def reached_execution(*_args, **_kwargs):
+        raise ReachedExecution("legacy artifact did not satisfy resume")
+
+    monkeypatch.setattr(scip_v3.harness, "configure_runtime", reached_execution)
+
+    with pytest.raises(ReachedExecution, match="legacy artifact did not satisfy resume"):
+        scip_v3.run_scip_v3_pair(
+            paths,
+            coder_seed=101,
+            pair_index=1,
+            profiles=profiles,
+            resume=True,
+        )
+
+    current_path = output_dir / scip_v3._result_name(profiles)
+    assert current_path != legacy_path
+    assert not current_path.exists()
+
+
+def test_run_pair_resume_accepts_only_current_revision_contract(monkeypatch, tmp_path) -> None:
+    pair = SimpleNamespace(
+        repo="example_repo",
+        task_id=7,
+        feature_a=2,
+        feature_b=3,
+        key="example_repo/task7/feature2+feature3",
+        gold_conflict=False,
+    )
+    study = SimpleNamespace(pairs=(pair,), coder_seeds=(101, 202, 303))
+    paths = scip_v3.ConfirmatoryPaths(
+        cooperbench=tmp_path / "cooperbench",
+        artifact_root=tmp_path / "artifacts",
+        repo_cache=tmp_path / "repos",
+        workspace_root=tmp_path / "worktrees",
+    )
+    profiles = scip_v3.DEFAULT_SCIP_V3_PROFILES
+    fingerprint = "e" * 64
+    monkeypatch.setattr(scip_v3, "load_confirmatory_study", lambda _paths: study)
+    monkeypatch.setattr(scip_v3, "study_fingerprint", lambda _study: fingerprint)
+    monkeypatch.setattr(
+        scip_v3,
+        "load_plan_bundle",
+        lambda _path: {
+            "pairs": {
+                "example_repo/task7/feature2+feature3": {
+                    "A": {"plan": {"files": []}},
+                    "B": {"plan": {"files": []}},
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(scip_v3, "validate_plan_bundle", lambda _bundle, _study: None)
+
+    output_dir = scip_v3._pair_dir(
+        paths, fingerprint=fingerprint, coder_seed=101, pair_index=1
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    current_path = output_dir / scip_v3._result_name(profiles)
+    payload = {
+        "protocol": scip_v3.SCIP_PHYSICAL_V3_PROTOCOL,
+        "result_revision": scip_v3.SCIP_PHYSICAL_V3_RESULT_REVISION,
+        "coder_seed": 101,
+        "pair_index": 1,
+        "profiles": [profile.value for profile in profiles],
+        "complete": True,
+        "sentinel": "current-result",
+    }
+    current_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    resumed = scip_v3.run_scip_v3_pair(
+        paths, coder_seed=101, pair_index=1, profiles=profiles, resume=True
+    )
+    assert resumed["sentinel"] == "current-result"
+
+    payload["coder_seed"] = 202
+    current_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="does not match the current result contract"):
+        scip_v3.run_scip_v3_pair(
+            paths, coder_seed=101, pair_index=1, profiles=profiles, resume=True
+        )

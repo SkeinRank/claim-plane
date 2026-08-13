@@ -477,7 +477,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.45.2"
+__version__ = "0.45.3"
 
 __all__ = [
     "BUILTIN_PYTHON_PROVIDER_ID",

@@ -705,12 +705,25 @@ def run_scip_v3_pair(
     output_dir = _pair_dir(
         paths, fingerprint=fingerprint, coder_seed=coder_seed, pair_index=pair_index
     )
-    profile_key = "+".join(sorted(profile.value for profile in selected))
-    output_file = output_dir / f"result-{hashlib.sha256(profile_key.encode()).hexdigest()[:12]}.json"
+    output_file = output_dir / _result_name(selected)
     if resume and output_file.exists():
         payload = json.loads(output_file.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            return payload
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"invalid SCIP v3 resume artifact: {output_file}")
+        expected_profiles = [profile.value for profile in selected]
+        if (
+            payload.get("protocol") != SCIP_PHYSICAL_V3_PROTOCOL
+            or payload.get("result_revision") != SCIP_PHYSICAL_V3_RESULT_REVISION
+            or payload.get("coder_seed") != coder_seed
+            or payload.get("pair_index") != pair_index
+            or payload.get("profiles") != expected_profiles
+            or payload.get("complete") is not True
+        ):
+            raise RuntimeError(
+                "SCIP v3 resume artifact does not match the current result contract: "
+                f"{output_file}"
+            )
+        return payload
     if output_file.exists() and not resume:
         raise RuntimeError(f"SCIP v3 artifact already exists; remove {output_file} or resume")
 

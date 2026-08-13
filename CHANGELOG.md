@@ -8,6 +8,13 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.45.3] — 2026-08-13
+
+### Fixed
+
+- Fixed SCIP v3 pair resume to use the revision-bound result identity instead of the legacy profile-only filename, so earlier smoke artifacts cannot satisfy a current benchmark execution.
+- Added fail-closed validation for resumed pair artifacts against the current protocol, result revision, coder seed, pair index, profile set, and completion state.
+
 ## [0.45.2] — 2026-08-13
 
 ### Fixed
