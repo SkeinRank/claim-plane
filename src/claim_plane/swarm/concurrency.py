@@ -35,6 +35,9 @@ from claim_plane.swarm.authority_projection import (
     build_symbol_scoped_authority_projection,
     projected_analysis_graph,
 )
+from claim_plane.swarm.dependency_authority_narrowing import (
+    build_dependency_aware_authority_narrowing,
+)
 from claim_plane.swarm.budget import (
     ConflictPolicy,
     SameFilePolicy,
@@ -922,6 +925,13 @@ def compute_concurrency_plan(
     authority_projection = build_symbol_scoped_authority_projection(
         graph, semantic_graph
     )
+    dependency_narrowing = build_dependency_aware_authority_narrowing(
+        graph, authority_projection, semantic_graph
+    )
+    # 9C records a dependency-closed authority envelope but does not change
+    # scheduling/conflict policy yet; 9D is the stage that may consume the proof
+    # to refine pairwise policy.  Keeping the 9B analysis graph here preserves the
+    # established concurrency decisions exactly.
     analysis_graph = projected_analysis_graph(graph, authority_projection)
     order = graph.topological_order()
     rank = {work_id: index for index, work_id in enumerate(order)}
@@ -998,6 +1008,7 @@ def compute_concurrency_plan(
             semantic_graph.fingerprint if semantic_graph is not None else None
         ),
         authority_projection=authority_projection,
+        dependency_narrowing=dependency_narrowing,
     )
     return ConcurrencyPlan(
         graph_version=graph_version,
@@ -1013,6 +1024,8 @@ def compute_concurrency_plan(
             "controller": "graph-aware-admission-v1",
             "symbol_authority_projection": authority_projection.to_dict(),
             "symbol_authority_projection_summary": authority_projection.summary(),
+            "dependency_authority_narrowing": dependency_narrowing.to_dict(),
+            "dependency_authority_narrowing_summary": dependency_narrowing.summary(),
             "admission_attribution": attribution.to_dict(),
             "admission_attribution_summary": attribution.summary(),
             "contingent_scope": "excluded_until_amendment",

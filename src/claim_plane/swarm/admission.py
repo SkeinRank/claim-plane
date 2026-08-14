@@ -20,6 +20,10 @@ from claim_plane.swarm.authority_projection import (
     SymbolScopedAuthorityProjectionReport,
     projected_operations_for_work,
 )
+from claim_plane.swarm.dependency_authority_narrowing import (
+    DependencyAwareAuthorityNarrowingReport,
+    narrowed_operations_for_work,
+)
 from claim_plane.swarm.concurrency import (
     ConcurrencyConstraintAction,
     ConcurrencyPlan,
@@ -373,6 +377,31 @@ def _symbol_conflict_projection(
     )
 
 
+
+def _dependency_conflict_projection(
+    intent: ChangeIntent,
+    work_id: str,
+    dependency_narrowing: DependencyAwareAuthorityNarrowingReport | None,
+    symbol_projection: SymbolScopedAuthorityProjectionReport | None,
+) -> ChangeIntent:
+    if dependency_narrowing is None:
+        return _symbol_conflict_projection(intent, work_id, symbol_projection)
+    operations = narrowed_operations_for_work(dependency_narrowing, work_id)
+    if operations == intent.operations:
+        return intent
+    return replace(
+        intent,
+        operations=operations,
+        metadata={
+            **dict(intent.metadata),
+            "shared_conflict_projection": dependency_narrowing.protocol,
+            "shared_conflict_projection_fingerprint": dependency_narrowing.fingerprint,
+            "symbol_projection_fingerprint": (
+                symbol_projection.fingerprint if symbol_projection is not None else None
+            ),
+        },
+    )
+
 def compute_shared_admission(
     session: SwarmSession, plan: ConcurrencyPlan
 ) -> SharedAdmissionPlan:
@@ -416,21 +445,37 @@ def compute_shared_admission(
     ):
         raise ValueError("symbol authority projection is stale for the swarm session")
 
+    narrowing_payload = plan.metadata.get("dependency_authority_narrowing")
+    dependency_narrowing = (
+        DependencyAwareAuthorityNarrowingReport.from_dict(narrowing_payload)
+        if isinstance(narrowing_payload, Mapping)
+        else None
+    )
+    if dependency_narrowing is not None:
+        if dependency_narrowing.work_graph_fingerprint != session.graph_fingerprint:
+            raise ValueError("dependency authority narrowing is stale for the swarm session")
+        if (
+            authority_projection is not None
+            and dependency_narrowing.symbol_projection_fingerprint
+            != authority_projection.fingerprint
+        ):
+            raise ValueError("dependency authority narrowing does not match symbol projection")
+
     engine = AdmissionEngine()
     known_intent_ids = tuple(intent_ids.values())
     admitted_by_work: dict[str, ChangeIntent] = {}
     records: list[WorkAdmission] = []
     for work_id in order:
         potentially_concurrent = [
-            _symbol_conflict_projection(
-                admitted_by_work[other], other, authority_projection
+            _dependency_conflict_projection(
+                admitted_by_work[other], other, dependency_narrowing, authority_projection
             )
             for other in order
             if other in admitted_by_work and other not in ancestors[work_id]
         ]
         decision = engine.evaluate(
-            _symbol_conflict_projection(
-                intents[work_id], work_id, authority_projection
+            _dependency_conflict_projection(
+                intents[work_id], work_id, dependency_narrowing, authority_projection
             ),
             potentially_concurrent,
             known_intent_ids=known_intent_ids,
@@ -480,6 +525,12 @@ def compute_shared_admission(
             ),
             "symbol_authority_projection_summary": plan.metadata.get(
                 "symbol_authority_projection_summary"
+            ),
+            "dependency_authority_narrowing": plan.metadata.get(
+                "dependency_authority_narrowing"
+            ),
+            "dependency_authority_narrowing_summary": plan.metadata.get(
+                "dependency_authority_narrowing_summary"
             ),
             "candidate_blocking": plan.metadata.get("candidate_blocking"),
             "semantic_graph_fingerprint": plan.metadata.get("semantic_graph_fingerprint"),

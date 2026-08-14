@@ -23,6 +23,9 @@ from claim_plane.core import (
 from claim_plane.swarm.authority_projection import (
     SymbolScopedAuthorityProjectionReport,
 )
+from claim_plane.swarm.dependency_authority_narrowing import (
+    DependencyAwareAuthorityNarrowingReport,
+)
 from claim_plane.swarm.models import WorkGraph, WorkItem
 from claim_plane.swarm.same_file_admission import (
     SameFileAdmissionAction,
@@ -480,6 +483,7 @@ def build_admission_decision_attribution(
     semantic_decisions: Iterable[SemanticConflictDecision] = (),
     semantic_graph_fingerprint: str | None = None,
     authority_projection: SymbolScopedAuthorityProjectionReport | None = None,
+    dependency_narrowing: DependencyAwareAuthorityNarrowingReport | None = None,
 ) -> AdmissionDecisionAttributionReport:
     """Build deterministic pair-level decision attribution without changing policy."""
 
@@ -498,6 +502,9 @@ def build_admission_decision_attribution(
 
     projection_map = (
         authority_projection.item_map if authority_projection is not None else {}
+    )
+    narrowing_map = (
+        dependency_narrowing.item_map if dependency_narrowing is not None else {}
     )
     candidate_ids = (
         {item.candidate_id for item in candidate_blocking.subgraphs}
@@ -538,6 +545,10 @@ def build_admission_decision_attribution(
                     if right_id in projection_map
                     else None
                 ),
+            },
+            "dependency_authority_narrowing": {
+                "left": narrowing_map[left_id].to_dict() if left_id in narrowing_map else None,
+                "right": narrowing_map[right_id].to_dict() if right_id in narrowing_map else None,
             },
             "semantic_classifications": [
                 {
@@ -685,6 +696,12 @@ def build_admission_decision_attribution(
                 authority_projection.fingerprint
                 if authority_projection is not None
                 else None
+            ),
+            "dependency_authority_narrowing": (
+                dependency_narrowing.protocol if dependency_narrowing is not None else None
+            ),
+            "dependency_authority_narrowing_fingerprint": (
+                dependency_narrowing.fingerprint if dependency_narrowing is not None else None
             ),
         },
     )

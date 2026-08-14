@@ -8,6 +8,20 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-08-13
+
+### Added
+
+- Added Dependency-Aware Authority Narrowing, which builds a source-bound dependency envelope around exact symbol mutation roots produced by Symbol-Scoped Authority Projection v2.
+- Added deterministic dependency-context, excluded-sibling, unresolved-boundary, external-boundary, and edge-provenance evidence for every work item, with tamper-evident fingerprints and admission attribution wiring.
+- Added fail-closed fallback to the 9B analysis surface whenever a symbol root is missing, authority is destructive/patterned, or a reachable dependency boundary is unresolved.
+
+### Changed
+
+- Concurrency planning records the dependency-closed authority proof without changing existing 9B scheduling decisions; policy consumption is intentionally deferred to the Conflict Policy Refinement stage.
+- Shared admission consumes the dependency-narrowed analysis surface only for already-potentially-concurrent work, while keeping the original planner-declared intent for worker execution and final verification.
+
+
 ## [0.47.0] — 2026-08-13
 
 ### Added

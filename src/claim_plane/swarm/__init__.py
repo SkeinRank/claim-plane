@@ -21,6 +21,17 @@ from claim_plane.swarm.authority_projection import (
     projected_analysis_graph,
     projected_operations_for_work,
 )
+from claim_plane.swarm.dependency_authority_narrowing import (
+    DEPENDENCY_AWARE_AUTHORITY_NARROWING_PROTOCOL,
+    DependencyNarrowingState,
+    DependencyNarrowingReason,
+    DependencyAuthorityEdgeEvidence,
+    WorkItemDependencyAuthorityNarrowing,
+    DependencyAwareAuthorityNarrowingReport,
+    build_dependency_aware_authority_narrowing,
+    dependency_narrowed_analysis_graph,
+    narrowed_operations_for_work,
+)
 from claim_plane.swarm.admission import (
     SWARM_SHARED_ADMISSION_PROTOCOL,
     SharedAdmissionPlan,
@@ -208,6 +219,15 @@ __all__ = [
     "AdmissionPairAttribution",
     "AdmissionPairDisposition",
     "DeclaredAuthoritySurface",
+    "DEPENDENCY_AWARE_AUTHORITY_NARROWING_PROTOCOL",
+    "DependencyNarrowingState",
+    "DependencyNarrowingReason",
+    "DependencyAuthorityEdgeEvidence",
+    "WorkItemDependencyAuthorityNarrowing",
+    "DependencyAwareAuthorityNarrowingReport",
+    "build_dependency_aware_authority_narrowing",
+    "dependency_narrowed_analysis_graph",
+    "narrowed_operations_for_work",
     "SWARM_BUDGET_POLICY_PROTOCOL",
     "SWARM_CODEX_RUN_PROTOCOL",
     "SWARM_CONCURRENCY_PLAN_PROTOCOL",

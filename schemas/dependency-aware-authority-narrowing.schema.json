@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/dependency-aware-authority-narrowing.schema.json",
+  "title": "Claim Plane Dependency-Aware Authority Narrowing v1",
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "operation": {"type": "object"},
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_identity", "target_identity", "relation", "evidence_fingerprints"],
+      "properties": {
+        "source_identity": {"type": "string", "minLength": 1},
+        "target_identity": {"type": "string", "minLength": 1},
+        "relation": {
+          "enum": ["imports", "calls", "reads", "writes", "inherits", "types", "tests", "references", "implements", "definition_of"]
+        },
+        "evidence_fingerprints": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_id", "state", "narrowed", "reasons", "mutation_root_identities",
+        "dependency_context_identities", "unresolved_targets", "external_targets",
+        "excluded_same_file_sibling_identities", "analysis_operations", "edge_evidence"
+      ],
+      "properties": {
+        "work_id": {"type": "string", "minLength": 1},
+        "state": {"enum": ["closed", "fail_closed", "not_applicable"]},
+        "narrowed": {"type": "boolean"},
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "closed_dependency_envelope", "no_semantic_graph", "no_symbol_root",
+              "missing_graph_root", "unresolved_boundary", "destructive_authority",
+              "pattern_authority"
+            ]
+          }
+        },
+        "mutation_root_identities": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "dependency_context_identities": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "unresolved_targets": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "external_targets": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "excluded_same_file_sibling_identities": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "analysis_operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+        "edge_evidence": {"type": "array", "items": {"$ref": "#/$defs/edge"}}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_item_count", "closed_work_items", "fail_closed_work_items",
+        "not_applicable_work_items", "mutation_root_count", "dependency_context_count",
+        "excluded_same_file_sibling_count", "unresolved_target_count", "fingerprint"
+      ],
+      "properties": {
+        "work_item_count": {"type": "integer", "minimum": 0},
+        "closed_work_items": {"type": "integer", "minimum": 0},
+        "fail_closed_work_items": {"type": "integer", "minimum": 0},
+        "not_applicable_work_items": {"type": "integer", "minimum": 0},
+        "mutation_root_count": {"type": "integer", "minimum": 0},
+        "dependency_context_count": {"type": "integer", "minimum": 0},
+        "excluded_same_file_sibling_count": {"type": "integer", "minimum": 0},
+        "unresolved_target_count": {"type": "integer", "minimum": 0},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint", "protocol", "work_graph_fingerprint", "symbol_projection_fingerprint",
+    "semantic_graph_fingerprint", "items", "summary", "metadata"
+  ],
+  "properties": {
+    "fingerprint": {"$ref": "#/$defs/sha256"},
+    "protocol": {"const": "claim-plane.dependency-aware-authority-narrowing.v1"},
+    "work_graph_fingerprint": {"$ref": "#/$defs/sha256"},
+    "symbol_projection_fingerprint": {"$ref": "#/$defs/sha256"},
+    "semantic_graph_fingerprint": {
+      "anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+    },
+    "items": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+    "summary": {"$ref": "#/$defs/summary"},
+    "metadata": {"type": "object"}
+  }
+}

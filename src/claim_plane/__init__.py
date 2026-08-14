@@ -404,6 +404,15 @@ from claim_plane.swarm import (
     build_symbol_scoped_authority_projection,
     projected_analysis_graph,
     projected_operations_for_work,
+    DEPENDENCY_AWARE_AUTHORITY_NARROWING_PROTOCOL,
+    DependencyNarrowingState,
+    DependencyNarrowingReason,
+    DependencyAuthorityEdgeEvidence,
+    WorkItemDependencyAuthorityNarrowing,
+    DependencyAwareAuthorityNarrowingReport,
+    build_dependency_aware_authority_narrowing,
+    dependency_narrowed_analysis_graph,
+    narrowed_operations_for_work,
     CodexRunBudget,
     CodexRunRecord,
     CodexRunState,
@@ -494,7 +503,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.47.0"
+__version__ = "0.48.0"
 
 __all__ = [
     "ADMISSION_DECISION_ATTRIBUTION_PROTOCOL",
@@ -512,6 +521,15 @@ __all__ = [
     "WorkItemAuthorityProjection",
     "SymbolScopedAuthorityProjectionReport",
     "build_symbol_scoped_authority_projection",
+    "DEPENDENCY_AWARE_AUTHORITY_NARROWING_PROTOCOL",
+    "DependencyNarrowingState",
+    "DependencyNarrowingReason",
+    "DependencyAuthorityEdgeEvidence",
+    "WorkItemDependencyAuthorityNarrowing",
+    "DependencyAwareAuthorityNarrowingReport",
+    "build_dependency_aware_authority_narrowing",
+    "dependency_narrowed_analysis_graph",
+    "narrowed_operations_for_work",
     "projected_analysis_graph",
     "projected_operations_for_work",
     "BUILTIN_PYTHON_PROVIDER_ID",
