@@ -505,6 +505,69 @@ def cmd_confirmatory_scip_v3_aggregate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_confirmatory_admission_v1_pair(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.admission_physical_v1 import (
+        parse_admission_physical_profiles,
+        run_admission_physical_pair,
+    )
+
+    result = run_admission_physical_pair(
+        _confirmatory_paths(args),
+        coder_seed=args.seed,
+        pair_index=args.pair,
+        profiles=parse_admission_physical_profiles(args.profiles),
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(
+        {
+            "protocol": result.get("protocol"),
+            "complete": result.get("complete"),
+            "coder_seed": result.get("coder_seed"),
+            "pair_index": result.get("pair_index"),
+            "pair_key": result.get("pair_key"),
+            "artifact": result.get("artifact"),
+            "pair_wall_time_seconds": result.get("pair_wall_time_seconds"),
+        }
+    )
+    return 0
+
+
+def cmd_confirmatory_admission_v1_run(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.admission_physical_v1 import (
+        parse_admission_physical_profiles,
+        run_admission_physical_batch,
+    )
+    from .confirmatory_30x3.final import parse_coder_seeds
+    from .physical_parallel import parse_pair_indexes
+
+    result = run_admission_physical_batch(
+        _confirmatory_paths(args),
+        seeds=parse_coder_seeds(args.seeds),
+        pair_indexes=parse_pair_indexes(args.pairs, pair_count=30),
+        profiles=parse_admission_physical_profiles(args.profiles),
+        max_parallel_pairs=args.max_parallel_pairs,
+        repo_root=args.repo,
+        resume=not args.no_resume,
+    )
+    _print_json(result)
+    return 0 if result.get("complete") else 1
+
+
+def cmd_confirmatory_admission_v1_status(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.admission_physical_v1 import admission_physical_status
+
+    _print_json(admission_physical_status(_confirmatory_paths(args)))
+    return 0
+
+
+def cmd_confirmatory_admission_v1_aggregate(args: argparse.Namespace) -> int:
+    from .confirmatory_30x3.admission_physical_v1 import aggregate_admission_physical
+
+    _print_json(aggregate_admission_physical(_confirmatory_paths(args)))
+    return 0
+
+
 def cmd_confirmatory_final_pair(args: argparse.Namespace) -> int:
     from .confirmatory_30x3.final import parse_confirmatory_modes, run_confirmatory_pair
 
@@ -807,6 +870,78 @@ def _add_confirmatory_commands(sub: Any) -> None:
     )
     scip_v3_aggregate.add_argument("--artifacts", default=".claim-plane/experiments")
     scip_v3_aggregate.set_defaults(func=cmd_confirmatory_scip_v3_aggregate)
+
+    admission_v1 = confirmatory_sub.add_parser(
+        "admission-v1-run",
+        help=(
+            "Run the confirmatory physical benchmark for the 9E admission-granularity "
+            "stages over selected frozen pair/seed units."
+        ),
+    )
+    _add_confirmatory_paths(admission_v1)
+    admission_v1.add_argument(
+        "--seeds",
+        default="101",
+        help="Comma-separated frozen coder seeds; use 101,202,303 for the full matrix.",
+    )
+    admission_v1.add_argument(
+        "--pairs",
+        default="1-6",
+        help="One-based pair indexes or ranges, for example 1-6 or 1-30.",
+    )
+    admission_v1.add_argument(
+        "--profiles",
+        default=(
+            "serial,naive_parallel,broad_declared,symbol_projection,"
+            "dependency_narrowing,refined_policy"
+        ),
+        help="Comma-separated Admission Physical v1 execution profiles.",
+    )
+    admission_v1.add_argument(
+        "--max-parallel-pairs",
+        type=int,
+        default=2,
+        help="Maximum independent pair/seed subprocesses active at once.",
+    )
+    admission_v1.add_argument("--repo", default=".")
+    admission_v1.add_argument("--no-resume", action="store_true")
+    admission_v1.set_defaults(func=cmd_confirmatory_admission_v1_run)
+
+    admission_v1_pair = confirmatory_sub.add_parser(
+        "admission-v1-pair",
+        help="Execute one frozen pair/seed unit under all selected admission stages.",
+    )
+    _add_confirmatory_paths(admission_v1_pair)
+    admission_v1_pair.add_argument(
+        "--seed", required=True, type=int, choices=(101, 202, 303)
+    )
+    admission_v1_pair.add_argument(
+        "--pair", required=True, type=int, choices=range(1, 31)
+    )
+    admission_v1_pair.add_argument(
+        "--profiles",
+        default=(
+            "serial,naive_parallel,broad_declared,symbol_projection,"
+            "dependency_narrowing,refined_policy"
+        ),
+    )
+    admission_v1_pair.add_argument("--repo", default=".")
+    admission_v1_pair.add_argument("--no-resume", action="store_true")
+    admission_v1_pair.set_defaults(func=cmd_confirmatory_admission_v1_pair)
+
+    admission_v1_status = confirmatory_sub.add_parser(
+        "admission-v1-status",
+        help="Report Admission Physical v1 completion without model calls.",
+    )
+    admission_v1_status.add_argument("--artifacts", default=".claim-plane/experiments")
+    admission_v1_status.set_defaults(func=cmd_confirmatory_admission_v1_status)
+
+    admission_v1_aggregate = confirmatory_sub.add_parser(
+        "admission-v1-aggregate",
+        help="Require and seal the complete 30x3 Admission Physical v1 matrix.",
+    )
+    admission_v1_aggregate.add_argument("--artifacts", default=".claim-plane/experiments")
+    admission_v1_aggregate.set_defaults(func=cmd_confirmatory_admission_v1_aggregate)
 
     final_run = confirmatory_sub.add_parser(
         "final-run",

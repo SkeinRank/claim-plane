@@ -37,8 +37,19 @@ def _command_version(*command: str) -> str | None:
     return text.splitlines()[0] if text else None
 
 
+def _memory_total_bytes() -> int | None:
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        pages = os.sysconf("SC_PHYS_PAGES")
+    except (AttributeError, OSError, ValueError):
+        return None
+    if not isinstance(page_size, int) or not isinstance(pages, int):
+        return None
+    return page_size * pages
+
+
 def runtime_environment() -> dict[str, Any]:
-    """Return non-secret toolchain diagnostics for a research execution."""
+    """Return non-secret toolchain and static execution-host diagnostics."""
 
     return {
         "lock": load_environment_lock(),
@@ -46,6 +57,8 @@ def runtime_environment() -> dict[str, Any]:
             "python_version": sys.version.split()[0],
             "platform": platform.platform(),
             "machine": platform.machine(),
+            "logical_cpu_count": os.cpu_count(),
+            "memory_total_bytes": _memory_total_bytes(),
             "git_version": _command_version("git", "--version"),
             "uv_version": _command_version("uv", "--version"),
             "node_version": _command_version("node", "--version"),

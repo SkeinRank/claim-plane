@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/admission-granularity-physical-benchmark-v1.schema.json",
+  "title": "Claim Plane Admission Granularity Physical Benchmark v1",
+  "type": "object",
+  "required": [
+    "protocol",
+    "result_revision",
+    "study_id",
+    "study_fingerprint",
+    "seeds",
+    "pair_indexes",
+    "profiles",
+    "complete",
+    "profile_summary",
+    "paired_speedup_vs_serial",
+    "paired_speedup_vs_broad_declared",
+    "stage_transition_summary",
+    "speedup_exclusions",
+    "execution_environment_count",
+    "execution_environments",
+    "aggregation_environment"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "claim-plane.admission-granularity-physical-benchmark.v1"
+    },
+    "result_revision": {
+      "const": 1
+    },
+    "study_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "study_fingerprint": {
+      "type": "string",
+      "minLength": 12
+    },
+    "seeds": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "pair_indexes": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1, "maximum": 30},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "serial",
+          "naive_parallel",
+          "broad_declared",
+          "symbol_projection",
+          "dependency_narrowing",
+          "refined_policy"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "expected_pair_units": {"type": "integer", "minimum": 0},
+    "completed_pair_units": {"type": "integer", "minimum": 0},
+    "expected_rows": {"type": "integer", "minimum": 0},
+    "observed_rows": {"type": "integer", "minimum": 0},
+    "complete": {"type": "boolean"},
+    "missing_pair_units": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "profile_summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "profile",
+          "observations",
+          "timing_observations",
+          "excluded_timing_observations",
+          "execution_outcome_counts",
+          "pair_pass_rate",
+          "integration_success_rate",
+          "serialization_rate",
+          "physical_concurrency_rate",
+          "mean_active_agents",
+          "mean_critical_path_seconds",
+          "mean_execution_wall_time_seconds",
+          "mean_control_plane_wall_time_seconds",
+          "mean_end_to_end_wall_time_seconds"
+        ],
+        "properties": {
+          "profile": {"type": "string"},
+          "observations": {"type": "integer", "minimum": 0},
+          "timing_observations": {"type": "integer", "minimum": 0},
+          "excluded_timing_observations": {"type": "integer", "minimum": 0},
+          "execution_outcome_counts": {
+            "type": "object",
+            "additionalProperties": {"type": "integer", "minimum": 0}
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "paired_speedup_vs_serial": {
+      "type": "object",
+      "additionalProperties": {"type": "object"}
+    },
+    "paired_speedup_vs_broad_declared": {
+      "type": "object",
+      "additionalProperties": {"type": "object"}
+    },
+    "stage_transition_summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from_profile",
+          "to_profile",
+          "paired_observations",
+          "released_serializations",
+          "newly_serialized_pairs"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "speedup_exclusions": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "execution_environment_count": {"type": "integer", "minimum": 0},
+    "execution_environments": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "aggregation_environment": {"type": "object"}
+  },
+  "additionalProperties": true
+}

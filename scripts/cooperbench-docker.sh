@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-IMAGE="${CLAIM_PLANE_RESEARCH_IMAGE:-claim-plane-cooperbench:0.10.1}"
+IMAGE="${CLAIM_PLANE_RESEARCH_IMAGE:-claim-plane-cooperbench:0.11.0}"
 STATE_INPUT="${CLAIM_PLANE_RESEARCH_STATE:-${ROOT}/.claim-plane/docker-research}"
 DOCKERFILE="${ROOT}/experiments/cooperbench/docker/Dockerfile"
 

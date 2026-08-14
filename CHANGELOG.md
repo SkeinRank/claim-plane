@@ -8,6 +8,20 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.51.0] — 2026-08-14
+
+### Added
+
+- Added Admission Physical Benchmark v1 over the frozen CooperBench 30×3 workload, with serial and naive baselines plus `broad_declared`, `symbol_projection`, `dependency_narrowing`, and `refined_policy` execution profiles.
+- Added source-bound physical metrics for serialization, observed A/B overlap, mean active agents, critical path, execution/end-to-end wall time, correctness outcomes, and paired speedups against both serial and broad-declared baselines.
+- Added adjacent-stage physical transition summaries and revision-bound resumable pair artifacts with single-environment final sealing.
+
+### Changed
+
+- Controlled admission profiles now share one exact warm SCIP-backed semantic graph per pair with candidate blocking disabled, so the physical comparison varies admission granularity rather than code-intelligence inputs.
+- Research helpers expose resumable `admission-v1-smoke`, `admission-v1`, and `admission-v1-status` workflows and use a new local research-image tag to prevent stale benchmark images.
+- Research environment evidence now records static logical CPU count and total visible memory so final wall-clock results remain bound to the execution host capacity.
+
 ## [0.50.0] — 2026-08-14
 
 ### Added
