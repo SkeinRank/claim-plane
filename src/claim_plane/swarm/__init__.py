@@ -57,6 +57,16 @@ from claim_plane.swarm.codex_runner import (
     list_codex_runs,
     run_codex_work_item,
 )
+from claim_plane.swarm.conflict_policy_refinement import (
+    CONFLICT_POLICY_REFINEMENT_PROTOCOL,
+    ConflictPolicyClass,
+    ConflictPolicyEffect,
+    ConflictPolicyPairRefinement,
+    ConflictPolicyRefinementReason,
+    ConflictPolicyRefinementReport,
+    build_conflict_policy_refinement_report,
+    evaluate_conflict_policy_refinement,
+)
 from claim_plane.swarm.concurrency import (
     SWARM_CONCURRENCY_PLAN_PROTOCOL,
     ConcurrencyConstraint,
@@ -219,6 +229,14 @@ __all__ = [
     "AdmissionPairAttribution",
     "AdmissionPairDisposition",
     "DeclaredAuthoritySurface",
+    "CONFLICT_POLICY_REFINEMENT_PROTOCOL",
+    "ConflictPolicyClass",
+    "ConflictPolicyEffect",
+    "ConflictPolicyPairRefinement",
+    "ConflictPolicyRefinementReason",
+    "ConflictPolicyRefinementReport",
+    "build_conflict_policy_refinement_report",
+    "evaluate_conflict_policy_refinement",
     "DEPENDENCY_AWARE_AUTHORITY_NARROWING_PROTOCOL",
     "DependencyNarrowingState",
     "DependencyNarrowingReason",

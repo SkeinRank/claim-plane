@@ -38,6 +38,11 @@ from claim_plane.swarm.authority_projection import (
 from claim_plane.swarm.dependency_authority_narrowing import (
     build_dependency_aware_authority_narrowing,
 )
+from claim_plane.swarm.conflict_policy_refinement import (
+    ConflictPolicyEffect,
+    build_conflict_policy_refinement_report,
+    evaluate_conflict_policy_refinement,
+)
 from claim_plane.swarm.budget import (
     ConflictPolicy,
     SameFilePolicy,
@@ -928,10 +933,9 @@ def compute_concurrency_plan(
     dependency_narrowing = build_dependency_aware_authority_narrowing(
         graph, authority_projection, semantic_graph
     )
-    # 9C records a dependency-closed authority envelope but does not change
-    # scheduling/conflict policy yet; 9D is the stage that may consume the proof
-    # to refine pairwise policy.  Keeping the 9B analysis graph here preserves the
-    # established concurrency decisions exactly.
+    # 9D keeps the 9B analysis graph as the conservative baseline, then consumes
+    # the 9C closed exact-authority proof pair-by-pair.  A baseline serialization is
+    # released only after an independent/commutative semantic classification.
     analysis_graph = projected_analysis_graph(graph, authority_projection)
     order = graph.topological_order()
     rank = {work_id: index for index, work_id in enumerate(order)}
@@ -939,6 +943,7 @@ def compute_concurrency_plan(
     constraints: list[ConcurrencyConstraint] = []
     same_file_admissions: list[SameFileAdmissionDecision] = []
     semantic_decisions: list[SemanticConflictDecision] = []
+    conflict_policy_refinements = []
     proofs = tuple(commutativity_proofs)
     candidate_blocking = (
         _candidate_blocking_plan(analysis_graph, semantic_graph)
@@ -977,6 +982,70 @@ def compute_concurrency_plan(
             candidate_blocking_fingerprint=candidate_blocking_fingerprint,
             semantic_decisions=semantic_decisions,
         )
+        refinement, refinement_semantic = evaluate_conflict_policy_refinement(
+            graph.item_map[left_id],
+            graph.item_map[right_id],
+            dependency_narrowing=dependency_narrowing,
+            semantic_graph=semantic_graph,
+            same_file_policy=policy.concurrency.same_file,
+            base_action=(constraint.action.value if constraint is not None else None),
+            base_reasons=(
+                tuple(reason.value for reason in constraint.reasons)
+                if constraint is not None
+                else ()
+            ),
+            commutativity_proofs=proofs,
+        )
+        conflict_policy_refinements.append(refinement)
+        if refinement_semantic is not None and not any(
+            item.fingerprint == refinement_semantic.fingerprint
+            for item in semantic_decisions
+        ):
+            semantic_decisions.append(refinement_semantic)
+        if refinement.effect is ConflictPolicyEffect.RELEASE_SERIALIZATION:
+            constraint = None
+        elif refinement.effect is ConflictPolicyEffect.REPLACE_WITH_SEMANTIC_ORDER:
+            assert refinement_semantic is not None
+            assert (
+                refinement.before_id is not None
+                and refinement.after_id is not None
+            )
+            constraint = ConcurrencyConstraint(
+                before=refinement.before_id,
+                after=refinement.after_id,
+                action=ConcurrencyConstraintAction.SERIALIZE,
+                reasons=(ConcurrencyConstraintReason.SEMANTIC_ORDER,),
+                resources=tuple(
+                    sorted(
+                        set(
+                            (
+                                *refinement_semantic.left_changes,
+                                *refinement_semantic.right_changes,
+                            )
+                        )
+                    )
+                ),
+                detail=refinement.detail,
+            )
+        elif refinement.effect is ConflictPolicyEffect.REPLACE_WITH_SEMANTIC_CONFLICT:
+            assert refinement_semantic is not None
+            constraint = ConcurrencyConstraint(
+                before=left_id,
+                after=right_id,
+                action=ConcurrencyConstraintAction.SERIALIZE,
+                reasons=(ConcurrencyConstraintReason.SEMANTIC_CONFLICT,),
+                resources=tuple(
+                    sorted(
+                        set(
+                            (
+                                *refinement_semantic.left_changes,
+                                *refinement_semantic.right_changes,
+                            )
+                        )
+                    )
+                ),
+                detail=refinement.detail,
+            )
         if constraint is not None:
             constraints.append(constraint)
     denied = any(
@@ -996,6 +1065,13 @@ def compute_concurrency_plan(
     )
     graph_fingerprint = graph.fingerprint()
     budget_fingerprint = policy.fingerprint()
+    conflict_policy_refinement = build_conflict_policy_refinement_report(
+        graph,
+        budget_fingerprint=budget_fingerprint,
+        dependency_narrowing=dependency_narrowing,
+        semantic_graph=semantic_graph,
+        pairs=conflict_policy_refinements,
+    )
     attribution = build_admission_decision_attribution(
         graph,
         graph_fingerprint=graph_fingerprint,
@@ -1009,6 +1085,7 @@ def compute_concurrency_plan(
         ),
         authority_projection=authority_projection,
         dependency_narrowing=dependency_narrowing,
+        conflict_policy_refinement=conflict_policy_refinement,
     )
     return ConcurrencyPlan(
         graph_version=graph_version,
@@ -1026,6 +1103,8 @@ def compute_concurrency_plan(
             "symbol_authority_projection_summary": authority_projection.summary(),
             "dependency_authority_narrowing": dependency_narrowing.to_dict(),
             "dependency_authority_narrowing_summary": dependency_narrowing.summary(),
+            "conflict_policy_refinement": conflict_policy_refinement.to_dict(),
+            "conflict_policy_refinement_summary": conflict_policy_refinement.summary(),
             "admission_attribution": attribution.to_dict(),
             "admission_attribution_summary": attribution.summary(),
             "contingent_scope": "excluded_until_amendment",

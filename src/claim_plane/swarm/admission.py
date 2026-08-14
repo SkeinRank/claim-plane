@@ -24,6 +24,11 @@ from claim_plane.swarm.dependency_authority_narrowing import (
     DependencyAwareAuthorityNarrowingReport,
     narrowed_operations_for_work,
 )
+from claim_plane.swarm.conflict_policy_refinement import (
+    ConflictPolicyClass,
+    ConflictPolicyEffect,
+    ConflictPolicyRefinementReport,
+)
 from claim_plane.swarm.concurrency import (
     ConcurrencyConstraintAction,
     ConcurrencyPlan,
@@ -402,6 +407,47 @@ def _dependency_conflict_projection(
         },
     )
 
+
+def _policy_refinement_releases_pair(
+    report: ConflictPolicyRefinementReport | None,
+    left_id: str,
+    right_id: str,
+) -> bool:
+    """Return whether 9D has a source-bound proof that this pair is safe.
+
+    Shared admission deliberately keeps the core AdmissionEngine conservative.
+    An existing intent is omitted from that coarse pairwise check only when 9D
+    already proved the exact narrowed pair independent or commutative.
+    """
+
+    if report is None:
+        return False
+    pair = report.pair_map.get(frozenset((left_id, right_id)))
+    if pair is None:
+        return False
+    if pair.effect is not ConflictPolicyEffect.RELEASE_SERIALIZATION:
+        return False
+    if pair.classification not in {
+        ConflictPolicyClass.PROVABLY_INDEPENDENT,
+        ConflictPolicyClass.COMMUTATIVE,
+    }:
+        return False
+    decision = pair.semantic_decision
+    if not isinstance(decision, Mapping):
+        return False
+    expected_kind = (
+        "independent"
+        if pair.classification is ConflictPolicyClass.PROVABLY_INDEPENDENT
+        else "commutative"
+    )
+    fingerprint = str(decision.get("fingerprint") or "").lower()
+    return (
+        decision.get("kind") == expected_kind
+        and len(fingerprint) == 64
+        and all(ch in "0123456789abcdef" for ch in fingerprint)
+    )
+
+
 def compute_shared_admission(
     session: SwarmSession, plan: ConcurrencyPlan
 ) -> SharedAdmissionPlan:
@@ -453,13 +499,57 @@ def compute_shared_admission(
     )
     if dependency_narrowing is not None:
         if dependency_narrowing.work_graph_fingerprint != session.graph_fingerprint:
-            raise ValueError("dependency authority narrowing is stale for the swarm session")
+            raise ValueError(
+                "dependency authority narrowing is stale for the swarm session"
+            )
         if (
             authority_projection is not None
             and dependency_narrowing.symbol_projection_fingerprint
             != authority_projection.fingerprint
         ):
-            raise ValueError("dependency authority narrowing does not match symbol projection")
+            raise ValueError(
+                "dependency authority narrowing does not match symbol projection"
+            )
+
+    refinement_payload = plan.metadata.get("conflict_policy_refinement")
+    conflict_policy_refinement = (
+        ConflictPolicyRefinementReport.from_dict(refinement_payload)
+        if isinstance(refinement_payload, Mapping)
+        else None
+    )
+    if conflict_policy_refinement is not None:
+        if (
+            conflict_policy_refinement.work_graph_fingerprint
+            != session.graph_fingerprint
+        ):
+            raise ValueError(
+                "conflict policy refinement is stale for the swarm session"
+            )
+        if (
+            conflict_policy_refinement.budget_fingerprint
+            != session.budget_fingerprint
+        ):
+            raise ValueError(
+                "conflict policy refinement is stale for the budget policy"
+            )
+        plan_semantic_graph_fingerprint = plan.metadata.get(
+            "semantic_graph_fingerprint"
+        )
+        if (
+            conflict_policy_refinement.semantic_graph_fingerprint
+            != plan_semantic_graph_fingerprint
+        ):
+            raise ValueError(
+                "conflict policy refinement does not match the semantic graph"
+            )
+        if (
+            dependency_narrowing is not None
+            and conflict_policy_refinement.dependency_narrowing_fingerprint
+            != dependency_narrowing.fingerprint
+        ):
+            raise ValueError(
+                "conflict policy refinement does not match dependency narrowing"
+            )
 
     engine = AdmissionEngine()
     known_intent_ids = tuple(intent_ids.values())
@@ -468,10 +558,19 @@ def compute_shared_admission(
     for work_id in order:
         potentially_concurrent = [
             _dependency_conflict_projection(
-                admitted_by_work[other], other, dependency_narrowing, authority_projection
+                admitted_by_work[other],
+                other,
+                dependency_narrowing,
+                authority_projection,
             )
             for other in order
-            if other in admitted_by_work and other not in ancestors[work_id]
+            if (
+                other in admitted_by_work
+                and other not in ancestors[work_id]
+                and not _policy_refinement_releases_pair(
+                    conflict_policy_refinement, work_id, other
+                )
+            )
         ]
         decision = engine.evaluate(
             _dependency_conflict_projection(
@@ -532,8 +631,16 @@ def compute_shared_admission(
             "dependency_authority_narrowing_summary": plan.metadata.get(
                 "dependency_authority_narrowing_summary"
             ),
+            "conflict_policy_refinement": plan.metadata.get(
+                "conflict_policy_refinement"
+            ),
+            "conflict_policy_refinement_summary": plan.metadata.get(
+                "conflict_policy_refinement_summary"
+            ),
             "candidate_blocking": plan.metadata.get("candidate_blocking"),
-            "semantic_graph_fingerprint": plan.metadata.get("semantic_graph_fingerprint"),
+            "semantic_graph_fingerprint": plan.metadata.get(
+                "semantic_graph_fingerprint"
+            ),
             "semantic_graph_revision": plan.metadata.get("semantic_graph_revision"),
             "semantic_graph_workspace_fingerprint": plan.metadata.get(
                 "semantic_graph_workspace_fingerprint"

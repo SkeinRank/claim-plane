@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/conflict-policy-refinement.schema.json",
+  "title": "Claim Plane Conflict Policy Refinement v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "work_graph_fingerprint",
+    "budget_fingerprint",
+    "dependency_narrowing_fingerprint",
+    "semantic_graph_fingerprint",
+    "pairs",
+    "summary",
+    "metadata"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fingerprint",
+        "left_id",
+        "right_id",
+        "classification",
+        "effect",
+        "changed",
+        "reasons",
+        "base_action",
+        "base_reasons",
+        "before_id",
+        "after_id",
+        "semantic_decision",
+        "left_narrowing_fingerprint",
+        "right_narrowing_fingerprint",
+        "detail"
+      ],
+      "properties": {
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "left_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "right_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "enum": [
+            "must_conflict",
+            "ordered",
+            "commutative",
+            "provably_independent",
+            "conservative_unknown",
+            "not_applicable"
+          ]
+        },
+        "effect": {
+          "enum": [
+            "preserve",
+            "release_serialization",
+            "replace_with_semantic_order",
+            "replace_with_semantic_conflict"
+          ]
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "no_base_constraint",
+              "explicit_deny",
+              "explicit_same_file_policy",
+              "non_refinable_policy_constraint",
+              "narrowing_not_closed",
+              "non_exact_mutation_surface",
+              "no_semantic_graph",
+              "no_semantic_mutation_root",
+              "semantic_independent",
+              "semantic_commutative",
+              "semantic_ordered",
+              "semantic_conflict",
+              "semantic_unknown"
+            ]
+          }
+        },
+        "base_action": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "serialize",
+            "deny",
+            null
+          ]
+        },
+        "base_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "before_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "after_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "semantic_decision": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "left_narrowing_fingerprint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "right_narrowing_fingerprint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "properties": {
+    "fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "protocol": {
+      "const": "claim-plane.conflict-policy-refinement.v1"
+    },
+    "work_graph_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "budget_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "dependency_narrowing_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "semantic_graph_fingerprint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pairs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pair"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pair_count",
+        "changed_pairs",
+        "preserved_pairs",
+        "released_serializations",
+        "semantic_orders",
+        "must_conflict",
+        "commutative",
+        "provably_independent",
+        "conservative_unknown",
+        "not_applicable",
+        "fingerprint"
+      ],
+      "properties": {
+        "pair_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changed_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "released_serializations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "semantic_orders": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "must_conflict": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "commutative": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "provably_independent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conservative_unknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "preserved_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_applicable": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

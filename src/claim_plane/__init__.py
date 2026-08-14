@@ -413,6 +413,14 @@ from claim_plane.swarm import (
     build_dependency_aware_authority_narrowing,
     dependency_narrowed_analysis_graph,
     narrowed_operations_for_work,
+    CONFLICT_POLICY_REFINEMENT_PROTOCOL,
+    ConflictPolicyClass,
+    ConflictPolicyEffect,
+    ConflictPolicyPairRefinement,
+    ConflictPolicyRefinementReason,
+    ConflictPolicyRefinementReport,
+    build_conflict_policy_refinement_report,
+    evaluate_conflict_policy_refinement,
     CodexRunBudget,
     CodexRunRecord,
     CodexRunState,
@@ -503,7 +511,7 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.48.0"
+__version__ = "0.49.0"
 
 __all__ = [
     "ADMISSION_DECISION_ATTRIBUTION_PROTOCOL",
@@ -521,6 +529,14 @@ __all__ = [
     "WorkItemAuthorityProjection",
     "SymbolScopedAuthorityProjectionReport",
     "build_symbol_scoped_authority_projection",
+    "CONFLICT_POLICY_REFINEMENT_PROTOCOL",
+    "ConflictPolicyClass",
+    "ConflictPolicyEffect",
+    "ConflictPolicyPairRefinement",
+    "ConflictPolicyRefinementReason",
+    "ConflictPolicyRefinementReport",
+    "build_conflict_policy_refinement_report",
+    "evaluate_conflict_policy_refinement",
     "DEPENDENCY_AWARE_AUTHORITY_NARROWING_PROTOCOL",
     "DependencyNarrowingState",
     "DependencyNarrowingReason",

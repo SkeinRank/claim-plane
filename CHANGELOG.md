@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.49.0] — 2026-08-13
+
+### Added
+
+- Added Conflict Policy Refinement with source-bound pair classifications for `must_conflict`, `ordered`, `commutative`, `provably_independent`, and `conservative_unknown` outcomes.
+- Added deterministic refinement evidence binding the 9C dependency envelope, semantic conflict decision, baseline constraint, and final policy effect for admission attribution and offline analysis.
+- Added a packaged Conflict Policy Refinement schema and fail-closed shared-admission validation.
+
+### Changed
+
+- Concurrency planning may now release a conservative serialization only when both work items have closed exact mutation authority and the pinned semantic graph proves the pair independent or commutative.
+- Semantic ordering evidence is normalized into an explicit deterministic order, while deny, explicit same-file serialize/deny, schema/shared-contract policy, unresolved evidence, and broad mutation surfaces remain authoritative.
+
 ## [0.48.0] — 2026-08-13
 
 ### Added

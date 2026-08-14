@@ -26,6 +26,10 @@ from claim_plane.swarm.authority_projection import (
 from claim_plane.swarm.dependency_authority_narrowing import (
     DependencyAwareAuthorityNarrowingReport,
 )
+from claim_plane.swarm.conflict_policy_refinement import (
+    ConflictPolicyClass,
+    ConflictPolicyRefinementReport,
+)
 from claim_plane.swarm.models import WorkGraph, WorkItem
 from claim_plane.swarm.same_file_admission import (
     SameFileAdmissionAction,
@@ -484,6 +488,7 @@ def build_admission_decision_attribution(
     semantic_graph_fingerprint: str | None = None,
     authority_projection: SymbolScopedAuthorityProjectionReport | None = None,
     dependency_narrowing: DependencyAwareAuthorityNarrowingReport | None = None,
+    conflict_policy_refinement: ConflictPolicyRefinementReport | None = None,
 ) -> AdmissionDecisionAttributionReport:
     """Build deterministic pair-level decision attribution without changing policy."""
 
@@ -505,6 +510,11 @@ def build_admission_decision_attribution(
     )
     narrowing_map = (
         dependency_narrowing.item_map if dependency_narrowing is not None else {}
+    )
+    refinement_map = (
+        conflict_policy_refinement.pair_map
+        if conflict_policy_refinement is not None
+        else {}
     )
     candidate_ids = (
         {item.candidate_id for item in candidate_blocking.subgraphs}
@@ -550,6 +560,11 @@ def build_admission_decision_attribution(
                 "left": narrowing_map[left_id].to_dict() if left_id in narrowing_map else None,
                 "right": narrowing_map[right_id].to_dict() if right_id in narrowing_map else None,
             },
+            "conflict_policy_refinement": (
+                refinement_map[pair_key].to_dict()
+                if pair_key in refinement_map
+                else None
+            ),
             "semantic_classifications": [
                 {
                     "fingerprint": item.fingerprint,
@@ -653,7 +668,18 @@ def build_admission_decision_attribution(
             )
             continue
 
-        parallel_reason = _same_file_parallel_reason(pair_same_file)
+        pair_refinement = refinement_map.get(pair_key)
+        parallel_reason = None
+        if pair_refinement is not None:
+            if pair_refinement.classification is ConflictPolicyClass.COMMUTATIVE:
+                parallel_reason = AdmissionAttributionReason.SEMANTIC_COMMUTATIVE
+            elif (
+                pair_refinement.classification
+                is ConflictPolicyClass.PROVABLY_INDEPENDENT
+            ):
+                parallel_reason = AdmissionAttributionReason.SEMANTIC_INDEPENDENT
+        if parallel_reason is None:
+            parallel_reason = _same_file_parallel_reason(pair_same_file)
         if parallel_reason is None:
             candidate_state = evidence["candidate_blocking"]["state"]
             if candidate_state == "pruned":
@@ -702,6 +728,16 @@ def build_admission_decision_attribution(
             ),
             "dependency_authority_narrowing_fingerprint": (
                 dependency_narrowing.fingerprint if dependency_narrowing is not None else None
+            ),
+            "conflict_policy_refinement": (
+                conflict_policy_refinement.protocol
+                if conflict_policy_refinement is not None
+                else None
+            ),
+            "conflict_policy_refinement_fingerprint": (
+                conflict_policy_refinement.fingerprint
+                if conflict_policy_refinement is not None
+                else None
             ),
         },
     )
