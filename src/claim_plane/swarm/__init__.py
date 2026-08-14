@@ -1,5 +1,14 @@
 """Swarm planning, admission, scheduling, and execution protocols."""
 
+from claim_plane.swarm.admission_granularity_ablation import (
+    ADMISSION_GRANULARITY_ABLATION_PROTOCOL,
+    ADMISSION_GRANULARITY_PROFILE_ORDER,
+    AdmissionGranularityProfile,
+    AdmissionGranularityProfileResult,
+    AdmissionGranularityTransition,
+    AdmissionGranularityAblationReport,
+    run_admission_granularity_ablation,
+)
 from claim_plane.swarm.admission_attribution import (
     ADMISSION_DECISION_ATTRIBUTION_PROTOCOL,
     AdmissionAttributionReason,
@@ -223,6 +232,13 @@ from claim_plane.swarm.worktrees import (
 )
 
 __all__ = [
+    "ADMISSION_GRANULARITY_ABLATION_PROTOCOL",
+    "ADMISSION_GRANULARITY_PROFILE_ORDER",
+    "AdmissionGranularityProfile",
+    "AdmissionGranularityProfileResult",
+    "AdmissionGranularityTransition",
+    "AdmissionGranularityAblationReport",
+    "run_admission_granularity_ablation",
     "ADMISSION_DECISION_ATTRIBUTION_PROTOCOL",
     "AdmissionAttributionReason",
     "AdmissionDecisionAttributionReport",

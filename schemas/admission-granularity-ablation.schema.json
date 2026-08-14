@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skeinrank.github.io/claim-plane/schemas/admission-granularity-ablation.schema.json",
+  "title": "Claim Plane Admission Granularity Ablation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "protocol",
+    "work_graph_fingerprint",
+    "worker_authority_fingerprint",
+    "budget_fingerprint",
+    "semantic_graph_fingerprint",
+    "profiles",
+    "transitions",
+    "summary",
+    "metadata"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "profileName": {
+      "enum": [
+        "broad_declared",
+        "symbol_projection",
+        "dependency_narrowing",
+        "refined_policy"
+      ]
+    },
+    "countMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "plan_fingerprint",
+        "analysis_graph_fingerprint",
+        "attribution_fingerprint",
+        "status",
+        "pair_count",
+        "parallel_eligible_pairs",
+        "dependency_ordered_pairs",
+        "serialized_pairs",
+        "denied_pairs",
+        "wave_count",
+        "peak_concurrency",
+        "mean_wave_width",
+        "parallel_eligibility_rate",
+        "narrowed_work_items",
+        "closed_dependency_work_items",
+        "fail_closed_dependency_work_items",
+        "policy_released_serializations",
+        "constraint_reason_counts",
+        "primary_reason_counts"
+      ],
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/profileName"
+        },
+        "plan_fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "analysis_graph_fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "attribution_fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "replan_required"
+          ]
+        },
+        "pair_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parallel_eligible_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dependency_ordered_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serialized_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "denied_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wave_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "peak_concurrency": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean_wave_width": {
+          "type": "number",
+          "minimum": 0
+        },
+        "parallel_eligibility_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "constraint_reason_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "primary_reason_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "narrowed_work_items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "closed_dependency_work_items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail_closed_dependency_work_items": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "policy_released_serializations": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_profile",
+        "to_profile",
+        "changed_pairs",
+        "newly_parallel_pairs",
+        "released_serializations",
+        "newly_serialized_pairs",
+        "newly_denied_pairs",
+        "released_denials",
+        "ordering_changes",
+        "parallel_pair_delta"
+      ],
+      "properties": {
+        "from_profile": {
+          "$ref": "#/$defs/profileName"
+        },
+        "to_profile": {
+          "$ref": "#/$defs/profileName"
+        },
+        "changed_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "newly_parallel_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "released_serializations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "newly_serialized_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "newly_denied_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "released_denials": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ordering_changes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parallel_pair_delta": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  "properties": {
+    "fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "protocol": {
+      "const": "claim-plane.admission-granularity-ablation.v1"
+    },
+    "work_graph_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "worker_authority_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "budget_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "semantic_graph_fingerprint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/sha256"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/transition"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_count",
+        "pair_count",
+        "baseline_parallel_eligible_pairs",
+        "final_parallel_eligible_pairs",
+        "parallel_pair_gain",
+        "baseline_peak_concurrency",
+        "final_peak_concurrency",
+        "released_serializations",
+        "released_denials",
+        "fingerprint"
+      ],
+      "properties": {
+        "profile_count": {
+          "type": "integer",
+          "const": 4
+        },
+        "pair_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "baseline_parallel_eligible_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_parallel_eligible_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parallel_pair_gain": {
+          "type": "integer"
+        },
+        "baseline_peak_concurrency": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final_peak_concurrency": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "released_serializations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "released_denials": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

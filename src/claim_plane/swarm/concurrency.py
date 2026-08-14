@@ -59,6 +59,13 @@ from claim_plane.swarm.same_file_admission import (
 
 SWARM_CONCURRENCY_PLAN_PROTOCOL = "claim-plane.swarm-concurrency-plan.v1"
 
+ADMISSION_GRANULARITY_STAGES = (
+    "broad_declared",
+    "symbol_projection",
+    "dependency_narrowing",
+    "refined_policy",
+)
+
 
 class ConcurrencyPlanStatus(str, Enum):
     READY = "ready"
@@ -923,20 +930,41 @@ def compute_concurrency_plan(
     semantic_graph: SemanticDependencyGraph | None = None,
     commutativity_proofs: Iterable[CommutativityProof] = (),
     candidate_blocking_enabled: bool = True,
+    admission_granularity_stage: str = "refined_policy",
 ) -> ConcurrencyPlan:
     """Compute deterministic safe waves without launching or admitting workers."""
 
     policy.validate_work_item_count(len(graph.work_items))
+    stage_value = getattr(
+        admission_granularity_stage, "value", admission_granularity_stage
+    )
+    stage = str(stage_value).strip()
+    if stage not in ADMISSION_GRANULARITY_STAGES:
+        raise ValueError(
+            "unsupported admission granularity stage "
+            f"{stage!r}; expected one of {ADMISSION_GRANULARITY_STAGES!r}"
+        )
     authority_projection = build_symbol_scoped_authority_projection(
         graph, semantic_graph
     )
     dependency_narrowing = build_dependency_aware_authority_narrowing(
         graph, authority_projection, semantic_graph
     )
-    # 9D keeps the 9B analysis graph as the conservative baseline, then consumes
-    # the 9C closed exact-authority proof pair-by-pair.  A baseline serialization is
-    # released only after an independent/commutative semantic classification.
-    analysis_graph = projected_analysis_graph(graph, authority_projection)
+    if stage == "broad_declared":
+        analysis_graph = graph
+    elif stage == "symbol_projection":
+        analysis_graph = projected_analysis_graph(graph, authority_projection)
+    elif stage == "dependency_narrowing":
+        # 9C is proof-producing by design: the closed dependency envelope is
+        # recorded but does not itself bypass the 9B conservative policy surface.
+        # This keeps explicit same-file and other fail-closed policy authoritative;
+        # only the refined-policy stage may consume the proof to change admission.
+        analysis_graph = projected_analysis_graph(graph, authority_projection)
+    else:
+        # Production 9D behavior deliberately keeps 9B's projected analysis graph
+        # as the conservative baseline.  The 9C closed-envelope proof is consumed
+        # pair-by-pair below and may release only a proven-safe serialization.
+        analysis_graph = projected_analysis_graph(graph, authority_projection)
     order = graph.topological_order()
     rank = {work_id: index for index, work_id in enumerate(order)}
     ancestors = _ancestor_map(graph)
@@ -982,70 +1010,71 @@ def compute_concurrency_plan(
             candidate_blocking_fingerprint=candidate_blocking_fingerprint,
             semantic_decisions=semantic_decisions,
         )
-        refinement, refinement_semantic = evaluate_conflict_policy_refinement(
-            graph.item_map[left_id],
-            graph.item_map[right_id],
-            dependency_narrowing=dependency_narrowing,
-            semantic_graph=semantic_graph,
-            same_file_policy=policy.concurrency.same_file,
-            base_action=(constraint.action.value if constraint is not None else None),
-            base_reasons=(
-                tuple(reason.value for reason in constraint.reasons)
-                if constraint is not None
-                else ()
-            ),
-            commutativity_proofs=proofs,
-        )
-        conflict_policy_refinements.append(refinement)
-        if refinement_semantic is not None and not any(
-            item.fingerprint == refinement_semantic.fingerprint
-            for item in semantic_decisions
-        ):
-            semantic_decisions.append(refinement_semantic)
-        if refinement.effect is ConflictPolicyEffect.RELEASE_SERIALIZATION:
-            constraint = None
-        elif refinement.effect is ConflictPolicyEffect.REPLACE_WITH_SEMANTIC_ORDER:
-            assert refinement_semantic is not None
-            assert (
-                refinement.before_id is not None
-                and refinement.after_id is not None
+        if stage == "refined_policy":
+            refinement, refinement_semantic = evaluate_conflict_policy_refinement(
+                graph.item_map[left_id],
+                graph.item_map[right_id],
+                dependency_narrowing=dependency_narrowing,
+                semantic_graph=semantic_graph,
+                same_file_policy=policy.concurrency.same_file,
+                base_action=(constraint.action.value if constraint is not None else None),
+                base_reasons=(
+                    tuple(reason.value for reason in constraint.reasons)
+                    if constraint is not None
+                    else ()
+                ),
+                commutativity_proofs=proofs,
             )
-            constraint = ConcurrencyConstraint(
-                before=refinement.before_id,
-                after=refinement.after_id,
-                action=ConcurrencyConstraintAction.SERIALIZE,
-                reasons=(ConcurrencyConstraintReason.SEMANTIC_ORDER,),
-                resources=tuple(
-                    sorted(
-                        set(
-                            (
-                                *refinement_semantic.left_changes,
-                                *refinement_semantic.right_changes,
+            conflict_policy_refinements.append(refinement)
+            if refinement_semantic is not None and not any(
+                item.fingerprint == refinement_semantic.fingerprint
+                for item in semantic_decisions
+            ):
+                semantic_decisions.append(refinement_semantic)
+            if refinement.effect is ConflictPolicyEffect.RELEASE_SERIALIZATION:
+                constraint = None
+            elif refinement.effect is ConflictPolicyEffect.REPLACE_WITH_SEMANTIC_ORDER:
+                assert refinement_semantic is not None
+                assert (
+                    refinement.before_id is not None
+                    and refinement.after_id is not None
+                )
+                constraint = ConcurrencyConstraint(
+                    before=refinement.before_id,
+                    after=refinement.after_id,
+                    action=ConcurrencyConstraintAction.SERIALIZE,
+                    reasons=(ConcurrencyConstraintReason.SEMANTIC_ORDER,),
+                    resources=tuple(
+                        sorted(
+                            set(
+                                (
+                                    *refinement_semantic.left_changes,
+                                    *refinement_semantic.right_changes,
+                                )
                             )
                         )
-                    )
-                ),
-                detail=refinement.detail,
-            )
-        elif refinement.effect is ConflictPolicyEffect.REPLACE_WITH_SEMANTIC_CONFLICT:
-            assert refinement_semantic is not None
-            constraint = ConcurrencyConstraint(
-                before=left_id,
-                after=right_id,
-                action=ConcurrencyConstraintAction.SERIALIZE,
-                reasons=(ConcurrencyConstraintReason.SEMANTIC_CONFLICT,),
-                resources=tuple(
-                    sorted(
-                        set(
-                            (
-                                *refinement_semantic.left_changes,
-                                *refinement_semantic.right_changes,
+                    ),
+                    detail=refinement.detail,
+                )
+            elif refinement.effect is ConflictPolicyEffect.REPLACE_WITH_SEMANTIC_CONFLICT:
+                assert refinement_semantic is not None
+                constraint = ConcurrencyConstraint(
+                    before=left_id,
+                    after=right_id,
+                    action=ConcurrencyConstraintAction.SERIALIZE,
+                    reasons=(ConcurrencyConstraintReason.SEMANTIC_CONFLICT,),
+                    resources=tuple(
+                        sorted(
+                            set(
+                                (
+                                    *refinement_semantic.left_changes,
+                                    *refinement_semantic.right_changes,
+                                )
                             )
                         )
-                    )
-                ),
-                detail=refinement.detail,
-            )
+                    ),
+                    detail=refinement.detail,
+                )
         if constraint is not None:
             constraints.append(constraint)
     denied = any(
@@ -1065,12 +1094,16 @@ def compute_concurrency_plan(
     )
     graph_fingerprint = graph.fingerprint()
     budget_fingerprint = policy.fingerprint()
-    conflict_policy_refinement = build_conflict_policy_refinement_report(
-        graph,
-        budget_fingerprint=budget_fingerprint,
-        dependency_narrowing=dependency_narrowing,
-        semantic_graph=semantic_graph,
-        pairs=conflict_policy_refinements,
+    conflict_policy_refinement = (
+        build_conflict_policy_refinement_report(
+            graph,
+            budget_fingerprint=budget_fingerprint,
+            dependency_narrowing=dependency_narrowing,
+            semantic_graph=semantic_graph,
+            pairs=conflict_policy_refinements,
+        )
+        if stage == "refined_policy"
+        else None
     )
     attribution = build_admission_decision_attribution(
         graph,
@@ -1099,12 +1132,23 @@ def compute_concurrency_plan(
         constraints=tuple(constraints),
         metadata={
             "controller": "graph-aware-admission-v1",
+            "admission_granularity_stage": stage,
+            "admission_analysis_graph_fingerprint": analysis_graph.fingerprint(),
+            "conflict_policy_refinement_applied": stage == "refined_policy",
             "symbol_authority_projection": authority_projection.to_dict(),
             "symbol_authority_projection_summary": authority_projection.summary(),
             "dependency_authority_narrowing": dependency_narrowing.to_dict(),
             "dependency_authority_narrowing_summary": dependency_narrowing.summary(),
-            "conflict_policy_refinement": conflict_policy_refinement.to_dict(),
-            "conflict_policy_refinement_summary": conflict_policy_refinement.summary(),
+            "conflict_policy_refinement": (
+                conflict_policy_refinement.to_dict()
+                if conflict_policy_refinement is not None
+                else None
+            ),
+            "conflict_policy_refinement_summary": (
+                conflict_policy_refinement.summary()
+                if conflict_policy_refinement is not None
+                else None
+            ),
             "admission_attribution": attribution.to_dict(),
             "admission_attribution_summary": attribution.summary(),
             "contingent_scope": "excluded_until_amendment",

@@ -8,6 +8,19 @@ not part of the public release history.
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-08-14
+
+### Added
+
+- Added Admission Granularity Ablation with source-bound `broad_declared`, `symbol_projection`, `dependency_narrowing`, and `refined_policy` profiles over identical work-graph, budget, and semantic-graph inputs.
+- Added deterministic per-profile concurrency metrics, attribution/reason counts, analysis-surface fingerprints, cumulative symbol/dependency proof counts, and adjacent-stage decision transitions.
+- Added a packaged Admission Granularity Ablation schema and tamper-evident report round-trip support for offline research analysis.
+
+### Changed
+
+- Concurrency planning now exposes an internal admission-granularity stage selector while keeping `refined_policy` as the production default. The dependency-narrowing profile remains proof-producing and does not bypass explicit same-file or other fail-closed policy.
+- Admission ablations disable candidate blocking so observed decision differences are attributable to authority granularity and conflict-policy refinement rather than pair prefiltering.
+
 ## [0.49.0] — 2026-08-13
 
 ### Added

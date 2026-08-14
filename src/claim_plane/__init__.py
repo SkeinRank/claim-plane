@@ -387,6 +387,13 @@ from claim_plane.runtime import (
     serve_broker,
 )
 from claim_plane.swarm import (
+    ADMISSION_GRANULARITY_ABLATION_PROTOCOL,
+    ADMISSION_GRANULARITY_PROFILE_ORDER,
+    AdmissionGranularityProfile,
+    AdmissionGranularityProfileResult,
+    AdmissionGranularityTransition,
+    AdmissionGranularityAblationReport,
+    run_admission_granularity_ablation,
     ADMISSION_DECISION_ATTRIBUTION_PROTOCOL,
     AdmissionAttributionReason,
     AdmissionDecisionAttributionReport,
@@ -511,9 +518,16 @@ from claim_plane.integration import (
     WorkerTarget,
 )
 
-__version__ = "0.49.0"
+__version__ = "0.50.0"
 
 __all__ = [
+    "ADMISSION_GRANULARITY_ABLATION_PROTOCOL",
+    "ADMISSION_GRANULARITY_PROFILE_ORDER",
+    "AdmissionGranularityProfile",
+    "AdmissionGranularityProfileResult",
+    "AdmissionGranularityTransition",
+    "AdmissionGranularityAblationReport",
+    "run_admission_granularity_ablation",
     "ADMISSION_DECISION_ATTRIBUTION_PROTOCOL",
     "AdmissionAttributionReason",
     "AdmissionDecisionAttributionReport",
